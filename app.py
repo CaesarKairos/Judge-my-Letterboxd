@@ -20,7 +20,7 @@ from src.run_storage import archive_run, no_judgment
 
 ROOT = Path(__file__).resolve().parent
 console = Console(markup=False, highlight=False)
-GENERATED = ('profile_summary.json', 'extracted_profile.json', 'findings.json', 'deterministic_findings.json',
+GENERATED = ('profile_summary.json', 'extracted_profile.json', 'raw_export.json', 'findings.json', 'deterministic_findings.json',
              'semantic_findings.json', 'semantic_validation.json', 'finding_pool.json', 'script.json',
              'writer_inputs.json', 'judgment.json', 'ai_context.json', 'ai_request.json', 'ai_response.json',
              'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt', 'run_status.json')
@@ -99,6 +99,8 @@ def run() -> int:
         analysis = analyze(profile)
         findings = build_findings(profile, analysis)
     save(output / 'extracted_profile.json', asdict(profile))
+    save(output / 'raw_export.json', profile.raw_export)
+    console.print(f'ZIP completo convertido: {len(profile.raw_export)} arquivos → output/raw_export.json', style='dim')
     save(output / 'profile_summary.json', analysis)
     for name in ('findings.json', 'deterministic_findings.json'):
         save(output / name, [asdict(f) for f in findings])
