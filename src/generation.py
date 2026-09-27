@@ -16,6 +16,7 @@ from .opening import build_events as build_opening_events
 from .opening import build_plan
 from .presentation import build_presentation, script_text, validate_presentation
 from .resources import bundle
+from .run_quality import analyst_quality, writer_quality
 from .run_storage import cache_response, no_judgment, read_cached
 from .script_engine import build_script, final_writer_input
 from .utils import dumps
@@ -133,13 +134,15 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     save(output / 'ai_id_map.json', ids)
     if not context_error:
         (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
-        request = make_request(config.model, analyst_prompt, message, config.analyst_temperature, 'analyst',
-                               config.fallback_models)
+        request = make_request(config.analyst_model, analyst_prompt, message, config.analyst_temperature, 'analyst',
+                               config.analyst_fallback_models)
         save(output / 'ai_request.json', request)
     else:
         request = None
     state: dict = {'status': 'running', 'analyst': 'pending', 'writer': 'pending', 'judgment_generated': False,
-                   'model': config.model, 'fallback_models': list(config.fallback_models),
+                   'analyst_model': config.analyst_model, 'writer_model': config.writer_model,
+                   'analyst_fallback_models': list(config.analyst_fallback_models),
+                   'writer_fallback_models': list(config.writer_fallback_models),
                    'locale': locale.locale, 'calls': 0,
                    'prompt_versions': {'analyst': ANALYST_PROMPT_VERSION, 'writer': WRITER_PROMPT_VERSION}}
     status_path = output / 'run_status.json'
@@ -208,9 +211,22 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     save(output / 'semantic_findings.json', semantic)
     save(output / 'semantic_validation.json', {'prompt_version': ANALYST_PROMPT_VERSION, 'rejected': rejected,
                                                'accepted_count': len(semantic), 'status': state['analyst']})
+    quality = analyst_quality(analysis, semantic, rejected)
+    save(output / 'quality_report.json', {'analyst': quality})
+    report(f"Analyst: {quality['returned_candidates']} retornados; {quality['accepted_candidates']} aceitos; "
+           f"{quality['rejected_candidates']} rejeitados; mínimo editorial {quality['required_semantic_candidates']}.")
+    if state['analyst'] in {'validated', 'validated_with_rejections'} and not quality['passes']:
+        state['analyst'] = 'insufficient_editorial_material'
+        state['error'] = {
+            'type': 'EditorialQualityGate',
+            'code': None,
+            'reason': 'insufficient_editorial_material',
+            'message': 'O Analyst não produziu material semântico suficiente para um julgamento de qualidade.'
+        }
+        failed = True
     pool = build_pool(full_dataset, semantic)
     save(output / 'finding_pool.json', pool)
-    report(f"Analyst: {len(semantic)} candidatos aceitos, {len(rejected)} rejeitados.")
+    # Counts are reported by the quality gate above.
 
 
     # Editorial Moments: selected and display-first, before any AI call.
@@ -239,10 +255,10 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         except Exception as exc:
             discovery_state = {'status': 'failed', 'source': 'api', **error_info(exc)}
             report(f"Descoberta de modelos indisponível: {discovery_state.get('message', '')}".strip())
-    chain, duplicates = build_chain(config.model, list(config.fallback_models), discovered)
+    chain, duplicates = build_chain(config.writer_model, list(config.writer_fallback_models), discovered)
     rejected_models += duplicates
-    state['model_chain'] = chain
-    discovery_payload = discovery_record(config.model, list(config.fallback_models), discovered, rejected_models,
+    state['writer_model_chain'] = chain
+    discovery_payload = discovery_record(config.writer_model, list(config.writer_fallback_models), discovered, rejected_models,
                                          chain, discovery_state)
     save(output / 'model_discovery.json', discovery_payload)
     plan = build_plan(profile, analysis['overview'], locale)
@@ -250,14 +266,18 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     plan['archetype_requested'] = len(top_four) == ARCHETYPE_FILMS
     trimmed: list[str] = []
     while True:
-        payload = final_writer_input(beats, closer, plan, locale, top_four if plan['archetype_requested'] else [],
-                                    config.max_lines, config.max_words)
+        payload = final_writer_input(
+            beats, closer, plan, locale, top_four if plan['archetype_requested'] else [],
+            config.max_lines, config.max_words, analysis.get('overview'),
+            analysis.get('review_style'), analysis.get('review_coverage')
+        )
         payload['opening_slots']['archetype']['enabled'] = plan['archetype_requested']
         size = len(writer_prompt) + len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
         if size <= config.writer_max_context or len(beats) <= 3:
             break
         trimmed.append(beats.pop()['beat_id'])
-    writer_request = make_request(config.model, writer_prompt, json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
+    writer_request = make_request(config.writer_model, writer_prompt,
+                                  json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
                                   config.writer_temperature, 'writer', tuple(chain[1:]))
     save(output / 'final_writer_request.json', {'payload': payload, 'request': writer_request, 'request_chars': size,
                                                 'trimmed_moments': trimmed, 'model_chain': chain})
@@ -267,7 +287,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     # One Final Writer call for the whole script, or a structural-only presentation.
     result, entries, closer_entry = None, [], None
     audit: dict = {'status': 'skipped', 'errors': [], 'warnings': []}
-    if dry_run or not api_key or analyze_only or state['analyst'] == 'failed':
+    if dry_run or not api_key or analyze_only or state['analyst'] not in {'validated', 'validated_with_rejections'}:
         state['writer'] = 'skipped'
         state['writer_skip_reason'] = (reason_with_hint(state.get('error', {}), 'Writer não executado.') if 'error' in state
                                        else 'Modo --analyze-only: reação do Writer desativada.' if analyze_only and not dry_run
@@ -332,8 +352,12 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         closer_entry = {'moment': closer, 'lines': closer_lines, 'render_strategy': 'ai',
                         'source': 'ai' if result else 'none', 'status': 'written' if closer_lines else 'silence'}
     plan['opening_events'] = build_opening_events(plan, plan['archetype_text'] or None, plan['profile_reaction'], locale)
+    writer_q = writer_quality(result, audit.get('served_model'))
+    prior_quality = json.loads((output / 'quality_report.json').read_text(encoding='utf-8')) if (output / 'quality_report.json').exists() else {}
+    save(output / 'quality_report.json', {**prior_quality, 'writer': writer_q})
     render = {'ai_generation': 'complete' if result else ('skipped' if audit['status'] == 'skipped' else 'failed'),
-              'model': config.model, 'served_model': audit.get('served_model'), 'fallback_models': chain[1:],
+              'model': config.writer_model, 'served_model': audit.get('served_model'), 'fallback_models': chain[1:],
+              'quality_degraded': writer_q['quality_degraded'],
               'human_templates': config.humor_templates}
     ai_meta = {'origin': audit.get('response_origin', 'none'), 'attempts': audit.get('model_attempts', []),
                'warnings': audit.get('warnings', []), 'calls': state['calls']}
