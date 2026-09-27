@@ -259,6 +259,10 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     plan = build_plan(profile, analysis['overview'], locale)
     top_four = top_four_favorites(profile, ids)
     plan['archetype_requested'] = len(top_four) == ARCHETYPE_FILMS
+    plan['top_four_archetype']['requested'] = plan['archetype_requested']
+    if plan['archetype_requested']:
+        plan['top_four_archetype']['fallback_used'] = True
+        plan['top_four_archetype']['issues'] = ['Writer archetype unavailable']
     trimmed: list[str] = []
     while True:
         payload = final_writer_input(
@@ -356,6 +360,8 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 plan['adjective_pair'] = result['opening']['adjective_pair']
                 plan['archetype'] = result['opening']['archetype']
                 plan['archetype_text'] = result['opening']['archetype_phrase'] if plan['archetype_requested'] else ''
+                if plan['archetype_requested']:
+                    plan['top_four_archetype'] = result['opening']['top_four_archetype']
                 plan['profile_reaction'] = result['opening']['profile_reaction']
                 for warning in result['warnings'][:3]:
                     report(f'Aviso do Writer: {warning}')
