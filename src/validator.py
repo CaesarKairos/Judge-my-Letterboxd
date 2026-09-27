@@ -66,6 +66,19 @@ def strings(value: Any) -> list[str]:
     return []
 
 
+def evidence_numbers(value: Any) -> set[float]:
+    """Numbers already present in cited evidence are grounded without duplicate bookkeeping."""
+    if type(value) in (int, float) and math.isfinite(value):
+        return {float(value)}
+    if isinstance(value, str):
+        return numeric_tokens(value)
+    if isinstance(value, dict):
+        return set().union(*(evidence_numbers(v) for v in value.values())) if value else set()
+    if isinstance(value, list):
+        return set().union(*(evidence_numbers(v) for v in value)) if value else set()
+    return set()
+
+
 def materialize_reference(ref: dict, registry: dict) -> dict:
     source = registry[(ref['source_type'], ref['source_id'])]
     if ref['source_type'] == 'review':
@@ -150,7 +163,12 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
             if not any(kind in {'diary', 'rewatch'} or (kind == 'finding' and registry[(kind, sid)]['type'] == 'rewatch')
                        for kind, sid in cited):
                 errors.append('session claims require diary or rewatch evidence; reviews are not sessions')
+        # Any number already present in a cited source is grounded. numeric_claims
+        # remain useful for calculated/backend fields, but the model no longer has
+        # to redundantly declare a film year/rating that is plainly in its evidence.
         numeric_values = set()
+        for key in cited:
+            numeric_values.update(evidence_numbers(registry[key]))
         for claim in item['numeric_claims']:
             key = (claim['source_type'], claim['source_id'])
             try:

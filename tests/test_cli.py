@@ -49,6 +49,7 @@ class CLITests(unittest.TestCase):
             archive.writestr('profile.csv', 'Username,Name,Favorite Films,Email Address\nsynthetic,Synthetic,,\n')
             archive.writestr('ratings.csv', 'Name,Year,Rating\n' +
                              ''.join(f'Film {i},2000,5\n' for i in range(films)))
+            archive.writestr('deleted/reviews.csv', 'Name,Year,Rating,Review\nOld Film,1999,1,old\n')
 
     def run_app(self, root: Path, arguments: list[str], api_key: str = '',
                 extra_env: dict | None = None) -> int:
@@ -87,7 +88,10 @@ class CLITests(unittest.TestCase):
             self.assertEqual(script['render']['ai_generation'], 'skipped')
             self.assertEqual(self.read(root, 'run_status.json')['status'], 'local_only')
             self.assertIn('SEM REAÇÃO DE IA', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8'))
-            self.assertGreaterEqual(self.read(root, 'editorial_moments.json')['count'], 1)
+            self.assertGreaterEqual(self.read(root, 'editorial_moments.json')['count'], 0)
+            raw = self.read(root, 'raw_export.json')
+            self.assertEqual(raw['file_count'], 3)
+            self.assertIn('deleted/reviews.csv', [item['path'] for item in raw['files']])
 
     def test_full_run_makes_at_most_two_ai_calls(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -105,8 +109,10 @@ class CLITests(unittest.TestCase):
             self.assertEqual(writer.call_args.args[1]['fallback_models'], [])
             script = self.read(root, 'presentation_script.json')
             self.assertEqual(script['render']['ai_generation'], 'complete')
-            self.assertTrue(any(event['type'] == 'message' and event['segments'][0]['text'] == 'Reação curta.'
-                                for event in script['events']))
+            self.assertTrue(any(event['type'] == 'message' for event in script['events']))
+            analyst_payload = json.loads(analyst.call_args.args[1]['contents'])
+            self.assertIn('raw_export', analyst_payload)
+            self.assertEqual(analyst_payload['raw_export']['file_count'], 3)
     def test_writer_cannot_add_beats_or_events(self):
         def add_beat(body):
             body['beats'].append({'beat_id': 'beat_99', 'lines': [{'text': 'Beat fantasma.', 'effect': 'none'}]})

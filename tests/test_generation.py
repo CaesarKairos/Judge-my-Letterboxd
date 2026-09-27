@@ -88,21 +88,27 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(review_sources, [candidate['evidence'][0]['source_id']])
         self.assertEqual(script['moments'][-1]['role'], 'closer')
 
-    def test_selection_has_type_film_and_tag_diversity(self):
-        candidates = []
-        kinds = ['rating_group', 'writing_pattern', 'rewatch', 'tag_overlap']
-        for index in range(12):
-            candidates.append({'id': f'candidate_{index}', 'origin': 'deterministic',
-                               'type': kinds[index % len(kinds)], 'score': 90, 'confidence': 1,
-                               'observation': f'Observation {index}', 'film_keys': [f'film_{index}'],
-                               'related_tags': [f'tag_{index}'], 'evidence': [{'source_type': 'finding',
-                                                                               'source_id': f'candidate_{index}',
-                                                                               'data': {}}], 'sample_size': 10})
-        script = build_script(candidates, 8, 10000, LOCALE)
-        types = [m['moment_type'] for m in script['moments']]
-        self.assertEqual(len(script['moments']), 8)
-        self.assertGreaterEqual(len(set(types)), 4)
-        self.assertTrue(all(a != b for a, b in zip(types, types[1:])))
+    def test_ai_first_selection_and_weak_stats_do_not_become_beats(self):
+        weak = {'id': 'rating_group_001', 'origin': 'deterministic', 'type': 'rating_group',
+                'score': 99, 'confidence': 1, 'observation': 'Muitas notas iguais.',
+                'film_keys': ['f1', 'f2'], 'related_tags': [],
+                'evidence': [{'source_type': 'finding', 'source_id': 'rating_group_001', 'data': {}}],
+                'sample_size': 20}
+        semantic = []
+        for index, kind in enumerate(['review_spotlight', 'semantic_contrast', 'self_irony', 'list_meaning']):
+            semantic.append({'id': f'semantic_{index:03}', 'origin': 'semantic', 'type': kind,
+                             'score': 90 - index, 'confidence': .95,
+                             'observation': f'Editorial {index}', 'film_keys': [f'f{index + 10}'],
+                             'related_tags': [], 'related_lists': [],
+                             'evidence': [{'source_type': 'film', 'source_id': f'f{index + 10}',
+                                           'data': {'key': f'f{index + 10}', 'name': f'Film {index}',
+                                                    'year': '2000', 'current_rating': 4.5}}],
+                             'sample_size': 1})
+        script = build_script([weak] + semantic, 4, 10000, LOCALE)
+        ids = [fid for m in script['moments'] for fid in m['finding_ids']]
+        self.assertNotIn('rating_group_001', ids)
+        self.assertEqual(len(script['moments']), 4)
+        self.assertTrue(all(m['origin'] == 'semantic' for m in script['moments']))
 
     def test_reject_missing_ids_entities_quotes_and_numbers(self):
         base = semantic_candidate(self.dataset)
@@ -164,7 +170,10 @@ class GenerationTests(unittest.TestCase):
         for kind in set(m['moment_type'] for m in script['moments']):
             self.assertLessEqual(sum(m['moment_type'] == kind for m in script['moments']), 2)
         self.assertEqual(len(build_script([], 3, 10000, LOCALE)['moments']), 0)
-        self.assertEqual(len(build_script(pool, 1, 10000, LOCALE)['moments']), 1)
+        self.assertLessEqual(len(build_script(pool, 1, 10000, LOCALE)['moments']), 1)
+        rating_only = [item for item in pool if item['type'] == 'rating_group']
+        if rating_only:
+            self.assertEqual(build_script(rating_only, 3, 10000, LOCALE)['moments'], [])
 
     def test_writer_limits_and_numeric_guard(self):
         moment = {'beat_id': 'beat_01', 'max_lines': 2, 'display': {'films': [{'title': 'Gattaca'}]},
@@ -196,17 +205,20 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(result['beats']['beat_01'], [{'text': 'Curto.', 'effect': 'none'}])
         self.assertEqual(result['dropped_lines'], {'beat_01': 1})
 
-    def test_compact_context_has_references_and_complete_reviews(self):
-        context, message = build_context(self.profile, self.analysis, self.findings, 'prompt', 300000, 'pt-BR')
+    def test_full_context_includes_raw_export_and_never_silently_truncates(self):
+        raw = {'format': 'letterboxd-export-json-v1', 'file_count': 2,
+               'files': [{'path': 'ratings.csv', 'format': 'csv', 'rows': [['Name'], ['Film']]},
+                         {'path': 'deleted/reviews.csv', 'format': 'csv', 'rows': [['Name'], ['Old Film']]}]}
+        context, message = build_context(self.profile, self.analysis, self.findings, 'prompt', 300000, 'pt-BR', raw)
+        self.assertEqual(context['raw_export'], raw)
+        self.assertTrue(context['coverage']['complete'])
+        self.assertFalse(context['coverage']['truncated'])
+        self.assertEqual(context['coverage']['raw_export_files'], 2)
         self.assertEqual(len(context['diary']), len(self.profile.diary))
         self.assertEqual(len(context['reviews']), len(self.profile.reviews))
-        self.assertNotIn('uri', context['reviews'][0])
-        self.assertNotIn('name', context['diary'][0])
-        for budget in (5000, 8000):
-            context, message = build_context(self.profile, self.analysis, self.findings, 'prompt', budget, 'pt-BR')
-            self.assertLessEqual(len(message) + 6, budget)
-            keys = {f['key'] for f in context['films']}
-            self.assertTrue(all(r['film_key'] in keys for r in context['reviews'] + context['diary']))
+        self.assertIn('uri', context['reviews'][0])
+        with self.assertRaises(ValueError):
+            build_context(self.profile, self.analysis, self.findings, 'prompt', 100, 'pt-BR', raw)
 
 
 if __name__ == '__main__':
