@@ -106,7 +106,7 @@ def run() -> int:
     parser.add_argument('--dry-run', action='store_true', help='Análise e roteiro locais; nenhuma chamada à IA')
     parser.add_argument('--analyze-only', action='store_true', help='Executa Analyst e Script Engine; pula Writer')
     parser.add_argument('--no-analyst', action='store_true',
-                        help='Pula o Analyst e escreve o julgamento apenas com findings determinísticos')
+                        help='Modo de debug: pula o Analyst, preserva findings locais e não chama o Writer')
     parser.add_argument('--show-findings', action='store_true', help='Mostra todos os findings determinísticos')
     parser.add_argument('--show-events', action='store_true', help='Mostra o presentation_script.json completo')
     args = parser.parse_args()
