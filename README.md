@@ -130,8 +130,8 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 | `GEMINI_MODEL` | `gemini-flash-latest` | Modelo configurável para ambas as etapas |
 | `GEMINI_FALLBACK_MODELS` | vazio | Cadeia de reserva separada por vírgula, tentada em 404/429/5xx (a cota é por modelo); `served_model` diz quem respondeu |
 | `JUDGE_LANGUAGE` | `pt-BR` | Idioma das observações e reações |
-| `MAX_CONTEXT_CHARS` | `300000` | Prompt + dados do Analyst |
-| `SCRIPT_MAX_BEATS` | `10` | Máximo entre 1 e 12; qualidade pode resultar em menos |
+| `MAX_CONTEXT_CHARS` | `1000000` | Prompt + dados do Analyst |
+| `SCRIPT_MAX_BEATS` | `8` | Máximo entre 1 e 12; qualidade pode resultar em menos |
 | `WRITER_MAX_CONTEXT_CHARS` | `60000` | Prompt + o roteiro inteiro em UMA chamada Writer |
 | `WRITER_MAX_LINES` | `3` | Teto global; cada momento define seu próprio `max_lines` (2) |
 | `WRITER_MAX_WORDS_PER_LINE` | `24` | Teto rígido; preferência de estilo: 2–12 |
@@ -171,7 +171,8 @@ evidências por ter sido escrito pelo Writer.
 
 | Arquivo | Conteúdo |
 | --- | --- |
-| `extracted_profile.json` | Extração consolidada, originais, URIs, datas, inventário e avisos |
+| `raw_export.json` | Conversão fiel de TODOS os arquivos do ZIP em JSON; não é filtrado editorialmente |
+| `extracted_profile.json` | Extração consolidada usada pela lógica determinística |
 | `profile_summary.json` | Todas as medições determinísticas |
 | `findings.json` / `deterministic_findings.json` | Mesmos candidatos estatísticos, com sample_size, metric, baseline, difference e fontes |
 | `ai_id_map.json` | Mapa da chave canônica local para IDs curtos de filmes |
@@ -307,11 +308,12 @@ escrita exigem pelo menos max(3, round(3% das reviews)) textos distintos, ngrams
 Score continua heurístico e transparente: amostra logarítmica + magnitude limitada.
 Confiança de amostras pequenas reduz o peso de seleção; não é certeza científica.
 
-O Analyst recebe nomes/anos uma vez no catálogo, com IDs curtos usados em diary,
-reviews e findings. Textos completos das reviews aparecem uma vez e permanecem
-inteiros quando selecionados. O budget prioriza reviews e inclui identidades dos
-filmes referenciados; coverage registra registros omitidos. Somente fontes presentes
-no contexto efetivamente enviado podem ser citadas pelo Analyst.
+O Analyst recebe o `raw_export` inteiro, fiel ao ZIP, além de um índice normalizado
+com IDs curtos usado para validação e citações. Não existe mais priorização/truncamento
+silencioso do dataset: se o pacote completo exceder `MAX_CONTEXT_CHARS`, a execução
+falha de forma explícita e pede aumento do limite. O JSON bruto inclui inclusive
+`deleted/` e `orphaned/` para contexto histórico, mas o prompt proíbe tratá-los como
+estado ativo da conta.
 
 O validator verifica schema/tipos/faixas, IDs, vínculo dos filmes às fontes,
 tags/listas citadas, trechos exatos e numeric_claims com caminhos de campos e valores
