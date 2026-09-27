@@ -3,7 +3,7 @@ from collections import Counter
 import json
 import re
 
-from .editorial import make_moment
+from .editorial_v2 import make_moment
 
 # Deterministic findings are measurements. Only a small subset is intrinsically
 # display-ready enough to serve as fallback when the Analyst does not supply enough
@@ -24,6 +24,8 @@ CATEGORY_FOR_TYPE = {
     'semantic_contrast': 'RATING_CONTRAST',
     'self_irony': 'SEMANTIC_FINDING',
     'meaningful_exception': 'SEMANTIC_FINDING',
+    'rewatch_pattern': 'REWATCH',
+    'logging_behavior': 'SEMANTIC_FINDING',
     'writing_pattern': 'WRITING_PATTERN',
     'rewatch': 'REWATCH',
     'tag_overlap': 'TAG_PATTERN',
@@ -78,10 +80,10 @@ def _eligible(pool: list[dict], max_evidence_chars: int) -> tuple[list[dict], li
     return candidates, excluded
 
 
-def build_script(pool: list[dict], max_beats: int = 8, max_evidence_chars: int = 16000, locale=None) -> dict:
+def build_script(pool: list[dict], max_beats: int = 12, max_evidence_chars: int = 16000, locale=None) -> dict:
     """Build a sequence from AI-selected semantic moments, with restrained local fallbacks."""
-    if not 1 <= max_beats <= 12:
-        raise ValueError('SCRIPT_MAX_BEATS deve estar entre 1 e 12.')
+    if not 1 <= max_beats <= 14:
+        raise ValueError('SCRIPT_MAX_BEATS deve estar entre 1 e 14.')
 
     candidates, excluded = _eligible(pool, max_evidence_chars)
     semantic = [f for f in candidates if f['origin'] == 'semantic']
@@ -103,7 +105,7 @@ def build_script(pool: list[dict], max_beats: int = 8, max_evidence_chars: int =
             excluded.append({'id': item['id'], 'reason': 'duplicate editorial idea'})
             continue
         kind = category(item)
-        if types[kind] >= 2:
+        if types[kind] >= 3:
             excluded.append({'id': item['id'], 'reason': 'category diversity cap'})
             continue
 
@@ -169,6 +171,8 @@ def moment_payload(moment: dict, max_lines: int, max_words: int) -> dict:
         'allow_silence': moment['allow_silence'],
         'what_the_user_sees': moment['display'],
         'editorial_candidate': moment['observation'],
+        'why_interesting': moment.get('why_interesting', ''),
+        'cultural_angle': moment.get('cultural_angle', ''),
         'evidence': moment['evidence'],
         'limits': {
             'max_lines': min(max_lines, moment['max_lines']),
@@ -178,12 +182,19 @@ def moment_payload(moment: dict, max_lines: int, max_words: int) -> dict:
 
 
 def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, locale, top_four: list[dict],
-                       max_lines: int = 3, max_words: int = 24) -> dict:
+                       max_lines: int = 4, max_words: int = 14, overview: dict | None = None,
+                       review_style: dict | None = None, review_coverage: dict | None = None) -> dict:
     """The Writer sees the whole SELECTED show, never the full ZIP again."""
     return {
         'task': 'Write the Judge voice for a fixed script selected from the complete export by the Analyst.',
         'language': locale.locale,
         'top_four_films': top_four,
+        'editorial_dossier': {
+            'profile_overview': overview or {},
+            'review_style': review_style or {},
+            'review_coverage': review_coverage or {},
+            'note': 'Use this for global rhythm/callback context; beat facts still come from each moment evidence.'
+        },
         'opening_slots': {
             'salutation_allowed': locale.salutations(),
             'adjective_pairs_allowed': locale.adjective_pairs(),
@@ -191,9 +202,10 @@ def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, loc
                 'count': 4,
                 'output': 'exactly four concepts, hyphen-joined by the frontend',
                 'source': 'the four favorite films listed above',
-                'about': 'themes, genres, atmospheres, settings, narrative elements of those films',
+                'about': 'recognizable archetypes, nouns, settings, genres or narrative elements of those films',
                 'concept_rules': ['one word when possible', 'at most two words', 'natural Portuguese',
-                                  'semantically distinct from the other three', 'no numbers, no diagnoses'],
+                                  'visual or recognizable rather than generic', 'semantically distinct', 'no numbers, no diagnoses',
+                                  'avoid generic words such as drama, story, emotional, intelligence when a concrete concept exists'],
                 'forbidden': ['claims about the person', 'religion', 'politics', 'health',
                               'clinical personality', 'personality diagnosis'],
             },
