@@ -132,10 +132,35 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     full_dataset = build_dataset(profile, analysis, findings, config.language)
     ids = film_ids(profile)
     save(output / 'ai_id_map.json', ids)
+
+    # Discover text models ONCE, before either AI stage, then build independent
+    # quality-ranked chains for Analyst and Writer.
+    discovered, rejected_models = [], []
+    discovery_state: dict = {'status': 'skipped', 'source': 'disabled'}
+    if api_key and not dry_run and config.discover_models:
+        try:
+            listing = list_models(api_key)
+            discovered, rejected_models = partition(listing)
+            discovery_state = {'status': 'ok', 'source': 'api', 'listed': len(listing), 'usable': len(discovered)}
+            report(f"Descoberta de modelos: {len(discovered)} utilizáveis de {len(listing)} listados.")
+        except Exception as exc:
+            discovery_state = {'status': 'failed', 'source': 'api', **error_info(exc)}
+            report(f"Descoberta de modelos indisponível: {discovery_state.get('message', '')}".strip())
+
+    analyst_chain, analyst_dupes = build_chain(
+        config.analyst_model, list(config.analyst_fallback_models), discovered
+    )
+    writer_chain, writer_dupes = build_chain(
+        config.writer_model, list(config.writer_fallback_models), discovered
+    )
+    rejected_models = list(rejected_models) + analyst_dupes + writer_dupes
+
     if not context_error:
         (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
-        request = make_request(config.analyst_model, analyst_prompt, message, config.analyst_temperature, 'analyst',
-                               config.analyst_fallback_models)
+        request = make_request(
+            analyst_chain[0], analyst_prompt, message, config.analyst_temperature,
+            'analyst', tuple(analyst_chain[1:])
+        )
         save(output / 'ai_request.json', request)
     else:
         request = None
@@ -262,24 +287,16 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         }
         failed = True
 
-    # Model discovery happens once per run, before the Writer request is built.
-    discovered, rejected_models = [], []
-    discovery_state: dict = {'status': 'skipped', 'source': 'disabled'}
-    if api_key and not dry_run and config.discover_models:
-        try:
-            listing = list_models(api_key)
-            discovered, refused = partition(listing)
-            rejected_models = refused
-            discovery_state = {'status': 'ok', 'source': 'api', 'listed': len(listing), 'usable': len(discovered)}
-            report(f"Descoberta de modelos: {len(discovered)} utilizáveis de {len(listing)} listados.")
-        except Exception as exc:
-            discovery_state = {'status': 'failed', 'source': 'api', **error_info(exc)}
-            report(f"Descoberta de modelos indisponível: {discovery_state.get('message', '')}".strip())
-    chain, duplicates = build_chain(config.writer_model, list(config.writer_fallback_models), discovered)
-    rejected_models += duplicates
-    state['writer_model_chain'] = chain
-    discovery_payload = discovery_record(config.writer_model, list(config.writer_fallback_models), discovered, rejected_models,
-                                         chain, discovery_state)
+    # Model discovery already ran once before the Analyst.
+    chain = writer_chain
+    state['analyst_model_chain'] = analyst_chain
+    state['writer_model_chain'] = writer_chain
+    discovery_payload = discovery_record(
+        config.writer_model, list(config.writer_fallback_models), discovered,
+        rejected_models, writer_chain, discovery_state
+    )
+    discovery_payload['analyst_chain'] = analyst_chain
+    discovery_payload['writer_chain'] = writer_chain
     save(output / 'model_discovery.json', discovery_payload)
     plan = build_plan(profile, analysis['overview'], locale)
     top_four = top_four_favorites(profile, ids)
