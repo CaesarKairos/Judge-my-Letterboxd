@@ -65,7 +65,11 @@ def _phrase_rows(reviews: list[ReviewRecord]) -> list[dict[str, Any]]:
             'count': len(ids),
             'share': len(ids) / total if total else 0,
         })
-    rows.sort(key=lambda row: (-row['count'], row['size'], row['phrase']))
+    # Prefer a compact multi-word expression over a lone token when both
+    # describe exactly the same reviews. Bigrams usually carry the idiom/style
+    # ("dito isso") while the unigram alone ("dito") loses the point.
+    size_priority = {2: 0, 3: 1, 1: 2}
+    rows.sort(key=lambda row: (-row['count'], size_priority.get(row['size'], 9), row['phrase']))
 
     # Remove longer phrases that cover exactly the same reviews as a shorter,
     # more reusable phrase contained inside them. This keeps the editorial signal
@@ -75,8 +79,7 @@ def _phrase_rows(reviews: list[ReviewRecord]) -> list[dict[str, Any]]:
         duplicate = False
         for other in selected:
             if (other['review_ids'] == row['review_ids']
-                    and other['size'] <= row['size']
-                    and other['phrase'] in row['phrase']):
+                    and (other['phrase'] in row['phrase'] or row['phrase'] in other['phrase'])):
                 duplicate = True
                 break
         if not duplicate:
