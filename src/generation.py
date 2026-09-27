@@ -323,6 +323,30 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         if size <= config.writer_max_context or len(beats) <= 3:
             break
         trimmed.append(beats.pop()['beat_id'])
+    writer_moment_count = len(beats) + (1 if closer else 0)
+    minimum_writer_moments = quality.get('required_semantic_candidates', 2)
+    if trimmed and writer_moment_count < minimum_writer_moments:
+        state['analyst'] = 'insufficient_editorial_material'
+        state['error'] = {
+            'type': 'EditorialQualityGate',
+            'code': None,
+            'reason': 'writer_context_trimmed_too_far',
+            'message': (
+                f'O budget do Writer reduziria o roteiro para {writer_moment_count} momentos; '
+                f'o mínimo editorial é {minimum_writer_moments}.'
+            )
+        }
+        failed = True
+        quality_path = output / 'quality_report.json'
+        quality_payload = json.loads(quality_path.read_text(encoding='utf-8')) if quality_path.exists() else {}
+        quality_payload['writer_context'] = {
+            'moments_after_trimming': writer_moment_count,
+            'minimum_required': minimum_writer_moments,
+            'trimmed_moments': trimmed,
+            'passes': False,
+        }
+        save(quality_path, quality_payload)
+
     writer_request = make_request(config.writer_model, writer_prompt,
                                   json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
                                   config.writer_temperature, 'writer', tuple(chain[1:]))
