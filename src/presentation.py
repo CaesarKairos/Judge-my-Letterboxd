@@ -115,6 +115,17 @@ def display_events(moment: dict) -> list[dict]:
             events.append({'type': 'review_quote', 'film_key': None, 'title': '', 'year': '', 'rating': None,
                            'text': example, 'review_id': None})
         return events
+    if kind == 'review_group':
+        by_key = {f['film_key']: f for f in films}
+        events = []
+        for review in display.get('reviews', [])[:MAX_EXAMPLE_QUOTES]:
+            film = by_key.get(review.get('film_key'))
+            events.append({'type': 'review_quote', 'film_key': review.get('film_key'),
+                           'title': film.get('title', '') if film else '',
+                           'year': film.get('year', '') if film else '',
+                           'rating': review.get('rating'), 'text': review.get('text', ''),
+                           'review_id': review.get('review_id')})
+        return events
     if films:
         return [{'type': 'film_group', 'films': [dict(f) for f in films[:3]]},
                 stat_event(display.get('stats', [])) if display.get('stats') else None]
