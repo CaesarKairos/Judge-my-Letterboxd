@@ -7,7 +7,7 @@ from typing import Callable
 
 from .ai_schemas import ANALYST_PROMPT_VERSION, WRITER_PROMPT_VERSION
 from .context_builder import build_context, build_dataset, film_ids
-from .final_writer import validate_final_writer
+from .final_writer_v2 import validate_final_writer
 from .finding_pool import build_pool
 from .gemini_client import analyze_semantically, error_info, list_models, make_request, write_final
 from .model_discovery import build_chain, partition, record as discovery_record
