@@ -43,9 +43,11 @@ ZIP → parser → perfil unificado → analyzer → findings determinísticos
                        Presentation Builder → presentation_script.json
 ```
 
-Python mede e seleciona. O Analyst identifica relações semânticas e cita fontes. O
-Script Engine escolhe assunto, ordem e modo. O Writer reage ao roteiro inteiro sem
-poder mudá-lo. O Presentation Builder traduz tudo em eventos: é o contrato do
+Python mede; o Analyst é o editor semântico. Medições determinísticas não viram piada
+automaticamente. O Analyst recebe também review_style, review_coverage, rewatches,
+listas, tags, likes/watchlist e pode usar cultura cinematográfica estável como ângulo,
+sem tratá-la como evidência da conta. O Script Engine escolhe assunto, ordem e modo.
+O Writer reage ao roteiro inteiro sem poder mudá-lo. O Presentation Builder traduz tudo em eventos: é o contrato do
 frontend futuro, legível sem HTML.
 
 ## Instalação
@@ -80,7 +82,9 @@ python app.py --show-events
 - `--dry-run`: nenhuma chamada à IA, mesmo com chave; ainda produz
   `presentation_script.json` com abertura estrutural, dados e silêncio.
 - `--analyze-only`: chama Analyst e Script Engine; nunca chama Writer.
-- `--no-analyst`: pula o Analyst; o roteiro usa apenas findings determinísticos.
+- `--no-analyst`: modo de debug local. Pula o Analyst e **não** gera um julgamento
+  final; findings determinísticos continuam auditáveis, mas o Writer não finge que
+  existe material editorial suficiente.
 - `--show-findings`: mostra todos os findings determinísticos.
 - `--show-events`: imprime o `presentation_script.json` completo.
 - Sem chave: qualquer modo conclui a parte local e informa que pulou a IA.
@@ -127,18 +131,22 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 | Variável | Default | Uso |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | vazio | Chave do Gemini |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Modelo configurável para ambas as etapas |
-| `GEMINI_FALLBACK_MODELS` | vazio | Cadeia de reserva separada por vírgula, tentada em 404/429/5xx (a cota é por modelo); `served_model` diz quem respondeu |
+| `GEMINI_MODEL` | `gemini-flash-latest` | Compatibilidade: modelo usado quando a variável específica da etapa não foi definida |
+| `GEMINI_ANALYST_MODEL` | herda `GEMINI_MODEL` | Modelo principal do Analyst |
+| `GEMINI_ANALYST_FALLBACK_MODELS` | herda fallback legado | Reservas do Analyst |
+| `GEMINI_WRITER_MODEL` | herda `GEMINI_MODEL` | Modelo principal do Final Writer |
+| `GEMINI_WRITER_FALLBACK_MODELS` | herda fallback legado | Reservas do Writer; variantes Lite são rebaixadas para o fim pelo discovery |
+| `GEMINI_FALLBACK_MODELS` | vazio | Compatibilidade para as duas etapas quando fallbacks específicos não foram definidos |
 | `JUDGE_LANGUAGE` | `pt-BR` | Idioma das observações e reações |
 | `MAX_CONTEXT_CHARS` | `1000000` | Prompt + dados do Analyst |
-| `SCRIPT_MAX_BEATS` | `8` | Máximo entre 1 e 12; qualidade pode resultar em menos |
-| `WRITER_MAX_CONTEXT_CHARS` | `60000` | Prompt + o roteiro inteiro em UMA chamada Writer |
-| `WRITER_MAX_LINES` | `3` | Teto global; cada momento define seu próprio `max_lines` (2) |
-| `WRITER_MAX_WORDS_PER_LINE` | `24` | Teto rígido; preferência de estilo: 2–12 |
+| `SCRIPT_MAX_BEATS` | `12` | Máximo entre 1 e 14; quality gate pode resultar em menos |
+| `WRITER_MAX_CONTEXT_CHARS` | `100000` | Prompt + dossier editorial + roteiro inteiro em UMA chamada Writer |
+| `WRITER_MAX_LINES` | `4` | Teto global por beat; normalmente 1–3 linhas |
+| `WRITER_MAX_WORDS_PER_LINE` | `14` | Teto rígido; linhas continuam curtas |
 | `ANALYST_TEMPERATURE` | `0.2` | Temperatura independente |
-| `WRITER_TEMPERATURE` | `0.7` | Temperatura independente |
+| `WRITER_TEMPERATURE` | `0.75` | Temperatura independente |
 | `MODEL_DISCOVERY` | `1` | Descoberta dinâmica via `models.list` antes do Writer |
-| `MODEL_DISCOVERY_CHAIN_LIMIT` | `5` | Quantos modelos descobertos entram na corrente |
+| `MODEL_DISCOVERY_CHAIN_LIMIT` | `8` | Quantos modelos de reserva entram na corrente; Flash-Lite fica por último |
 | `MODEL_DISCOVERY_TTL_MINUTES` | `30` | Validade do cache local de descoberta (desligado por padrão no fluxo) |
 | `JUDGE_HUMOR_TEMPLATES` | `0` | `1` habilita momentos HUMAN_TEMPLATE quando o template casar |
 | `WRITER_MAX_LINES` | `3` | Máximo entre 1 e 3 linhas geradas por beat |
@@ -174,6 +182,10 @@ evidências por ter sido escrito pelo Writer.
 | `raw_export.json` | Conversão fiel de TODOS os arquivos do ZIP em JSON; não é filtrado editorialmente |
 | `extracted_profile.json` | Extração consolidada usada pela lógica determinística |
 | `profile_summary.json` | Todas as medições determinísticas |
+| `review_style.json` | Frases/aberturas/finais recorrentes, markup e interseções |
+| `review_coverage.json` | Matching diary ↔ reviews e sessões sem review |
+| `quality_report.json` | Gate editorial do Analyst/Script e qualidade do modelo Writer |
+| `editorial_dossier.json` | Contexto global e momentos exatos entregues ao Final Writer |
 | `findings.json` / `deterministic_findings.json` | Mesmos candidatos estatísticos, com sample_size, metric, baseline, difference e fontes |
 | `ai_id_map.json` | Mapa da chave canônica local para IDs curtos de filmes |
 | `ai_context.json` | Mensagem de dados exata do Analyst; coverage registra omissões |
