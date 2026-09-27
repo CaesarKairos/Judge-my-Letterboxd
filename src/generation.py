@@ -213,6 +213,9 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 report('Analyst: resposta local reaproveitada para o mesmo pedido, sem consumir nova chamada.')
             if response.get('served_model'):
                 state['analyst_model'] = response['served_model']
+                state['analyst_quality_degraded'] = 'lite' in response['served_model'].casefold()
+                report(f"Analyst servido por {response['served_model']}"
+                       f"{' [QUALIDADE DEGRADADA: Lite]' if state['analyst_quality_degraded'] else ''}.")
             if response.get('model_attempts'):
                 state['analyst_model_attempts'] = response['model_attempts']
             save(output / 'ai_response.json', response)
@@ -310,6 +313,12 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
             analysis.get('review_style'), analysis.get('review_coverage')
         )
         payload['opening_slots']['archetype']['enabled'] = plan['archetype_requested']
+        save(output / 'editorial_dossier.json', {
+            'top_four_films': payload.get('top_four_films', []),
+            'editorial_dossier': payload.get('editorial_dossier', {}),
+            'moments': payload.get('moments', []),
+            'closer': payload.get('closer')
+        })
         size = len(writer_prompt) + len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
         if size <= config.writer_max_context or len(beats) <= 3:
             break
@@ -360,6 +369,10 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 audit['status'] = 'validated'
                 audit['warnings'] = result['warnings']
                 audit['dropped_lines'] = result['dropped_lines']
+                live_quality = writer_quality(result, audit.get('served_model'))
+                report(f"Writer: {audit.get('served_model') or 'modelo desconhecido'}; "
+                       f"{live_quality['reaction_lines']} linhas; {live_quality['silent_moments']} momentos em silêncio"
+                       f"{'; QUALIDADE DEGRADADA (Lite)' if live_quality['quality_degraded'] else ''}.")
                 cache_response(output, 'writer', writer_request, raw, response)
                 plan['salutation'] = result['opening']['salutation']
                 plan['adjective_pair'] = result['opening']['adjective_pair']
