@@ -177,7 +177,7 @@ class GenerationTests(unittest.TestCase):
         item['observation'] = 'As sessões têm o mesmo comentário.'
         accepted, rejected = self.validate(item)
         self.assertFalse(accepted)
-        self.assertIn('session claims require', str(rejected))
+        self.assertIn('session review comparison requires multiple review records', str(rejected))
 
     def test_excluded_context_source_cannot_be_cited(self):
         candidate = semantic_candidate(self.dataset)
