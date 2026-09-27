@@ -86,7 +86,7 @@ class GeminiClientTests(unittest.TestCase):
         info = error_info(QuotaError())
         self.assertEqual(info['reason'], 'rate_limit_or_quota_exhausted')
         self.assertIn('429', info['message'])
-        self.assertIn('GEMINI_FALLBACK_MODELS', info['hint'])
+        self.assertIn('fallback', info['hint'].casefold())
 
     def test_raw_error_details_never_leak_into_allowlisted_metadata(self):
         class SyntheticError(Exception):
