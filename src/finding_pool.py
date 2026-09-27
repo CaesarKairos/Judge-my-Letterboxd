@@ -1,5 +1,5 @@
 """Normalize candidates without erasing their origin or original measurements."""
-from .validator import evidence_registry
+from .semantic_validator import evidence_registry
 from .utils import plain_text
 
 
