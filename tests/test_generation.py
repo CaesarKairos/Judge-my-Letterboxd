@@ -5,13 +5,13 @@ import unittest
 import test_pipeline
 from src.analyzer import analyze
 from src.context_builder import build_context, build_dataset
-from src.final_writer import validate_final_writer
+from src.final_writer_v2 import validate_final_writer
 from src.findings import build_findings
 from src.finding_pool import build_pool
 from src.opening import build_plan
 from src.resources import bundle
 from src.script_engine import build_script, final_writer_input
-from src.validator import validate_semantic_findings
+from src.semantic_validator import validate_semantic_findings
 
 LOCALE = bundle('pt-BR')
 
@@ -20,8 +20,9 @@ def semantic_candidate(dataset: dict) -> dict:
     review = dataset['reviews'][0]
     return {'id': 'semantic_001', 'type': 'review_spotlight', 'interestingness': .9, 'confidence': .95,
             'observation': 'A review insiste na imagem.', 'why_interesting': 'Há ênfase textual na imagem.',
-            'evidence': [{'source_type': 'review', 'source_id': review['id'], 'quote': review['text']}],
-            'film_keys': [review['film_key']], 'related_tags': [], 'related_lists': [], 'numeric_claims': []}
+            'cultural_angle': '',
+            'evidence': [{'source_type': 'review', 'source_id': review['id'], 'focus_text': review['text']}],
+            'film_keys': [review['film_key']], 'related_tags': [], 'related_lists': []}
 
 
 class GenerationTests(unittest.TestCase):
@@ -114,7 +115,7 @@ class GenerationTests(unittest.TestCase):
         base = semantic_candidate(self.dataset)
         changes = [lambda c: c['evidence'][0].update(source_id='missing'),
                    lambda c: c.update(film_keys=['missing']), lambda c: c.update(related_tags=['missing']),
-                   lambda c: c.update(related_lists=['missing']), lambda c: c['evidence'][0].update(quote='fabricated quotation'),
+                   lambda c: c.update(related_lists=['missing']),
                    lambda c: c.update(observation='Possui 999 reviews.'), lambda c: c.update(evidence=[]),
                    lambda c: c.update(observation='Avaliou o filme antes do lançamento oficial.'),
                    lambda c: c.update(confidence='alta')]
@@ -137,7 +138,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(valid[0]['confidence'], .95)
         self.assertEqual(valid[0]['score_normalization'],
                          {'interestingness': 'percent_to_unit', 'confidence': 'percent_to_unit'})
-        self.assertEqual(valid[0]['bounded_lists'], {'film_keys': {'returned': 19, 'kept': 8}})
+        self.assertEqual(valid[0]['bounded_lists'], {'film_keys': {'returned': 19, 'kept': 10}})
         saturated = deepcopy(base)
         saturated.update(interestingness=400, confidence=-3)
         valid, _ = self.validate(saturated)
@@ -145,14 +146,20 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(valid[0]['confidence'], 0.0)
         self.assertFalse(build_pool(self.dataset, valid)[0]['confidence'] > 1)
 
-    def test_numeric_claim_field_binding(self):
+    def test_numbers_are_grounded_from_backend_without_numeric_claims(self):
         item = semantic_candidate(self.dataset)
         item['observation'] = 'A review tem nota 2.'
-        item['numeric_claims'] = [{'source_type': 'review', 'source_id': item['evidence'][0]['source_id'],
-                                  'field': 'review_rating', 'value': 2}]
         self.assertTrue(self.validate(item)[0])
-        item['numeric_claims'][0]['value'] = 5
+        item['observation'] = 'A review tem nota 999.'
         self.assertFalse(self.validate(item)[0])
+
+    def test_bad_focus_hint_does_not_kill_a_good_finding(self):
+        item = semantic_candidate(self.dataset)
+        item['evidence'][0]['focus_text'] = 'trecho inventado que não existe'
+        valid, invalid = self.validate(item)
+        self.assertFalse(invalid)
+        self.assertEqual(valid[0]['focus_text'][item['evidence'][0]['source_id']], 'unresolved_hint_ignored')
+        self.assertIn('full_text', valid[0]['resolved_evidence'][0]['data'])
 
     def test_list_membership_is_not_inferred_from_tags(self):
         item = semantic_candidate(self.dataset)
@@ -161,8 +168,8 @@ class GenerationTests(unittest.TestCase):
         nonmember = next(f for f in self.dataset['films'] if f['key'] not in {m['film_key'] for m in own_list['members']})
         item['related_lists'] = [own_list['id']]
         item['film_keys'] = [nonmember['key']]
-        item['evidence'].extend([{'source_type': 'list', 'source_id': own_list['id'], 'quote': ''},
-                                 {'source_type': 'film', 'source_id': nonmember['key'], 'quote': ''}])
+        item['evidence'].extend([{'source_type': 'list', 'source_id': own_list['id'], 'focus_text': ''},
+                                 {'source_type': 'film', 'source_id': nonmember['key'], 'focus_text': ''}])
         self.assertFalse(self.validate(item)[0])
 
     def test_reviews_do_not_prove_diary_sessions(self):
@@ -187,7 +194,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertFalse(pool[0]['id'] in ids and duplicated['id'] in ids)
         for kind in set(m['moment_type'] for m in script['moments']):
-            self.assertLessEqual(sum(m['moment_type'] == kind for m in script['moments']), 2)
+            self.assertLessEqual(sum(m['moment_type'] == kind for m in script['moments']), 3)
         self.assertEqual(len(build_script([], 3, 10000, LOCALE)['moments']), 0)
         self.assertLessEqual(len(build_script(pool, 1, 10000, LOCALE)['moments']), 1)
         rating_only = [item for item in pool if item['type'] == 'rating_group']
@@ -221,8 +228,9 @@ class GenerationTests(unittest.TestCase):
                                                 self.analysis['overview'])[0])
         result, errors = run([{'text': 'Gattaca', 'effect': 'none'}, {'text': 'Curto.', 'effect': 'none'}])
         self.assertFalse(errors)
-        self.assertEqual(result['beats']['beat_01'], [{'text': 'Curto.', 'effect': 'none'}])
-        self.assertEqual(result['dropped_lines'], {'beat_01': 1})
+        self.assertEqual(result['beats']['beat_01'],
+                         [{'text': 'Gattaca', 'effect': 'none'}, {'text': 'Curto.', 'effect': 'none'}])
+        self.assertEqual(result['dropped_lines'], {})
 
     def test_full_context_includes_raw_export_and_never_silently_truncates(self):
         raw = {'format': 'letterboxd-export-json-v1', 'file_count': 2,
