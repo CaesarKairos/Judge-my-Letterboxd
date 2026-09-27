@@ -1,4 +1,6 @@
-"""Read active CSVs in memory; profile personal fields are never retained."""
+"""Read a Letterboxd ZIP in memory and preserve every file as JSON-ready data."""
+from base64 import b64encode
+from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
@@ -51,6 +53,19 @@ def read_list(profile: UserProfile, source: str, rows: list[list[str]]) -> None:
     profile.lists.append(own_list)
 
 
+def raw_file_record(source: str, raw: bytes) -> dict:
+    """Convert one ZIP member into JSON-safe data without silently discarding its contents."""
+    base = {'file': source, 'bytes': len(raw), 'sha256': sha256(raw).hexdigest()}
+    if source.casefold().endswith('.csv'):
+        rows = csv_rows(raw)
+        return {**base, 'kind': 'csv', 'row_count': len(rows), 'rows': rows}
+    try:
+        text = raw.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return {**base, 'kind': 'binary_base64', 'content_base64': b64encode(raw).decode('ascii')}
+    return {**base, 'kind': 'text', 'text': text}
+
+
 def read_export(path: Path) -> UserProfile:
     profile = UserProfile()
     favorite_refs: list[str] = []
@@ -64,22 +79,36 @@ def read_export(path: Path) -> UserProfile:
             parts = PurePosixPath(source).parts
             item = {'file': source, 'bytes': info.file_size, 'status': 'unknown'}
             profile.inventory.append(item)
+
+            if info.file_size > MAX_FILE_BYTES:
+                raise ValueError(f'Arquivo excede 50 MB: {source}')
+
+            raw = archive.read(info)
+            raw_record = raw_file_record(source, raw)
+            profile.raw_export.append(raw_record)
+            item['raw_exported'] = True
+
             if '..' in parts or source.startswith('/'):
-                item['status'] = 'unsafe_path_ignored'
+                item['status'] = 'unsafe_path_ignored_by_normalizer'
                 continue
             if parts and parts[0] in {'deleted', 'orphaned'}:
-                item['status'] = 'inactive_ignored'
+                item['status'] = 'inactive_ignored_by_normalizer'
                 continue
+
             is_list = len(parts) == 2 and parts[0] == 'lists' and source.endswith('.csv')
             if source not in KNOWN and not is_list:
+                item['status'] = 'raw_only'
                 continue
-            if info.file_size > MAX_FILE_BYTES:
-                raise ValueError(f'CSV excede 50 MB: {source}')
-            rows = csv_rows(archive.read(info))
+            if raw_record['kind'] != 'csv':
+                item['status'] = 'known_non_csv_ignored_by_normalizer'
+                continue
+
+            rows = raw_record['rows']
             item.update(status='read', rows=max(0, len(rows) - 1))
             if is_list:
                 read_list(profile, source, rows)
                 continue
+
             data = records(rows)
             if source == 'profile.csv':
                 for row in data:
@@ -116,6 +145,7 @@ def read_export(path: Path) -> UserProfile:
                         else:
                             profile.reviews.append(ReviewRecord(**entry, text=row.get('Review', '')))
                             film.review_ids.append(entry['id'])
+
     for ref in favorite_refs:
         matches = [f.key for f in profile.films.values() if ref.rstrip('/') in {u.rstrip('/') for u in f.uris}]
         profile.favorites.append({'reference': ref, 'film_keys': matches,
