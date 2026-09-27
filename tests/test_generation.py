@@ -76,7 +76,7 @@ class GenerationTests(unittest.TestCase):
         accepted, rejected = self.validate(candidate)
         self.assertFalse(rejected)
         pool = build_pool(self.dataset, accepted)
-        script = build_script(pool, 5, 10000, LOCALE)
+        script = build_script(pool, 5, 10000, LOCALE, debug=True)
         moment = next(m for m in script['moments'] if candidate['id'] in m['finding_ids'])
         payload = final_writer_input([moment], None, build_plan(self.profile, self.analysis['overview'], LOCALE),
                                      LOCALE, [])
@@ -208,7 +208,8 @@ class GenerationTests(unittest.TestCase):
 
         def run(lines, closer=None):
             raw = json.dumps({'opening': {'salutation': plan['salutation'],
-                                          'top_four_archetype': ['a', 'b', 'c', 'd'],
+                                          'archetype_concepts': ['a', 'b', 'c', 'd'],
+                                          'archetype_phrase': 'a-e-b-de-c-d',
                                           'negative_adjective': plan['adjective_pair']['negative'],
                                           'positive_adjective': plan['adjective_pair']['positive'],
                                           'profile_reaction': []},

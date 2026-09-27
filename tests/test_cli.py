@@ -24,7 +24,8 @@ def valid_response(request: dict, line: str = 'Reação curta.', mutate=None) ->
     payload = writer_payload(request)
     pair = payload['opening_slots']['adjective_pairs_allowed'][0]
     body = {'opening': {'salutation': payload['opening_slots']['salutation_allowed'][0],
-                        'top_four_archetype': list(ARCHETYPE),
+                        'archetype_concepts': list(ARCHETYPE),
+                        'archetype_phrase': 'astronauta-e-adolescente-existencial',
                         'negative_adjective': pair['negative'], 'positive_adjective': pair['positive'],
                         'profile_reaction': []},
             'beats': [{'beat_id': moment['beat_id'], 'lines': [{'text': line, 'effect': 'none'}]}
@@ -170,7 +171,7 @@ class CLITests(unittest.TestCase):
 
     def test_archetype_needs_exactly_four_concepts(self):
         def three(body):
-            body['opening']['top_four_archetype'] = ARCHETYPE[:3]
+            body['opening']['archetype_concepts'] = ARCHETYPE[:3]
 
         with tempfile.TemporaryDirectory() as directory, \
                 patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()), \

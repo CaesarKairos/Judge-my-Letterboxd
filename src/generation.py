@@ -213,7 +213,8 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
 
     # Editorial Moments: selected and display-first, before any AI call.
     evidence_budget = max(0, config.writer_max_context - len(writer_prompt) - 4000)
-    script = build_script(pool, config.max_beats, evidence_budget, locale)
+    script = build_script(pool, config.max_beats, evidence_budget, locale,
+                          semantic_only=quality['passes'])
     moments = script['moments']
     save(output / 'editorial_moments.json', {'count': len(moments), 'moments': moments,
                                              'selection': script['selection'], 'excluded': script['excluded'],
@@ -263,7 +264,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         payload = final_writer_input(
             beats, closer, plan, locale, top_four if plan['archetype_requested'] else [],
             config.max_lines, config.max_words, analysis.get('overview'),
-            analysis.get('review_style'), analysis.get('review_coverage')
+            analysis.get('review_style'), analysis.get('review_coverage'), config.writer_acid_level
         )
         payload['opening_slots']['archetype']['enabled'] = plan['archetype_requested']
         save(output / 'editorial_dossier.json', {
@@ -346,7 +347,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 audit['status'] = 'validated'
                 audit['warnings'] = result['warnings']
                 audit['dropped_lines'] = result['dropped_lines']
-                live_quality = writer_quality(result, audit.get('served_model'))
+                live_quality = writer_quality(result, audit.get('served_model'), beats)
                 report(f"Writer: {audit.get('served_model') or 'modelo desconhecido'}; "
                        f"{live_quality['reaction_lines']} linhas; {live_quality['silent_moments']} momentos em silêncio"
                        f"{'; QUALIDADE DEGRADADA (Lite)' if live_quality['quality_degraded'] else ''}.")
@@ -354,7 +355,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 plan['salutation'] = result['opening']['salutation']
                 plan['adjective_pair'] = result['opening']['adjective_pair']
                 plan['archetype'] = result['opening']['archetype']
-                plan['archetype_text'] = '-'.join(result['opening']['archetype'])
+                plan['archetype_text'] = result['opening']['archetype_phrase'] if plan['archetype_requested'] else ''
                 plan['profile_reaction'] = result['opening']['profile_reaction']
                 for warning in result['warnings'][:3]:
                     report(f'Aviso do Writer: {warning}')
@@ -380,9 +381,10 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         closer_entry = {'moment': closer, 'lines': closer_lines, 'render_strategy': 'ai',
                         'source': 'ai' if result else 'none', 'status': 'written' if closer_lines else 'silence'}
     plan['opening_events'] = build_opening_events(plan, plan['archetype_text'] or None, plan['profile_reaction'], locale)
-    writer_q = writer_quality(result, audit.get('served_model'))
+    writer_q = writer_quality(result, audit.get('served_model'), beats)
     prior_quality = json.loads((output / 'quality_report.json').read_text(encoding='utf-8')) if (output / 'quality_report.json').exists() else {}
-    save(output / 'quality_report.json', {**prior_quality, 'writer': writer_q})
+    save(output / 'writer_quality.json', writer_q)
+    save(output / 'quality_report.json', {**prior_quality, 'writer': writer_q, 'writer_style': writer_q})
     render = {'ai_generation': 'complete' if result else ('skipped' if audit['status'] == 'skipped' else 'failed'),
               'model': config.writer_model, 'served_model': audit.get('served_model'), 'fallback_models': chain[1:],
               'quality_degraded': writer_q['quality_degraded'],
