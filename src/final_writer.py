@@ -13,6 +13,41 @@ FORBIDDEN_CONCEPT = re.compile(
 ARCHETYPE_CONCEPT_WORDS = 2
 PROFILE_REACTION_WORDS = 14
 TIMING_TOKEN = re.compile(r'\b\d+\s*(?:ms|mseg|milissegundos?|segundos?|s)\b', re.I)
+ABSOLUTES = {'pt-BR': re.compile(r'\b(sempre|nunca|nenhum[as]?|tod[ao]s?|toda vez|uma única|exclusivamente|obrigatoriamente|sem exceção|100%)\b', re.I),
+             'en': re.compile(r'\b(always|never|none|all|every|exclusively|without exception|100%)\b', re.I),
+             'es': re.compile(r'\b(siempre|nunca|ningun[ao]s?|tod[ao]s?|exclusivamente|sin excepción|100%)\b', re.I)}
+RATIO = re.compile(r'\b(\d+)\s*(?:de|of|out of|/)\s*(\d+)\b', re.I)
+POSITIVE_ABSOLUTES = {'sempre', 'todos', 'todas', 'todo', 'toda', 'toda vez', 'uma única',
+                      'exclusivamente', 'obrigatoriamente', 'sem exceção', '100%',
+                      'always', 'all', 'every', 'exclusively', 'without exception',
+                      'siempre', 'todos', 'todas', 'exclusivamente', 'sin excepción'}
+
+
+def absolute_language_flags(text: str, moment: dict, locale: str = 'pt-BR') -> list[str]:
+    """Reject measured generalizations only when a cited ratio contradicts the absolute."""
+    pattern = ABSOLUTES.get(locale, ABSOLUTES['pt-BR'])
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return []
+    evidence = json.dumps(moment.get('evidence', []), ensure_ascii=False)
+    ratios = [(int(a), int(b)) for a, b in RATIO.findall(evidence) if int(b) > 0]
+    # Structured measurements often carry a share without repeating its denominator.
+    def shares(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {'share', 'phrase_coverage', 'markup_coverage'} and isinstance(item, (int, float)) and 0 <= item <= 1:
+                    yield item
+                elif isinstance(item, (dict, list)):
+                    yield from shares(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from shares(item)
+    measured = [a / b for a, b in ratios] + list(shares(moment.get('evidence', [])))
+    if not measured:
+        return []
+    positive = any(0 < share < 1 for share in measured)
+    negative = any(share > 0 for share in measured)
+    return [m.group() for m in matches if (positive if m.group().casefold() in POSITIVE_ABSOLUTES else negative)]
 
 
 def line_errors(line: dict, moment: dict, max_words: int) -> list[str]:
@@ -57,6 +92,9 @@ def validate_lines(lines, moment: dict, max_lines: int, max_words: int) -> tuple
         if problems:
             errors.extend(problems)
             continue
+        if absolute_language_flags(line['text'], moment, moment.get('locale', 'pt-BR')):
+            errors.append('absolute language contradicts measured evidence')
+            continue
         if line['text'].strip().casefold() in shown:
             continue
         kept.append({'text': line['text'].strip(), 'effect': line.get('effect', 'none')})
@@ -80,6 +118,18 @@ def validate_archetype(concepts, locale) -> tuple[list[str], list[str]]:
     return clean, []
 
 
+def validate_archetype_phrase(phrase, overview: dict) -> tuple[str, list[str]]:
+    if not isinstance(phrase, str):
+        return '', ['archetype phrase is missing']
+    phrase = phrase.strip()
+    if (not phrase or len(phrase) > 70 or '\n' in phrase or '\r' in phrase
+            or re.search(r'[<>`*_#\[\]]', phrase) or FORBIDDEN_CONCEPT.search(phrase)
+            or numeric_tokens(phrase) or phrase.casefold() in {
+                str(overview.get(key, '')).casefold() for key in ('username', 'handle', 'name')}):
+        return '', ['invalid archetype phrase']
+    return phrase, []
+
+
 def validate_opening(opening: dict, plan: dict, locale, overview: dict) -> tuple[dict, list[str]]:
     """Slots the Script Engine owns: the Writer may only pick inside the localized pools."""
     warnings, result = [], {}
@@ -97,9 +147,12 @@ def validate_opening(opening: dict, plan: dict, locale, overview: dict) -> tuple
     else:
         result['adjective_pair'] = plan['adjective_pair']
         warnings.append('adjective pair outside the localized pool; Script Engine choice kept')
-    archetype, archetype_errors = validate_archetype(opening.get('top_four_archetype'), locale)
+    archetype, archetype_errors = validate_archetype(opening.get('archetype_concepts'), locale)
     result['archetype'] = archetype
     warnings.extend(archetype_errors)
+    phrase, phrase_errors = validate_archetype_phrase(opening.get('archetype_phrase'), overview)
+    result['archetype_phrase'] = phrase if archetype else ''
+    warnings.extend(phrase_errors)
     reaction, problems = validate_lines(opening.get('profile_reaction') or [],
                                         {'display': [], 'evidence': [], 'max_lines': 1}, 1, PROFILE_REACTION_WORDS)
     revealed = numeric_tokens(json.dumps(overview, ensure_ascii=False))

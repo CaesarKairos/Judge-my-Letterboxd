@@ -85,7 +85,8 @@ def _eligible(pool: list[dict], max_evidence_chars: int) -> tuple[list[dict], li
     return candidates, excluded
 
 
-def build_script(pool: list[dict], max_beats: int = 12, max_evidence_chars: int = 16000, locale=None) -> dict:
+def build_script(pool: list[dict], max_beats: int = 12, max_evidence_chars: int = 16000, locale=None,
+                 semantic_only: bool = False, debug: bool = False) -> dict:
     """Build a sequence from AI-selected semantic moments, with restrained local fallbacks."""
     if not 1 <= max_beats <= 14:
         raise ValueError('SCRIPT_MAX_BEATS deve estar entre 1 e 14.')
@@ -96,7 +97,7 @@ def build_script(pool: list[dict], max_beats: int = 12, max_evidence_chars: int 
 
     # The Analyst is the editor. Deterministic findings only fill genuine gaps.
     ordered = sorted(semantic, key=lambda f: (-f['score'] * f['confidence'], f['id']))
-    if len(ordered) < max_beats:
+    if not semantic_only and debug and len(ordered) < max_beats:
         ordered.extend(sorted(deterministic, key=lambda f: (-f['score'] * f['confidence'], f['id'])))
 
     selected: list[dict] = []
@@ -161,9 +162,8 @@ def build_script(pool: list[dict], max_beats: int = 12, max_evidence_chars: int 
         'moments': moments,
         'selection': reasons,
         'excluded': excluded,
-        'policy': ('AI-first: semantic candidates define the show. Deterministic findings are measurements '
-                   'and only a small display-ready subset may fill gaps. rating_group/review-length/tag-mean '
-                   'statistics are never auto-promoted to jokes.'),
+        'policy': ('Semantic candidates define the production show. Deterministic measurements may fill '
+                   'gaps only in debug mode when semantic material is insufficient.'),
     }
 
 
@@ -178,6 +178,8 @@ def moment_payload(moment: dict, max_lines: int, max_words: int) -> dict:
         'editorial_candidate': moment['observation'],
         'why_interesting': moment.get('why_interesting', ''),
         'cultural_angle': moment.get('cultural_angle', ''),
+        'interestingness': moment.get('interestingness'),
+        'confidence': moment.get('confidence'),
         'evidence': moment['evidence'],
         'limits': {
             'max_lines': min(max_lines, moment['max_lines']),
@@ -220,11 +222,14 @@ def compact_review_coverage(coverage: dict | None) -> dict:
 
 def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, locale, top_four: list[dict],
                        max_lines: int = 4, max_words: int = 14, overview: dict | None = None,
-                       review_style: dict | None = None, review_coverage: dict | None = None) -> dict:
+                       review_style: dict | None = None, review_coverage: dict | None = None,
+                       acid_level: float = .75) -> dict:
     """The Writer sees the whole SELECTED show, never the full ZIP again."""
     return {
         'task': 'Write the Judge voice for a fixed script selected from the complete export by the Analyst.',
         'language': locale.locale,
+        'tone': {'acid_level': acid_level, 'target': 'dry, specific, cutting, natural',
+                 'target_of_judgment': 'account behavior and movie choices, never identity'},
         'top_four_films': top_four,
         'editorial_dossier': {
             'profile_overview': overview or {},
@@ -237,7 +242,7 @@ def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, loc
             'adjective_pairs_allowed': locale.adjective_pairs(),
             'archetype': {
                 'count': 4,
-                'output': 'exactly four concepts, hyphen-joined by the frontend',
+                'output': 'four concepts plus one grammatical archetype_phrase, shown verbatim',
                 'source': 'the four favorite films listed above',
                 'about': 'recognizable archetypes, nouns, settings, genres or narrative elements of those films',
                 'concept_rules': ['one word when possible', 'at most two words', 'natural Portuguese',
