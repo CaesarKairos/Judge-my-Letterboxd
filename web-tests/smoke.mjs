@@ -24,6 +24,24 @@ assert.equal(await page.locator('.review img').count(),0);assert.ok(await page.l
 // Quoted reviews are rendered as real blockquotes, never as literal markup.
 assert.ok(await page.locator('.judge-quote').count()>0);assert.ok(await page.locator('.review blockquote').count()>0);
 assert.equal((await page.locator('#chat').textContent()).includes('<blockquote'),false);
+// A resolved poster replaces the abstract card, and a refused lookup keeps it.
+await page.unroute('**/api/poster?*');
+await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:true,poster_url:'https://image.tmdb.org/t/p/w342/fixture.png'}}));
+await page.route('**/image.tmdb.org/**',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==','base64')}));
+await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();
+const posterCard=page.locator('.film-card .poster').first();await posterCard.locator('img').waitFor();
+assert.equal(await posterCard.locator('.poster-fallback').first().isHidden(),true);
+assert.equal(await page.locator('.film-card .poster img').count()>0,true);
+await page.evaluate(()=>localStorage.clear());
+await page.unroute('**/api/poster?*');
+await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false,reason:'no_match'}}));
+await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();await page.waitForTimeout(400);
+assert.equal(await page.locator('.film-card .poster img').count(),0);
+assert.equal(await page.locator('.film-card .poster .poster-fallback').first().isVisible(),true);
+await page.evaluate(()=>localStorage.clear());
+await page.unroute('**/api/poster?*');
+await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false}}));
+
 await page.goto(base);await page.locator('#export').setInputFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from('x')});await page.locator('#upload-error').filter({hasText:'ZIP'}).waitFor();
 await page.route('**/api/judge',route=>route.fulfill({status:501,json:{error:'not_connected'}}));
 await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:Buffer.from([80,75,3,4,0,0])});

@@ -41,12 +41,19 @@ pois `/api/judge` é executado como Pages Function.
 - `opening.top_four` contém identidade dos favoritos; `cue: top_four_reveal` na
   mensagem de apresentação dispara a faixa antes de `role: archetype_phrase`.
   A faixa permanece no histórico. Zero a quatro favoritos são suportados.
-- `poster-service.js`: URL fornecida → memória/localStorage (7 dias) →
-  `/api/poster` → cartaz abstrato com título e ano. Resolução lazy por proximidade
-  do viewport; só favoritos são antecipados. Falhas não interrompem o player.
-- `functions/api/poster.js`: consulta TMDB no servidor, aceita apenas correspondência
-  exata de título/ano e única; resultados ambíguos usam fallback. Cache HTTP de 7 dias
-  para sucesso e curto para falhas. Nenhum rating ou evidência é alterado.
+- `poster-service.js`: URL fornecida → memória/localStorage (7 dias) → `/api/poster` →
+  cartaz abstrato com título e ano. Um `resolved: false` definitivo fica no cache da
+  sessão; falha transitória (rede, 429, 5xx) não fica, então o próximo cartão daquele
+  filme tenta de novo. Resolução lazy por proximidade do viewport; só favoritos são
+  antecipados. Falhas não interrompem o player.
+- `functions/api/poster.js`: consulta TMDB no servidor com o idioma do visitante, aceita
+  título (ou título original) normalizado e escolhe o ano de lançamento mais próximo —
+  exato, com um ano de tolerância entre festival e lançamento — desempatando pelo mais
+  popular. Se nada casar, repete sem o filtro de ano antes de desistir; a resposta traz
+  `reason` (`missing_tmdb_key`, `tmdb_error`, `tmdb_unreachable`, `no_match`,
+  `invalid_query`) para diagnosticar direto em
+  `/api/poster?title=Young%20Hearts&year=2024`. Cache HTTP de 7 dias para sucesso e curto
+  para falhas. Nenhum rating ou evidência é alterado.
 - `functions/api/judge.js` e `functions/_lib/`: backend web independente. Descompacta
   o ZIP com APIs do runtime Workers, interpreta os CSVs, calcula estatísticas e
   momentos editoriais, chama Gemini com saída estruturada e monta o Presentation Script.
@@ -110,6 +117,11 @@ Abra a URL exibida pelo Wrangler. Não inserir secrets no código público nem c
 Referências oficiais: [desenvolvimento local](https://developers.cloudflare.com/pages/functions/local-development/),
 [rotas](https://developers.cloudflare.com/pages/functions/routing/),
 [busca TMDB](https://developer.themoviedb.org/reference/search-movie).
+
+Sem `TMDB_API_KEY` — ou servindo apenas o estático, sem as Pages Functions —
+`/api/poster` não resolve e **todo** cartaz usa o fallback abstrato desenhado pelo CSS.
+Para conferir um filme específico, abra `/api/poster?title=Título&year=2024`: a resposta
+diz `resolved` e, quando não resolve, o `reason`.
 
 ### Testes web
 
