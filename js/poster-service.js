@@ -1,5 +1,5 @@
 import {el,safeImage} from './utils.js';
-import {t} from './i18n.js';
+import {locale,t} from './i18n.js';
 const memory=new Map(), TTL=7*86400000;
 export async function resolvePoster(film) {
   const supplied=safeImage(film.poster_url); if(supplied)return supplied;
@@ -8,12 +8,14 @@ export async function resolvePoster(film) {
   const pending=(async()=>{
     try {const stored=JSON.parse(localStorage.getItem(key));if(stored?.expires>Date.now()&&safeImage(stored.url))return stored.url;}catch{}
     try {
-      const response=await fetch(`/api/poster?${new URLSearchParams({title:film.title||'',year:film.year||''})}`,{signal:AbortSignal.timeout(6000)});
-      if(!response.ok)return null;
+      const response=await fetch(`/api/poster?${new URLSearchParams({title:film.title||'',year:film.year||'',locale})}`,{signal:AbortSignal.timeout(8000)});
+      // A definitive "no" stays cached for the session; a transient failure does not, so a
+      // later render (another card with the same film) can ask the endpoint again.
+      if(!response.ok){if(response.status>=500||response.status===429)memory.delete(key);return null;}
       const data=await response.json(), url=data.resolved&&safeImage(data.poster_url);
       if(url)try{localStorage.setItem(key,JSON.stringify({url,expires:Date.now()+TTL}));}catch{}
       return url||null;
-    }catch{return null;}
+    }catch{memory.delete(key);return null;}
   })();
   memory.set(key,pending);return pending;
 }
