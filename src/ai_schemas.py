@@ -1,7 +1,8 @@
 """Wire schemas and prompt identifiers; no behavior depends on version labels."""
 from typing import Any
-ANALYST_PROMPT_VERSION = 'v2'
-WRITER_PROMPT_VERSION = 'v3'
+
+ANALYST_PROMPT_VERSION = 'v3'
+WRITER_PROMPT_VERSION = 'v4'
 
 
 def obj(properties: dict) -> dict:
@@ -13,41 +14,58 @@ def array(items: dict, maximum: int = 30) -> dict:
 
 
 STRING = {'type': 'string'}
-REF = obj({'source_type': {'type': 'string', 'enum': ['review', 'diary', 'film', 'tag', 'list', 'finding', 'stats', 'rewatch']},
-           'source_id': STRING, 'quote': STRING})
-NUMBER_CLAIM = obj({'source_type': STRING, 'source_id': STRING, 'field': STRING, 'value': {'type': 'number'}})
+REF = obj({
+    'source_type': {'type': 'string', 'enum': [
+        'review', 'diary', 'film', 'tag', 'list', 'finding', 'stats', 'rewatch', 'review_style'
+    ]},
+    'source_id': STRING,
+    # Optional semantically, required structurally so provider schemas stay simple.
+    # Use "" for non-review evidence. The backend resolves it against the original.
+    'focus_text': STRING,
+})
 SEMANTIC_SCHEMA = obj({'semantic_findings': array(obj({
     'id': STRING,
-    'type': {'type': 'string', 'enum': ['self_irony', 'semantic_contrast', 'review_spotlight', 'recurring_idea',
-                                     'list_meaning', 'tag_meaning', 'meaningful_exception']},
+    'type': {'type': 'string', 'enum': [
+        'self_irony', 'semantic_contrast', 'review_spotlight', 'recurring_idea',
+        'list_meaning', 'tag_meaning', 'meaningful_exception', 'rewatch_pattern',
+        'logging_behavior'
+    ]},
     'interestingness': {'type': 'number', 'minimum': 0, 'maximum': 1},
     'confidence': {'type': 'number', 'minimum': 0, 'maximum': 1},
-    'observation': STRING, 'why_interesting': STRING,
-    'evidence': array(REF, 6), 'film_keys': array(STRING, 8),
-    'related_tags': array(STRING, 5), 'related_lists': array(STRING, 5),
-    'numeric_claims': array(NUMBER_CLAIM, 10)}), 24)})
-WRITER_SCHEMA = obj({'lines': array(STRING, 3)})  # kept for historical per-beat audits
-LINE_ITEM = {'type': 'object', 'properties': {'text': STRING,
-                                             'effect': {'type': 'string', 'enum': ['none', 'strike', 'correction']}},
-             'required': ['text']}
+    # Account observation must be grounded. cultural_angle may use stable cinema knowledge.
+    'observation': STRING,
+    'why_interesting': STRING,
+    'cultural_angle': STRING,
+    'evidence': array(REF, 10),
+    'film_keys': array(STRING, 10),
+    'related_tags': array(STRING, 6),
+    'related_lists': array(STRING, 6),
+}), 24)})
+
+LINE_ITEM = {'type': 'object', 'properties': {
+    'text': STRING,
+    'effect': {'type': 'string', 'enum': ['none', 'strike', 'correction']},
+}, 'required': ['text']}
 FINAL_WRITER_SCHEMA = obj({
     'opening': {'type': 'object', 'properties': {
-        'salutation': STRING, 'top_four_archetype': array(STRING, 4),
-        'negative_adjective': STRING, 'positive_adjective': STRING,
-        'profile_reaction': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 1}},
-     'required': ['salutation', 'top_four_archetype', 'negative_adjective', 'positive_adjective', 'profile_reaction'],
-     'additionalProperties': False},
-    'beats': array(obj({'beat_id': STRING, 'lines': array(LINE_ITEM, 3)}), 12),
-    'closer': {'type': 'object', 'properties': {'lines': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 3}},
-               'required': ['lines'], 'additionalProperties': False}})
+        'salutation': STRING,
+        'top_four_archetype': array(STRING, 4),
+        'negative_adjective': STRING,
+        'positive_adjective': STRING,
+        'profile_reaction': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 1},
+    }, 'required': [
+        'salutation', 'top_four_archetype', 'negative_adjective',
+        'positive_adjective', 'profile_reaction'
+    ], 'additionalProperties': False},
+    'beats': array(obj({'beat_id': STRING, 'lines': array(LINE_ITEM, 4)}), 16),
+    'closer': {'type': 'object', 'properties': {
+        'lines': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 4},
+    }, 'required': ['lines'], 'additionalProperties': False},
+})
 
 
 def wire_schema(schema: dict) -> dict:
-    """Keep the provider grammar small; enforce all bounds again locally.
-
-    Some Flash versions reject nested maxItems/additionalProperties constraints
-    with HTTP 400. The wire contract retains object fields, types, required and enums.
-    """
+    """Keep provider grammar small; enforce bounds again locally."""
     def simplify(value: Any) -> Any:
         if isinstance(value, dict):
             return {k: simplify(v) for k, v in value.items()
