@@ -5,6 +5,30 @@ const number=value=>value===''||value==null?null:Number.isFinite(Number(value))?
 const boxdId=value=>{try{return new URL(value).pathname.split('/').filter(Boolean).at(-1)||'';}catch{return '';}};
 const filmFrom=row=>({film_key:keyOf(row.Name,row.Year),title:(row.Name||'').trim(),year:(row.Year||'').trim(),rating:number(row.Rating)});
 const tags=value=>String(value||'').split(',').map(item=>item.trim()).filter(Boolean);
+const entities={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:' '};
+const decodeEntities=value=>value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi,(_,entity)=>{
+  if(entity[0]==='#'){const radix=entity[1].toLowerCase()==='x'?16:10,raw=entity.slice(radix===16?2:1),code=Number.parseInt(raw,radix);return Number.isFinite(code)?String.fromCodePoint(code):'';}
+  return entities[entity.toLowerCase()]||'';
+});
+
+const markupTypes={blockquote:'blockquote',strong:'strong',b:'strong',em:'em',i:'em',p:'paragraph'};
+
+export function structuredReview(value) {
+  const input=String(value||'').replace(/[\u200B-\u200D\uFEFF]/g,''),segments=[];let cursor=0,stack=[];
+  const push=(type,text)=>{const clean=decodeEntities(text).replace(/\r\n?/g,'\n');if(!clean)return;const previous=segments.at(-1);if(previous?.type===type)previous.text+=clean;else segments.push({type,text:clean});};
+  for(const match of input.matchAll(/<[^>]*>/g)){
+    push(stack.at(-1)||'text',input.slice(cursor,match.index));cursor=match.index+match[0].length;
+    const tag=match[0].match(/^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)/);if(!tag)continue;
+    const closing=Boolean(tag[1]),name=tag[2].toLowerCase();
+    if(name==='br'){push(stack.at(-1)||'text','\n');continue;}
+    const type=markupTypes[name];if(!type)continue;
+    if(type==='paragraph'&&!closing&&segments.length)push(stack.at(-1)||'text','\n');
+    if(closing){const found=stack.lastIndexOf(type);if(found>=0)stack=stack.slice(0,found);}else stack.push(type);
+  }
+  push(stack.at(-1)||'text',input.slice(cursor));
+  const cleaned=segments.map(segment=>({...segment,text:segment.text.trim()})).filter(segment=>segment.text);
+  return {text:cleaned.map(segment=>segment.text).join('\n'),segments:cleaned};
+}
 
 function parseList(text,path) {
   const rows=parseCsv(text),header=rows.findIndex(row=>row[0]==='Date'&&row[1]==='Name');
@@ -29,7 +53,7 @@ export function parseExport(entries) {
   const favoriteIds=String(profileRow['Favorite Films']||'').split(',').map(boxdId).filter(Boolean);
   const topFour=favoriteIds.map(id=>[...films.values()].find(f=>boxdId(f.uri)===id)).filter(Boolean).slice(0,4);
   const sessions=diary.map((row,index)=>({...filmFrom(row),date:row['Watched Date']||row.Date,rewatch:/^(yes|true|1)$/i.test(row.Rewatch),tags:tags(row.Tags),index:index+1}));
-  const reviewRows=reviews.map((row,index)=>({...filmFrom(row),text:String(row.Review||'').trim(),date:row['Watched Date']||row.Date,tags:tags(row.Tags),review_id:`review-${index+1}`})).filter(r=>r.text);
+  const reviewRows=reviews.map((row,index)=>({...filmFrom(row),...structuredReview(row.Review),date:row['Watched Date']||row.Date,tags:tags(row.Tags),review_id:`review-${index+1}`})).filter(r=>r.text);
   const lists=[...entries].filter(([path])=>/^lists\/[^/]+\.csv$/i.test(path)).map(([path,text])=>parseList(text,path));
   return {handle:(profileRow.Username||'').trim(),name:(profileRow.Username||profileRow['Given Name']||'').trim(),films:[...films.values()],sessions,reviews:reviewRows,lists,watchlist:watchlist.length,topFour};
 }

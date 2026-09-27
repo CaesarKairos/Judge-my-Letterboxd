@@ -1,4 +1,7 @@
-export const timing = Object.freeze({instant:0, short:480, medium:950, long:1650, character:17, comma:65, sentence:125, strike:280, stagger:85, typo:110, frame:24, messageGap:190});
+export const timing = Object.freeze({instant:0, short:520, medium:1100, long:1900, evidence:1250, review:1900, read:14, readMax:5200, character:17, comma:70, sentence:140, strike:280, stagger:85, typo:110, frame:24, messageGap:520});
+// An evidence card is only useful when it can be read: keep it on screen for its
+// own length, never longer than readMax. The AI still decides the pause around it.
+export const readWait = (text, base = timing.evidence) => Math.min(timing.readMax, base + String(text ?? '').replace(/\s+/g, ' ').trim().length * timing.read);
 export class Playback {
   constructor() { this.speed=1; this.paused=false; this.skipped=false; this.stopped=false; this.motion=matchMedia('(prefers-reduced-motion: reduce)'); }
   get instant() {return this.skipped || this.motion.matches;}

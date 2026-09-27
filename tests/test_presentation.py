@@ -2,7 +2,7 @@
 import unittest
 
 from src.opening import ARCHETYPE_COUNT, build_events, build_plan
-from src.presentation import (DURATIONS, EVENT_TYPES, build_presentation, correction, display_events, event_errors,
+from src.presentation import (DURATIONS, EVENT_TYPES, build_presentation, correction, display_events, event_errors, event_text,
                               line_events, message, pause, script_text, strike, typing, validate_presentation)
 from src.resources import bundle, resolve_locale
 
@@ -108,6 +108,17 @@ class EventTests(unittest.TestCase):
         self.assertTrue(event_errors([message('~~péssimo~~')]))
         self.assertTrue(event_errors([message('*correção')]))
         self.assertTrue(event_errors([{'type': 'message', 'segments': [{'text': 'x', 'effect': 'nope'}]}]))
+
+    def test_quoted_review_markup_becomes_a_real_quote_segment(self):
+        """A quote copied from an export is a blockquote segment, never literal markup."""
+        quoted = 'Dito isso, de pau duro e triste.<blockquote>"Jack, I swear..." — Ennis Del Mar</blockquote>'
+        event = message(quoted)
+        self.assertEqual([segment['effect'] for segment in event['segments']], ['none', 'quote'])
+        self.assertEqual(event['segments'][1]['text'], '"Jack, I swear..." — Ennis Del Mar')
+        self.assertNotIn('<blockquote>', event_text(event))
+        self.assertFalse(event_errors([event]))
+        self.assertEqual(message('Curto.')['segments'], [{'text': 'Curto.', 'effect': 'none'}])
+        self.assertEqual(message('<i>ênfase</i>')['segments'], [{'text': 'ênfase', 'effect': 'none'}])
 
 
 class PresentationTests(unittest.TestCase):
