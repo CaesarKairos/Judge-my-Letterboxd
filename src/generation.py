@@ -20,7 +20,7 @@ from .run_storage import cache_response, no_judgment, read_cached
 class GenerationConfig:
     model: str = 'gemini-flash-latest'
     language: str = 'pt-BR'
-    max_context: int = 300000
+    max_context: int = 2000000
     max_beats: int = 10
     writer_max_context: int = 16000
     max_lines: int = 3
@@ -32,7 +32,7 @@ class GenerationConfig:
     @classmethod
     def from_env(cls) -> 'GenerationConfig':
         config = cls(os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), os.getenv('JUDGE_LANGUAGE', 'pt-BR'),
-                     int(os.getenv('MAX_CONTEXT_CHARS', '300000')), int(os.getenv('SCRIPT_MAX_BEATS', '10')),
+                     int(os.getenv('MAX_CONTEXT_CHARS', '2000000')), int(os.getenv('SCRIPT_MAX_BEATS', '10')),
                      int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '16000')), int(os.getenv('WRITER_MAX_LINES', '3')),
                      int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
                      float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models())
@@ -98,8 +98,9 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root
     if status_path.exists():
         state['previous_run'] = json.loads(status_path.read_text(encoding='utf-8')).get('previous_run')
     save(output / 'run_status.json', state)
-    report(f"Contexto Analyst: {len(analyst_prompt) + len(message):,} caracteres; "
-           f"{len(context['reviews'])}/{len(profile.reviews)} reviews.")
+    report(f"Contexto Analyst COMPLETO: {len(analyst_prompt) + len(message):,} caracteres; "
+           f"ZIP {context['coverage']['zip_files_included']}/{context['coverage']['zip_files_total']} arquivos; "
+           f"{len(context['reviews'])}/{len(profile.reviews)} reviews; 0 arquivos omitidos.")
     semantic, rejected = [], []
     failed = False
     if dry_run or not api_key:
