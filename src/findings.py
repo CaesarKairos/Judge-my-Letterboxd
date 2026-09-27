@@ -64,6 +64,16 @@ def build_findings(profile: UserProfile, analysis: dict[str, Any]) -> list[Findi
     for item in review_stats['multiple_reviews']:
         add('multiple_reviews', f"Filme possui {len(item['review_ids'])} reviews.", item,
             [item['film_key']], ['reviews.csv', 'diary.csv'], len(item['review_ids']), .4)
+    for item in analysis['lists']:
+        if item['film_count'] >= 3:
+            keys = [m['film_key'] for m in item['members']]
+            reviewed = item.get('with_reviews', 0)
+            add('own_list', f"Lista {item['name']!r} tem {item['film_count']} filmes; {reviewed} com review.",
+                {'name': item['name'], 'description': item['description'], 'film_count': item['film_count'],
+                 'ratings': item.get('ratings', {}), 'with_reviews': reviewed,
+                 'with_rewatches': item.get('with_rewatches', 0), 'favorites': item.get('favorites', 0)},
+                keys, ['lists'], item['film_count'], max(.2, reviewed / item['film_count']),
+                metric='own_list_composition')
     liked_mean = analysis['likes']['film_ratings']['mean']
     if analysis['likes']['film_ratings']['count'] >= 3 and global_mean is not None and abs(liked_mean - global_mean) >= .5:
         add('liked_rating_difference', 'Média dos filmes curtidos difere da média global em pelo menos 0.5.',

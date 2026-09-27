@@ -5,10 +5,15 @@ import unittest
 import test_pipeline
 from src.analyzer import analyze
 from src.context_builder import build_context, build_dataset
+from src.final_writer import validate_final_writer
 from src.findings import build_findings
 from src.finding_pool import build_pool
-from src.script_engine import build_script, writer_input
-from src.validator import validate_semantic_findings, validate_writer
+from src.opening import build_plan
+from src.resources import bundle
+from src.script_engine import build_script, final_writer_input
+from src.validator import validate_semantic_findings
+
+LOCALE = bundle('pt-BR')
 
 
 def semantic_candidate(dataset: dict) -> dict:
@@ -70,17 +75,18 @@ class GenerationTests(unittest.TestCase):
         accepted, rejected = self.validate(candidate)
         self.assertFalse(rejected)
         pool = build_pool(self.dataset, accepted)
-        script = build_script(pool, self.analysis['overview'], 5)
-        beat = next(b for b in script['beats'] if candidate['id'] in b['finding_ids'])
-        payload = writer_input(beat, 'pt-BR')
-        self.assertEqual(payload['evidence'], beat['evidence'])
-        self.assertEqual(payload['previous_context'], [])
-        self.assertNotIn('stats', payload)
-        self.assertNotIn('reviews', payload)
-        self.assertNotIn('films', payload)
-        review_sources = [e['source_id'] for e in payload['evidence'] if e['source_type'] == 'review']
+        script = build_script(pool, 5, 10000, LOCALE)
+        moment = next(m for m in script['moments'] if candidate['id'] in m['finding_ids'])
+        payload = final_writer_input([moment], None, build_plan(self.profile, self.analysis['overview'], LOCALE),
+                                     LOCALE, [])
+        sent = payload['moments'][0]
+        self.assertEqual(sent['evidence'], moment['evidence'])
+        self.assertNotIn('stats', sent)
+        self.assertNotIn('reviews', sent)
+        self.assertNotIn('films', sent)
+        review_sources = [e['source_id'] for e in sent['evidence'] if e['source_type'] == 'review']
         self.assertEqual(review_sources, [candidate['evidence'][0]['source_id']])
-        self.assertEqual(script['beats'][-1]['beat_type'], 'CLOSER')
+        self.assertEqual(script['moments'][-1]['role'], 'closer')
 
     def test_selection_has_type_film_and_tag_diversity(self):
         candidates = []
@@ -89,12 +95,14 @@ class GenerationTests(unittest.TestCase):
             candidates.append({'id': f'candidate_{index}', 'origin': 'deterministic',
                                'type': kinds[index % len(kinds)], 'score': 90, 'confidence': 1,
                                'observation': f'Observation {index}', 'film_keys': [f'film_{index}'],
-                               'related_tags': [f'tag_{index}'], 'evidence': [], 'sample_size': 10})
-        script = build_script(candidates, self.analysis['overview'], 8)
-        kinds = [b['beat_type'] for b in script['beats'][1:]]
-        self.assertEqual(len(script['beats']), 8)
-        self.assertGreaterEqual(len(set(kinds)), 4)
-        self.assertTrue(all(a != b for a, b in zip(kinds, kinds[1:])))
+                               'related_tags': [f'tag_{index}'], 'evidence': [{'source_type': 'finding',
+                                                                               'source_id': f'candidate_{index}',
+                                                                               'data': {}}], 'sample_size': 10})
+        script = build_script(candidates, 8, 10000, LOCALE)
+        types = [m['moment_type'] for m in script['moments']]
+        self.assertEqual(len(script['moments']), 8)
+        self.assertGreaterEqual(len(set(types)), 4)
+        self.assertTrue(all(a != b for a, b in zip(types, types[1:])))
 
     def test_reject_missing_ids_entities_quotes_and_numbers(self):
         base = semantic_candidate(self.dataset)
@@ -148,23 +156,45 @@ class GenerationTests(unittest.TestCase):
         pool = build_pool(self.dataset, [])
         duplicated = deepcopy(pool[0])
         duplicated['id'] = 'duplicate_new_id'
-        script = build_script(pool + [duplicated], self.analysis['overview'], 6)
-        self.assertLessEqual(len(script['beats']), 6)
-        ids = [fid for b in script['beats'] for fid in b['finding_ids']]
+        script = build_script(pool + [duplicated], 6, 10000, LOCALE)
+        self.assertLessEqual(len(script['moments']), 6)
+        ids = [fid for m in script['moments'] for fid in m['finding_ids']]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertFalse(pool[0]['id'] in ids and duplicated['id'] in ids)
-        for kind in set(b['beat_type'] for b in script['beats']):
-            self.assertLessEqual(sum(b['beat_type'] == kind for b in script['beats']), 2)
-        self.assertFalse(any(b['beat_type'] in {'LIST_PATTERN', 'CLOSER', 'CALLBACK'} for b in script['beats']))
-        self.assertEqual(len(build_script([], self.analysis['overview'])['beats']), 1)
-        self.assertEqual(len(build_script(pool, self.analysis['overview'], 1)['beats']), 1)
+        for kind in set(m['moment_type'] for m in script['moments']):
+            self.assertLessEqual(sum(m['moment_type'] == kind for m in script['moments']), 2)
+        self.assertEqual(len(build_script([], 3, 10000, LOCALE)['moments']), 0)
+        self.assertEqual(len(build_script(pool, 1, 10000, LOCALE)['moments']), 1)
 
     def test_writer_limits_and_numeric_guard(self):
-        beat = build_script([], self.analysis['overview'])['beats'][0]
-        self.assertEqual(validate_writer('{"lines": []}', beat), ([], []))
-        for raw in ['not json', '{"lines": ["a", "b", "c", "d"]}', '{"lines": ["999 reviews."]}',
-                    json.dumps({'lines': ['word ' * 30]})]:
-            self.assertTrue(validate_writer(raw, beat)[1])
+        moment = {'beat_id': 'beat_01', 'max_lines': 2, 'display': {'films': [{'title': 'Gattaca'}]},
+                  'evidence': [{'source_type': 'film', 'source_id': 'f1', 'data': {'current_rating': 4.5}}]}
+        plan = build_plan(self.profile, self.analysis['overview'], LOCALE)
+
+        def run(lines, closer=None):
+            raw = json.dumps({'opening': {'salutation': plan['salutation'],
+                                          'top_four_archetype': ['a', 'b', 'c', 'd'],
+                                          'negative_adjective': plan['adjective_pair']['negative'],
+                                          'positive_adjective': plan['adjective_pair']['positive'],
+                                          'profile_reaction': []},
+                              'beats': [{'beat_id': 'beat_01', 'lines': lines}], 'closer': {'lines': []}})
+            return validate_final_writer(raw, [moment], closer, plan, LOCALE, self.analysis['overview'])
+
+        for lines in ([{'text': 'a', 'effect': 'none'}] * 3,
+                      [{'text': '999 reviews.', 'effect': 'none'}],
+                      [{'text': 'word ' * 30, 'effect': 'none'}],
+                      [{'text': '~~riscado~~', 'effect': 'none'}],
+                      [{'text': 'espera 300 ms', 'effect': 'none'}]):
+            self.assertIsNone(run(lines)[0])
+        broken = json.dumps({'opening': {}, 'beats': [], 'closer': {}})
+        self.assertEqual(validate_final_writer('not json', [moment], None, plan, LOCALE,
+                                              self.analysis['overview'])[1], ['invalid JSON'])
+        self.assertIsNone(validate_final_writer(broken, [moment], None, plan, LOCALE,
+                                                self.analysis['overview'])[0])
+        result, errors = run([{'text': 'Gattaca', 'effect': 'none'}, {'text': 'Curto.', 'effect': 'none'}])
+        self.assertFalse(errors)
+        self.assertEqual(result['beats']['beat_01'], [{'text': 'Curto.', 'effect': 'none'}])
+        self.assertEqual(result['dropped_lines'], {'beat_01': 1})
 
     def test_compact_context_has_references_and_complete_reviews(self):
         context, message = build_context(self.profile, self.analysis, self.findings, 'prompt', 300000, 'pt-BR')

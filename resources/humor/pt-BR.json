@@ -1,0 +1,20 @@
+{
+  "locale": "pt-BR",
+  "note": "HUMAN_TEMPLATE. Linhas escritas por gente, nunca pela IA. Sempre marcadas como render_strategy=human_template no presentation_script.json.",
+  "templates": [
+    {
+      "id": "humor_rewatch_same_rating",
+      "moment_type": "rewatch",
+      "condition": "all_sessions_same_rating",
+      "lines": ["Mesma nota. Todas as vezes."],
+      "max_lines": 1
+    },
+    {
+      "id": "humor_review_only_quote",
+      "moment_type": "review_spotlight",
+      "condition": "always",
+      "lines": [],
+      "max_lines": 0
+    }
+  ]
+}
