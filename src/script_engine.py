@@ -52,9 +52,13 @@ def duplicate(a: dict, b: dict) -> bool:
     fa, fb = set(a['film_keys']), set(b['film_keys'])
     if a['type'] == b['type'] and fa and fb and len(fa & fb) / len(fa | fb) >= .8:
         return True
+    # Similar prose alone is not duplication: LLMs often describe distinct
+    # evidence with the same vocabulary. Text similarity only breaks ties when
+    # the candidates already share concrete evidence or films.
     wa = set(re.findall(r'\w+', a['observation'].casefold()))
     wb = set(re.findall(r'\w+', b['observation'].casefold()))
-    return bool(wa and wb and len(wa & wb) / len(wa | wb) >= .82)
+    has_shared_ground = bool((sa and sb and sa & sb) or (fa and fb and fa & fb))
+    return bool(has_shared_ground and wa and wb and len(wa & wb) / len(wa | wb) >= .82)
 
 
 def _eligible(pool: list[dict], max_evidence_chars: int) -> tuple[list[dict], list[dict]]:
