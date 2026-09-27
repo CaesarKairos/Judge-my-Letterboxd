@@ -55,7 +55,7 @@ def build_dataset(profile: UserProfile, analysis: dict, findings: list[Finding],
                for r in profile.reviews]
     tags = [{k: v for k, v in t.items() if k in {'tag', 'film_count', 'sessions', 'session_ids', 'reviews',
              'review_ids', 'current_film_ratings', 'session_ratings', 'explicit_rewatches', 'unique_session_films',
-             'rated_session_ids', 'film_keys'}} for t in analysis['tags']]
+             'rated_session_ids', 'film_keys', 'films'}} for t in analysis['tags']]
     lists = [{k: v for k, v in item.items() if k in {
                 'id', 'name', 'description', 'tags', 'members', 'film_count', 'ratings',
                 'member_ratings', 'favorites', 'with_reviews', 'with_rewatches', 'member_details'
