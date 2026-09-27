@@ -17,6 +17,7 @@ from src.analyzer import analyze
 from src.findings import build_findings
 from src.generation import GenerationConfig, generate, save
 from src.parser import read_export
+from src.raw_export import read_raw_export
 from src.run_storage import archive_run, no_judgment
 
 ROOT = Path(__file__).resolve().parent
@@ -26,7 +27,7 @@ GENERATED = ('profile_summary.json', 'extracted_profile.json', 'findings.json', 
              'editorial_moments.json', 'model_discovery.json', 'final_writer_request.json',
              'final_writer_response.json', 'presentation_script.json', 'ai_context.json', 'ai_request.json',
              'ai_response.json', 'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt',
-             'run_status.json')
+             'run_status.json', 'raw_export.json')
 # Outputs da arquitetura antiga (uma chamada Writer por beat): removidos sem arquivar,
 # porque o equivalente atual vive em editorial_moments/final_writer_response/presentation.
 RETIRED = ('writer_inputs.json', 'judgment.json')
@@ -127,15 +128,17 @@ def run() -> int:
         console.print(f'Execução anterior preservada em output/{previous}/', style='dim')
     console.print(Text(f'ZIP: {path.name}'))
     with console.status('Lendo export e calculando evidências...', spinner='dots'):
+        raw_export = read_raw_export(path)
         profile = read_export(path)
         analysis = analyze(profile)
         findings = build_findings(profile, analysis)
+    save(output / 'raw_export.json', raw_export)
     save(output / 'extracted_profile.json', asdict(profile))
     save(output / 'profile_summary.json', analysis)
     for name in ('findings.json', 'deterministic_findings.json'):
         save(output / name, [asdict(f) for f in findings])
     show_profile(analysis, findings, args.show_findings)
-    script, judgment, failed = generate(profile, analysis, findings, ROOT, config,
+    script, judgment, failed = generate(profile, analysis, findings, raw_export, ROOT, config,
                                         os.getenv('GEMINI_API_KEY', '').strip(), args.dry_run,
                                         args.analyze_only, args.no_analyst,
                                         lambda text: console.print(Text(text)))
