@@ -245,7 +245,7 @@ def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, loc
                 'output': 'four concepts plus one grammatical archetype_phrase, shown verbatim',
                 'source': 'the four favorite films listed above',
                 'about': 'recognizable archetypes, nouns, settings, genres or narrative elements of those films',
-                'concept_rules': ['one word when possible', 'at most two words', 'natural Portuguese',
+                'concept_rules': ['short film-derived concepts, including composed expressions', 'natural Portuguese',
                                   'visual or recognizable rather than generic', 'semantically distinct', 'no numbers, no diagnoses',
                                   'avoid generic words such as drama, story, emotional, intelligence when a concrete concept exists'],
                 'forbidden': ['claims about the person', 'religion', 'politics', 'health',
