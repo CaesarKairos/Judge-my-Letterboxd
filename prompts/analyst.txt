@@ -55,6 +55,10 @@ A recurring_idea MUST be more meaningful than a common filler phrase unless the 
 
 THE RAW EXPORT IS FOR DISCOVERY
 
+The raw export may contain account/profile fields that are not movie-taste material.
+Never turn email, location, website, private contact details or incidental personal data
+into a Judge moment. They are present only because the user requested a faithful export.
+
 Use raw_export to notice anything the normalized indexes may not foreground:
 - list metadata;
 - exact review wording;
