@@ -239,8 +239,28 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     closer = next((m for m in moments if m.get('role') == 'closer'), None)
     beats = [m for m in moments if m.get('role') != 'closer']
     save(output / 'script.json', script)
-    report(f"Momentos editoriais: {len(moments)} ({len(beats)} mids"
-           f"{', 1 closer reservado' if closer else ', sem closer'}).")
+    semantic_moments = sum(moment.get('origin') == 'semantic' for moment in moments)
+    deterministic_moments = len(moments) - semantic_moments
+    report(f"Script: {semantic_moments} semantic; {deterministic_moments} fallback determinístico; "
+           f"{len(moments)} momentos totais.")
+    quality_path = output / 'quality_report.json'
+    quality_payload = json.loads(quality_path.read_text(encoding='utf-8')) if quality_path.exists() else {}
+    quality_payload['script'] = {
+        'semantic_moments': semantic_moments,
+        'deterministic_fallbacks': deterministic_moments,
+        'total_moments': len(moments),
+        'passes': semantic_moments >= quality.get('required_semantic_candidates', 2)
+    }
+    save(quality_path, quality_payload)
+    if state['analyst'] in {'validated', 'validated_with_rejections'} and not quality_payload['script']['passes']:
+        state['analyst'] = 'insufficient_editorial_material'
+        state['error'] = {
+            'type': 'EditorialQualityGate',
+            'code': None,
+            'reason': 'insufficient_editorial_moments',
+            'message': 'Poucos momentos semânticos sobreviveram à seleção editorial.'
+        }
+        failed = True
 
     # Model discovery happens once per run, before the Writer request is built.
     discovered, rejected_models = [], []
