@@ -242,6 +242,40 @@ class CLITests(unittest.TestCase):
             self.assertIsInstance(arguments['config'], types.GenerateContentConfig)
             self.assertEqual(arguments['contents'], '{}')
 
+    def test_context_over_budget_is_reported_and_keeps_the_local_presentation(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch('src.generation.analyze_semantically') as analyst, \
+                patch('src.generation.write_final') as writer:
+            root = Path(directory)
+            self.prepare(root)
+            self.assertEqual(self.run_app(root, [], 'synthetic-key', {'MAX_CONTEXT_CHARS': '500'}), 1)
+            analyst.assert_not_called()
+            writer.assert_not_called()
+            status = self.read(root, 'run_status.json')
+            self.assertEqual(status['status'], 'context_too_large')
+            self.assertEqual(status['error']['reason'], 'context_too_large')
+            self.assertIn('MAX_CONTEXT_CHARS', status['error']['message'])
+            self.assertIn('ANALYST_RAW_EXPORT=0', status['error']['hint'])
+            script = self.read(root, 'presentation_script.json')
+            self.assertEqual(script['render']['ai_generation'], 'skipped')
+            self.assertGreaterEqual(len(script['events']), 10)
+            explanation = (root / 'output' / 'judgment.txt').read_text(encoding='utf-8')
+            self.assertIn('SEM REAÇÃO DE IA', explanation)
+            self.assertIn('MAX_CONTEXT_CHARS', explanation)
+            self.assertEqual(self.read(root, 'debug_report.txt')['coverage']['reason'], 'context_over_budget')
+
+    def test_raw_export_can_be_disabled_for_huge_exports(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})) as analyst, \
+                patch('src.generation.write_final', side_effect=writer_side_effect()):
+            root = Path(directory)
+            self.prepare(root)
+            self.assertEqual(self.run_app(root, [], 'synthetic-key', {'ANALYST_RAW_EXPORT': '0'}), 0)
+            payload = json.loads(analyst.call_args.args[1]['contents'])
+            self.assertNotIn('raw_export', payload)
+            self.assertFalse(payload['coverage']['raw_export_included'])
+            self.assertEqual(self.read(root, 'run_status.json')['status'], 'complete')
+
 
 if __name__ == '__main__':
     unittest.main()

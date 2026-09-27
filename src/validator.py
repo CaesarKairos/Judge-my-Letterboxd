@@ -79,6 +79,43 @@ def evidence_numbers(value: Any) -> set[float]:
     return set()
 
 
+ELLIPSIS_RE = re.compile(r'\s*(?:\.{2,}|…|\[\.\.\.\])\s*')
+
+
+def quote_fragments(quote: str) -> list[str]:
+    return [fragment.strip() for fragment in ELLIPSIS_RE.split(quote) if fragment.strip()]
+
+
+def fragments_in_order(fragments: list[str], body: str) -> bool:
+    cursor = 0
+    for fragment in fragments:
+        position = body.find(fragment, cursor)
+        if position == -1:
+            return False
+        cursor = position + len(fragment)
+    return True
+
+
+def quote_style(quote: str, texts: list[str]) -> str:
+    """'exact' for a contiguous excerpt, 'fragments' when only omissions were added.
+
+    A model may cut an excerpt short with an ellipsis. Every fragment still has to be an
+    exact, in-order substring of the cited record, so no word can be invented.
+    """
+    fragments = quote_fragments(quote)
+    if not fragments:
+        return ''
+    # A trailing ellipsis still marks an excerpt: the fragment itself must exist in order.
+    has_ellipsis = bool(ELLIPSIS_RE.search(quote))
+    for text in texts:
+        for body in (text, plain_text(text)):
+            if quote in body:
+                return 'exact'
+            if has_ellipsis and fragments_in_order(fragments, body):
+                return 'fragments'
+    return ''
+
+
 def materialize_reference(ref: dict, registry: dict) -> dict:
     source = registry[(ref['source_type'], ref['source_id'])]
     if ref['source_type'] == 'review':
@@ -88,6 +125,104 @@ def materialize_reference(ref: dict, registry: dict) -> dict:
     else:
         data = source
     return {'source_type': ref['source_type'], 'source_id': ref['source_id'], 'data': data}
+
+
+def normalize_unit(value: Any) -> float | None:
+    """Bring an out-of-contract score into 0..1 without changing its order.
+
+    The wire schema cannot carry minimum/maximum on nested fields (some Flash
+    versions answer HTTP 400), so a model may legitimately answer on a 0–100 scale.
+    1..100 is read as a percentage; above 100 saturates at 1; negative saturates at 0.
+    Anything non-numeric stays untouched and is rejected by the schema check.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    if value < 0:
+        return 0.0
+    if value <= 1:
+        return float(value)
+    if value <= 100:
+        return value / 100
+    return 1.0
+
+
+SCORE_FIELDS = ('interestingness', 'confidence')
+
+
+# Collection names a model naturally copies from the payload, mapped to the evidence vocabulary.
+SOURCE_ALIASES = {'film': 'film', 'films': 'film', 'ratings': 'film', 'watched': 'film', 'watchlist': 'film',
+                  'review': 'review', 'reviews': 'review', 'diary': 'diary', 'diary_entries': 'diary',
+                  'tag': 'tag', 'tags': 'tag', 'list': 'list', 'lists': 'list',
+                  'rewatch': 'rewatch', 'rewatches': 'rewatch', 'finding': 'finding', 'findings': 'finding',
+                  'deterministic_findings': 'finding', 'stats': 'stats', 'overview': 'stats'}
+ROUNDING_TOLERANCE = 5e-3  # 0.5%: accepts 1.67 for 1.6667, rejects an invented 4.2 for 3.8
+
+
+def canonical_source(value: Any) -> str | None:
+    return SOURCE_ALIASES.get(str(value).strip().casefold())
+
+
+def resolve_field(record: dict, path: str) -> tuple[Any, str]:
+    """Documented dot path first, then a unique match by field name anywhere in the record."""
+    try:
+        return field_value(record, path), 'exact_path'
+    except (KeyError, IndexError, TypeError):
+        leaf = path.split('.')[-1]
+        matches: list[Any] = []
+
+        def walk(value: Any) -> None:
+            if len(matches) > 1:
+                return
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key == leaf:
+                        matches.append(item)
+                    walk(item)
+            elif isinstance(value, list):
+                for item in value:
+                    walk(item)
+
+        walk(record)
+        if len(matches) == 1:
+            return matches[0], 'unique_name_match'
+        raise KeyError(path)
+
+
+def normalize_candidate(item: dict) -> tuple[dict, dict]:
+    """Clamp scores to 0..1 and bound arrays to the documented maxima, recording every change."""
+    candidate = dict(item)
+    notes: dict[str, Any] = {}
+    scales = {}
+    for field in SCORE_FIELDS:
+        value = candidate.get(field)
+        normalized = normalize_unit(value)
+        if normalized is not None and normalized != value:
+            candidate[field] = normalized
+            scales[field] = 'percent_to_unit' if isinstance(value, (int, float)) and value > 1 else 'saturated'
+    if scales:
+        notes['score_normalization'] = scales
+    aliases = {}
+    for group in ('evidence', 'numeric_claims'):
+        for ref in candidate.get(group) or []:
+            if not isinstance(ref, dict):
+                continue
+            canonical = canonical_source(ref.get('source_type'))
+            if canonical and canonical != ref.get('source_type'):
+                aliases[ref['source_type']] = canonical
+                ref['source_type'] = canonical
+    if aliases:
+        notes['source_type_aliases'] = aliases
+    bounds = SEMANTIC_SCHEMA['properties']['semantic_findings']['items']['properties']
+    bounded = {}
+    for field, schema in bounds.items():
+        limit = schema.get('maxItems')
+        value = candidate.get(field)
+        if limit and isinstance(value, list) and len(value) > limit:
+            candidate[field] = value[:limit]
+            bounded[field] = {'returned': len(value), 'kept': limit}
+    if bounded:
+        notes['bounded_lists'] = bounded
+    return candidate, notes
 
 
 def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], list[dict]]:
@@ -104,13 +239,18 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
     seen: set[str] = set()
     schema = SEMANTIC_SCHEMA['properties']['semantic_findings']['items']
     for item in parsed['semantic_findings']:
+        item, notes = normalize_candidate(item) if isinstance(item, dict) else (item, {})
         errors = schema_errors(item, schema)
         if errors:
             rejected.append({'candidate': item, 'errors': errors})
             continue
-        if not item['id'].startswith('semantic_') or item['id'] in seen:
+        # The ID only has to be a usable, unique key; the prefix is a prompt convention.
+        identifier = item['id'] if isinstance(item['id'], str) else ''
+        if not identifier.strip() or any(c.isspace() for c in identifier) or identifier in seen:
             errors.append('invalid or duplicate semantic ID')
-        seen.add(item['id'])
+        if not identifier.startswith('semantic_') and 'invalid' not in ' '.join(errors):
+            notes['id_convention'] = 'kept a non-standard ID; the prompt asks for semantic_NNN'
+        seen.add(identifier)
         if not item['observation'].strip() or not item['why_interesting'].strip():
             errors.append('empty observation')
         prose = item['observation'] + ' ' + item['why_interesting']
@@ -130,8 +270,12 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
             cited.add(key)
             quote = ref['quote']
             texts = strings(registry[key])
-            if quote and not any(quote in t or quote in plain_text(t) for t in texts):
-                errors.append(f'quote not found: {key}')
+            if quote:
+                style = quote_style(quote, texts)
+                if not style:
+                    errors.append(f'quote not found: {key}')
+                elif style == 'fragments':
+                    notes.setdefault('quote_style', {})[f'{key[0]}:{key[1]}'] = 'excerpt_with_ellipsis'
             if ref['source_type'] == 'review' and (not quote.strip() or len(quote) > 1000):
                 errors.append('review evidence needs an exact excerpt of 1–1000 characters')
             materialized.append(materialize_reference(ref, registry))
@@ -160,7 +304,7 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
             if set(item['film_keys']) - members:
                 errors.append('list_meaning references films outside the cited list membership')
         if re.search(r'\b(?:sessões|sessão|sessions?|rewatches)\b', item['observation'], re.I):
-            if not any(kind in {'diary', 'rewatch'} or (kind == 'finding' and registry[(kind, sid)]['type'] == 'rewatch')
+            if not any(kind in {'diary', 'rewatch'} or (kind == 'finding' and registry[(kind, sid)]['type'] in {'rewatch', 'tag_rating_difference'})
                        for kind, sid in cited):
                 errors.append('session claims require diary or rewatch evidence; reviews are not sessions')
         # Any number already present in a cited source is grounded. numeric_claims
@@ -169,12 +313,25 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
         numeric_values = set()
         for key in cited:
             numeric_values.update(evidence_numbers(registry[key]))
+        for fid in item['film_keys']:
+            if ('film', fid) in registry:
+                numeric_values.update(evidence_numbers(registry[('film', fid)]))
         for claim in item['numeric_claims']:
             key = (claim['source_type'], claim['source_id'])
             try:
-                actual = field_value(registry[key], claim['field'])
-                if key not in cited or type(actual) not in (int, float) or not math.isclose(actual, claim['value'], abs_tol=1e-8):
+                # The claim must be for a cited evidence record, a referenced film, or an account-level finding/stat
+                is_grounded_target = (key in cited) or (key[0] == 'film' and key[1] in item['film_keys']) or (key[0] in {'stats', 'finding'})
+                if not is_grounded_target:
                     raise ValueError
+                actual, resolution = resolve_field(registry[key], claim['field'])
+                if type(actual) not in (int, float):
+                    raise ValueError
+                if not math.isclose(actual, claim['value'], abs_tol=1e-8):
+                    if not math.isclose(actual, claim['value'], rel_tol=ROUNDING_TOLERANCE):
+                        raise ValueError
+                    notes.setdefault('numeric_tolerance', 'relative_0.5%')
+                if resolution != 'exact_path':
+                    notes.setdefault('field_resolution', {})[claim['field']] = resolution
                 numeric_values.add(float(actual))
             except (KeyError, IndexError, ValueError, TypeError):
                 errors.append('numeric claim does not match cited field')
@@ -190,7 +347,8 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
         if errors:
             rejected.append({'candidate': item, 'errors': errors})
         else:
-            accepted.append({**item, 'resolved_evidence': materialized, 'validation': 'references_quotes_numbers_checked'})
+            accepted.append({**item, 'resolved_evidence': materialized, **notes,
+                             'validation': 'references_quotes_numbers_checked'})
     return accepted, rejected
 
 
