@@ -1,8 +1,101 @@
-# Judge My Letterboxd — Backend Prototype
+# Judge My Letterboxd
 
-Protótipo de terminal em Python. O ZIP oficial é interpretado localmente; o Gemini
-recebe JSON. Sem frontend, Flask, banco de dados, scraping ou API externa de filmes.
-O terminal usa Rich para painéis, tabelas, cores e indicador de leitura.
+Experiência web em HTML/CSS/JavaScript e pipeline local em Python. O terminal continua
+funcionando com Rich; o frontend reproduz o contrato `presentation-v1` do Python.
+
+## Frontend web
+
+```powershell
+python -m http.server 8080 --bind 127.0.0.1
+```
+
+Abra http://localhost:8080 e http://localhost:8080/?demo=1. Não use `file://`.
+O servidor estático serve a interface e a demo; não executa Pages Functions.
+O upload só envia após o CTA. `/api/judge` é uma fronteira explícita: a Function
+retorna 501 até a integração com um serviço de análise. Nesse caso a interface
+oferece a demo, sem inventar um julgamento do arquivo enviado.
+
+### Arquitetura e reprodução
+
+- `index.html`, `css/`: landing, upload, loading, narrativa e final; identidade original,
+  fontes do sistema, layout estreito, teclado e reduced motion.
+- `js/app.js`: estados e cancelamento; `api.js`: multipart `export` + `locale`,
+  timeout e erros; `upload.js`: extensão, assinatura ZIP e limite inicial de 50 MB.
+  Isso não substitui a validação completa do ZIP no futuro backend.
+- `chat-renderer.js` e `animations.js`: fila assíncrona, pausa, 1×/1.5×/2×,
+  skip, digitação rápida, raros erros cosméticos corrigidos e strike sem Markdown.
+  Os tempos ficam em `timing`. Ao subir a página, o acompanhamento automático para.
+- `event-renderer.js`: evidências tipadas, sem HTML da IA; reviews estruturadas
+  são construídas com elementos seguros. Eventos desconhecidos são ignorados.
+- `i18n.js`: interface pt-BR/en-US, com detecção do navegador. O roteiro nunca é traduzido.
+- `opening.top_four` contém identidade dos favoritos; `cue: top_four_reveal` na
+  mensagem de apresentação dispara a faixa antes de `role: archetype_phrase`.
+  A faixa permanece no histórico. Zero a quatro favoritos são suportados.
+- `poster-service.js`: URL fornecida → memória/localStorage (7 dias) →
+  `/api/poster` → cartaz abstrato com título e ano. Resolução lazy por proximidade
+  do viewport; só favoritos são antecipados. Falhas não interrompem o player.
+- `functions/api/poster.js`: consulta TMDB no servidor, aceita apenas correspondência
+  exata de título/ano e única; resultados ambíguos usam fallback. Cache HTTP de 7 dias
+  para sucesso e curto para falhas. Nenhum rating ou evidência é alterado.
+
+### Atualizar a demo
+
+```powershell
+python app.py
+python scripts/update-demo.py
+```
+
+A fixture deriva da saída real, preservando falas e evidências. O script remove
+diagnósticos e metadados internos de IA. Para outputs legados `opening_v1`, recupera
+os favoritos de `final_writer_request.json` e marca as posições estruturais da
+abertura, sem comparar textos. Não altera `output/`. A fixture contém nome público,
+filmes e trechos reais de reviews: revise seu conteúdo antes de publicar.
+
+### Cloudflare Pages
+
+Use o repositório, branch `main`, root directory `/`, build command
+`python scripts/prepare-web.py` e output directory `dist`. Esse comando só copia
+uma lista permitida de assets; não transpila nem empacota JavaScript. **Não publique
+a raiz do repositório**, pois contém exports e outputs locais. Não coloque arquivos
+privados em `dist/`. `functions/` fica na raiz, como esperado pelo Pages.
+
+```powershell
+python scripts/prepare-web.py
+npx wrangler pages dev dist
+# Depois de criar/configurar seu projeto Pages:
+npx wrangler pages deploy dist --project-name judge-my-letterboxd
+```
+
+O `_routes.json` envia somente `/api/*` às Functions. Configure `TMDB_API_KEY`
+como secret nas configurações do Pages; localmente use `.dev.vars` (ignorado).
+`GEMINI_API_KEY` continua no backend Python; só será necessária no serviço web
+quando ele existir. Não inserir secrets no código público nem commitar `.env`.
+Referências oficiais: [desenvolvimento local](https://developers.cloudflare.com/pages/functions/local-development/),
+[rotas](https://developers.cloudflare.com/pages/functions/routing/),
+[busca TMDB](https://developer.themoviedb.org/reference/search-movie).
+
+### Testes web
+
+```powershell
+npm ci
+npx playwright install chromium firefox webkit
+npm run test:web
+# Com o servidor estático na porta 8080 em outro terminal:
+npm run test:browser
+# Opcional, após instalar os três navegadores:
+$env:ALL_BROWSERS='1'; npm run test:browser
+```
+
+Playwright é apenas ferramenta de desenvolvimento; o site não tem dependências JS.
+`/web-tests/harness.html` exercita todos os tipos, títulos/reviews longos, nota e
+pôster ausentes, markup hostil e favoritos. O smoke automatizado usa 360×800,
+390×844, 768×1024, 1366×768 e 1920×1080; screenshots ficam em
+`web-tests/artifacts/` (ignorado). O harness não é copiado para produção.
+
+Compartilhamento usa Web Share, clipboard ou download de texto; não há URL persistida.
+O SVG de Open Graph é um placeholder: algumas redes exigem PNG/JPEG para preview.
+Sem secret TMDB os cartazes usam fallback. A demo é pt-BR, mesmo com UI em inglês.
+O backend de análise web, persistência e deployment real não fazem parte desta etapa.
 
 ## Princípio: conteúdo é uma coisa, apresentação é outra
 

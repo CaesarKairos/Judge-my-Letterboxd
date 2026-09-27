@@ -258,6 +258,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     save(output / 'model_discovery.json', discovery_payload)
     plan = build_plan(profile, analysis['overview'], locale)
     top_four = top_four_favorites(profile, ids)
+    plan['top_four'] = [{k: film[k] for k in ('film_key', 'title', 'year')} for film in top_four]
     plan['archetype_requested'] = len(top_four) == ARCHETYPE_FILMS
     plan['top_four_archetype']['requested'] = plan['archetype_requested']
     if plan['archetype_requested']:

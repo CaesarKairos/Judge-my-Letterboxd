@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101619"><meta name="description" content="Seu diário de filmes tem coisas a explicar. Uma experiência cinematográfica julgando seu Letterboxd.">
+  <meta property="og:title" content="Judge My Letterboxd"><meta property="og:description" content="Todo mundo é crítico. Até ser criticado."><meta property="og:image" content="/images/og-image.svg">
+  <title>Judge My Letterboxd</title><link rel="icon" href="/images/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content / Ir ao conteúdo</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Judge My Letterboxd"><img src="/images/icon.svg" width="30" height="30" alt=""><span>JUDGE MY<br><b>LETTERBOXD</b></span></a>
+    <nav id="landing-nav" aria-label="Navigation"><a href="#about" data-i18n="about">Sobre</a><a href="#how" data-i18n="how">Como funciona</a><a href="https://github.com/CaesarKairos/Judge-my-Letterboxd" target="_blank" rel="noopener">GitHub ↗</a></nav>
+    <label class="language"><span class="sr-only">Language / Idioma</span><select id="locale"><option value="pt-BR">PT</option><option value="en-US">EN</option></select></label>
+    <details id="controls" class="controls" hidden><summary data-i18n="controls">Controles</summary><div><button id="pause" data-i18n="pause">Pausar</button><button id="speed" aria-label="Playback speed / Velocidade">1×</button><button id="skip" data-i18n="skip">Pular animações</button><button id="restart" data-i18n="restart">Recomeçar</button></div></details>
+  </header>
+  <main id="main">
+    <section id="landing" class="screen landing">
+      <div class="hero-art" aria-hidden="true"><div class="art-poster art-one"><span>01 / A FILM BY YOU</span><b>THE<br>HUMAN<br>CONDITION</b><i>★★★★★</i></div><div class="art-poster art-two"><span>ANOTHER REWATCH</span><div class="orbit"></div><b>STILL<br>FEELING<br>NOTHING.</b><i>★★½</i></div><div class="art-poster art-three"><span>CINEMA, APPARENTLY</span><b>GOOD<br>BAD<br>TASTE</b><i>★★★★★</i></div></div>
+      <div class="hero-copy"><p class="eyebrow"><span class="status-dot"></span> <span data-i18n="eyebrow">SEU GOSTO ESTÁ EM JULGAMENTO</span></p><h1><span data-i18n="hero">Todo mundo é crítico.</span><br><em data-i18n="punch">Até ser criticado.</em></h1><p class="intro" data-i18n="sub">Anos de escolhas cinematográficas. Uma IA sem muita delicadeza. Seu diário tem coisas a explicar.</p></div>
+      <form id="upload-form" class="upload-panel">
+        <div id="dropzone" class="dropzone"><span class="upload-symbol" aria-hidden="true">↥</span><strong data-i18n="drop">Arraste seu export para cá</strong><label class="file-button"><span data-i18n="choose">Escolher arquivo .zip</span><input id="export" type="file" accept=".zip,application/zip" aria-label="Letterboxd export ZIP"></label><small data-i18n="limit">ZIP do Letterboxd · até 50 MB</small></div>
+        <div id="selected" class="selected" hidden><span aria-hidden="true">▤</span><div><strong id="file-name"></strong><small id="file-size"></small></div><button type="button" id="remove" data-i18n="remove">Remover</button></div>
+        <p id="upload-error" class="error-copy" role="alert"></p><button id="judge" class="primary" disabled><span data-i18n="judge">Julgar meu Letterboxd</span><span aria-hidden="true">↗</span></button><p class="privacy" data-i18n="privacy">Seu export é usado para gerar o julgamento.</p>
+      </form>
+      <button id="demo" class="text-button demo-link" data-i18n="demo">Só quero ver uma demonstração ↗</button>
+      <div class="landing-info"><details id="how"><summary data-i18n="exportHelp">Como consigo meu export?</summary><p data-i18n="instructions"></p></details><details id="about"><summary data-i18n="about">Sobre</summary><p data-i18n="aboutText"></p></details></div>
+    </section>
+    <section id="analyzing" class="screen narrow analyzing" hidden><p class="eyebrow" data-i18n="session"></p><h2 tabindex="-1" data-i18n="analyzing"></h2><div id="loading-dots"></div><p id="loading-copy" class="loading-copy" role="status"></p><div class="indeterminate" aria-hidden="true"></div><p class="muted" data-i18n="loadingNote"></p><button id="cancel" class="text-button" data-i18n="back"></button></section>
+    <section id="error" class="screen narrow error-screen" hidden><p class="eyebrow">OUTTAKE / 01</p><h2 tabindex="-1" data-i18n="errorTitle"></h2><p id="error-message" role="alert"></p><div class="actions"><button id="retry" class="primary" data-i18n="retry"></button><button id="error-demo" data-i18n="demoAction"></button><button id="error-back" data-i18n="back"></button></div></section>
+    <section id="judgment" class="screen narrow judgment" hidden><div class="chat-heading"><span class="status-dot"></span><span data-i18n="session"></span><span id="demo-label" data-i18n="demoLabel" hidden></span></div><div id="chat" aria-label="Judge"></div><section id="ending" class="ending" hidden><span class="end-mark" aria-hidden="true">✳</span><h2 data-i18n="done"></h2><div class="actions"><button id="another" class="primary" data-i18n="another"></button><button id="replay" data-i18n="replay"></button><button id="show-all" data-i18n="all"></button><button id="share" data-i18n="share"></button></div><p id="share-status" role="status"></p></section></section>
+  </main>
+  <button id="bottom" class="back-bottom" data-i18n="bottom" hidden></button><p id="announce" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  <footer><span data-i18n="footer"></span><span>JML / EST. 2026</span><small data-i18n="posterCredit"></small></footer>
+  <noscript>Ative o JavaScript para reproduzir o julgamento. Enable JavaScript to play the judgment.</noscript>
+</body>
+</html>

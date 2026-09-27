@@ -30,6 +30,18 @@ def moment(display, **extra):
 
 
 class OpeningTests(unittest.TestCase):
+    def test_web_favorites_cue_precedes_archetype_and_metadata_survives(self):
+        built = plan(top_four=[{'film_key': 'synthetic', 'title': 'Fixture', 'year': '2000'}])
+        built['opening_events'] = build_events(built, 'synthetic archetype', [], LOCALE)
+        events = built['opening_events']
+        self.assertEqual(events[3]['cue'], 'top_four_reveal')
+        self.assertEqual(events[4]['role'], 'archetype_phrase')
+        result = build_presentation(built, [], None, {}, {}, LOCALE)
+        self.assertEqual(result['opening']['top_four'], built['top_four'])
+        self.assertEqual(validate_presentation(result), [])
+        short = build_events(built, None, [], LOCALE)
+        self.assertEqual(short[1]['cue'], 'top_four_reveal')
+
     def test_opening_sequence_is_typing_message_strike_correction_and_stats(self):
         events = build_events(plan(), 'espacial-adolescente', [], LOCALE)
         kinds = [event['type'] for event in events]
