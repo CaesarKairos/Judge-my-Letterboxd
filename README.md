@@ -309,11 +309,20 @@ Score continua heurístico e transparente: amostra logarítmica + magnitude limi
 Confiança de amostras pequenas reduz o peso de seleção; não é certeza científica.
 
 O Analyst recebe o `raw_export` inteiro, fiel ao ZIP, além de um índice normalizado
-com IDs curtos usado para validação e citações. Não existe mais priorização/truncamento
-silencioso do dataset: se o pacote completo exceder `MAX_CONTEXT_CHARS`, a execução
-falha de forma explícita e pede aumento do limite. O JSON bruto inclui inclusive
-`deleted/` e `orphaned/` para contexto histórico, mas o prompt proíbe tratá-los como
-estado ativo da conta.
+com IDs curtos usado para validação e citações. Não existe priorização/truncamento
+silencioso do dataset: se o pacote completo exceder `MAX_CONTEXT_CHARS`, o Analyst não
+é chamado e a execução continua marcada (`context_too_large`) com a apresentação
+estrutural local, dizendo exatamente quanto foi excedido. Duas saídas: aumentar
+`MAX_CONTEXT_CHARS` ou definir `ANALYST_RAW_EXPORT=0` para enviar só o índice
+normalizado, sem o ZIP bruto (~200 mil caracteres no export de referência). O JSON
+bruto inclui inclusive `deleted/` e `orphaned/` para contexto histórico, mas o prompt
+proíbe tratá-los como estado ativo da conta.
+
+Dois ajustes deixam o veredito do Analyst mais estável sem afrouxar a evidência: notas
+de 0–100 são lidas como porcentagem e viraram 0–1 (`score_normalization` registra cada
+normalização em `semantic_findings.json`) e arrays acima do teto do schema são cortados
+no limite documentado (`bounded_lists` registra quanto veio e quanto ficou). IDs, quotes,
+números, vínculo de filmes, tags e listas continuam sendo checados um por um.
 
 O validator verifica schema/tipos/faixas, IDs, vínculo dos filmes às fontes,
 tags/listas citadas, trechos exatos e numeric_claims com caminhos de campos e valores

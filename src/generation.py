@@ -38,6 +38,7 @@ class GenerationConfig:
     fallback_models: tuple[str, ...] = ()
     discover_models: bool = True
     humor_templates: bool = False
+    include_raw_export: bool = True
 
     @classmethod
     def from_env(cls) -> 'GenerationConfig':
@@ -47,7 +48,8 @@ class GenerationConfig:
                      int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
                      float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models(),
                      os.getenv('MODEL_DISCOVERY', '1') not in {'0', 'false', 'no'},
-                     os.getenv('JUDGE_HUMOR_TEMPLATES', '0') in {'1', 'true', 'yes'})
+                     os.getenv('JUDGE_HUMOR_TEMPLATES', '0') in {'1', 'true', 'yes'},
+                     os.getenv('ANALYST_RAW_EXPORT', '1') not in {'0', 'false', 'no'})
         if not 1 <= config.max_beats <= 12 or not 1 <= config.max_lines <= 3 or not 2 <= config.max_words <= 40:
             raise ValueError('Limites inválidos: beats 1–12; linhas 1–3; palavras 2–40.')
         if not 0 <= config.analyst_temperature <= 2 or not 0 <= config.writer_temperature <= 2:
@@ -114,17 +116,28 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     locale = bundle(config.language)
     analyst_prompt = (root / 'prompts' / 'analyst.txt').read_text(encoding='utf-8')
     writer_prompt = (root / 'prompts' / 'writer.txt').read_text(encoding='utf-8')
-    context, message = build_context(profile, analysis, findings, analyst_prompt, config.max_context,
-                                     config.language, raw_export)
+    context, message = None, ''
+    context_error = ''
+    try:
+        context, message = build_context(profile, analysis, findings, analyst_prompt, config.max_context,
+                                         config.language, raw_export if config.include_raw_export else None)
+    except ValueError as exc:
+        # Explicit, never silent: the run continues, but with structural content only.
+        context_error = str(exc)
+        report(context_error)
+        report('Sem contexto dentro do orçamento, o Analyst não é chamado; o roteiro local é preservado.')
     # The pool/validator only needs the normalized evidence index; raw_export is already
     # present in the Analyst request and is intentionally not duplicated here.
     full_dataset = build_dataset(profile, analysis, findings, config.language)
     ids = film_ids(profile)
     save(output / 'ai_id_map.json', ids)
-    (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
-    request = make_request(config.model, analyst_prompt, message, config.analyst_temperature, 'analyst',
-                           config.fallback_models)
-    save(output / 'ai_request.json', request)
+    if not context_error:
+        (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
+        request = make_request(config.model, analyst_prompt, message, config.analyst_temperature, 'analyst',
+                               config.fallback_models)
+        save(output / 'ai_request.json', request)
+    else:
+        request = None
     state: dict = {'status': 'running', 'analyst': 'pending', 'writer': 'pending', 'judgment_generated': False,
                    'model': config.model, 'fallback_models': list(config.fallback_models),
                    'locale': locale.locale, 'calls': 0,
@@ -133,11 +146,22 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     if status_path.exists():
         state['previous_run'] = json.loads(status_path.read_text(encoding='utf-8')).get('previous_run')
     save(output / 'run_status.json', state)
-    report(f"Contexto Analyst COMPLETO: {len(analyst_prompt) + len(message):,} caracteres; "
-           f"{context['coverage']['raw_export_files']} arquivos do ZIP; "
-           f"{len(context['reviews'])}/{len(profile.reviews)} reviews no índice normalizado; sem truncamento.")
+    if not context_error:
+        source = (f"{context['coverage']['raw_export_files']} arquivos do ZIP bruto + índice normalizado"
+                  if context['coverage']['raw_export_included'] else 'somente índice normalizado (ANALYST_RAW_EXPORT=0)')
+        report(f"Contexto Analyst: {len(analyst_prompt) + len(message):,} caracteres; {source}; "
+               f"{len(context['reviews'])}/{len(profile.reviews)} reviews; sem truncamento.")
     semantic, rejected, failed = [], [], False
-    if dry_run or not api_key:
+    if context_error:
+        state['analyst'] = 'failed'
+        state['analyst_error_type'] = 'ContextBudgetExceeded'
+        state['error'] = {'type': 'ContextBudgetExceeded', 'code': None, 'reason': 'context_too_large',
+                          'message': context_error,
+                          'hint': 'Aumente MAX_CONTEXT_CHARS no .env ou defina ANALYST_RAW_EXPORT=0 para enviar '
+                                  'somente o índice normalizado.'}
+        failed = True
+        report(state['error']['hint'])
+    elif dry_run or not api_key:
         state['analyst'] = 'skipped'
         state['gemini'] = 'skipped'
         state['reason'] = '--dry-run' if dry_run else 'GEMINI_API_KEY não configurada'
@@ -328,12 +352,16 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 f'{reason}\nConsulte run_status.json; execuções anteriores em output/runs/.\n\n{text}')
     (output / 'judgment.txt').write_text(text, encoding='utf-8', newline='')
     ai_done = render['ai_generation'] == 'complete'
-    state['status'] = 'partial' if failed else ('complete' if ai_done else 'local_only')
+    state['status'] = ('context_too_large' if context_error else
+                       'partial' if failed else ('complete' if ai_done else 'local_only'))
     state['writer'] = 'complete' if ai_done else state['writer']
     state['judgment_generated'] = ai_done
     save(output / 'run_status.json', state)
     save(output / 'debug_report.txt', {'inventory': profile.inventory, 'warnings': profile.warnings,
-                                       'coverage': context['coverage'], 'model_discovery': discovery_payload,
+                                       'coverage': context['coverage'] if context else
+                                       {'complete': False, 'truncated': False, 'raw_export_included': False,
+                                        'reason': 'context_over_budget'},
+                                       'model_discovery': discovery_payload,
                                        'render': render, 'run': state})
     return script, text, failed
 

@@ -129,13 +129,20 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(context['reviews']), len(profile.reviews))
         self.assertEqual(context['reviews'][0]['text'], profile.reviews[0].text)
         self.assertNotIn('private@example.com', text)
-        context, text = build_context(profile, analysis, findings, 'system', 6500, 'pt-BR')
-        self.assertLessEqual(len(text) + len('system'), 6500)
-        self.assertTrue(any(context['coverage']['omitted'].values()))
-        for review in context['reviews']:
-            self.assertIn(review['text'], [r.text for r in profile.reviews])
+        self.assertTrue(context['coverage']['complete'])
+        self.assertFalse(context['coverage']['truncated'])
+        # Sem orçamento, o pacote completo falha em vez de truncar em silêncio.
+        with self.assertRaises(ValueError) as raised:
+            build_context(profile, analysis, findings, 'system', 6500, 'pt-BR')
+        self.assertIn('MAX_CONTEXT_CHARS', str(raised.exception))
+        self.assertIn('ANALYST_RAW_EXPORT=0', str(raised.exception))
         with self.assertRaises(ValueError):
             build_context(profile, analysis, findings, 'system', 100, 'pt-BR')
+        # Sem o ZIP bruto o payload é menor, mas continua completo no índice normalizado.
+        normalized, normalized_text = build_context(profile, analysis, findings, 'system', 300000, 'pt-BR')
+        self.assertFalse(normalized['coverage']['raw_export_included'])
+        self.assertNotIn('raw_export', normalized)
+        self.assertEqual(len(normalized_text), len(text))
 
     def test_unresolved_favorite_does_not_invent_film(self):
         profile = self.export({'profile.csv': 'Favorite Films\nhttps://boxd.it/unknown\n'})

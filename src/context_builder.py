@@ -107,7 +107,8 @@ def build_context(profile: UserProfile, analysis: dict, findings: list[Finding],
     actual = len(system) + len(message)
     if actual > max_chars:
         raise ValueError(
-            f'O contexto completo do export tem {actual:,} caracteres e MAX_CONTEXT_CHARS={max_chars:,}. '
-            'Nada foi truncado. Aumente MAX_CONTEXT_CHARS para enviar o ZIP inteiro à IA.'
+            f'O contexto completo do export tem {actual:,} caracteres e MAX_CONTEXT_CHARS={max_chars:,} '
+            f'(excesso de {actual - max_chars:,}). Nada foi truncado. Aumente MAX_CONTEXT_CHARS ou rode com '
+            'ANALYST_RAW_EXPORT=0 para enviar apenas o índice normalizado, sem o ZIP bruto.'
         )
     return context, message

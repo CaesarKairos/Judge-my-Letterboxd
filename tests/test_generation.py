@@ -117,7 +117,7 @@ class GenerationTests(unittest.TestCase):
                    lambda c: c.update(related_lists=['missing']), lambda c: c['evidence'][0].update(quote='fabricated quotation'),
                    lambda c: c.update(observation='Possui 999 reviews.'), lambda c: c.update(evidence=[]),
                    lambda c: c.update(observation='Avaliou o filme antes do lançamento oficial.'),
-                   lambda c: c.update(confidence=2)]
+                   lambda c: c.update(confidence='alta')]
         for change in changes:
             with self.subTest(change=change):
                 item = deepcopy(base)
@@ -125,6 +125,25 @@ class GenerationTests(unittest.TestCase):
                 valid, invalid = self.validate(item)
                 self.assertFalse(valid)
                 self.assertTrue(invalid)
+
+    def test_out_of_range_scores_and_long_lists_are_normalized_not_rejected(self):
+        base = semantic_candidate(self.dataset)
+        grounded = self.dataset['reviews'][0]['film_key']
+        item = deepcopy(base)
+        item.update(interestingness=88, confidence=95, film_keys=[grounded] * 19)
+        valid, invalid = self.validate(item)
+        self.assertFalse(invalid)
+        self.assertEqual(valid[0]['interestingness'], .88)
+        self.assertEqual(valid[0]['confidence'], .95)
+        self.assertEqual(valid[0]['score_normalization'],
+                         {'interestingness': 'percent_to_unit', 'confidence': 'percent_to_unit'})
+        self.assertEqual(valid[0]['bounded_lists'], {'film_keys': {'returned': 19, 'kept': 8}})
+        saturated = deepcopy(base)
+        saturated.update(interestingness=400, confidence=-3)
+        valid, _ = self.validate(saturated)
+        self.assertEqual(valid[0]['interestingness'], 1.0)
+        self.assertEqual(valid[0]['confidence'], 0.0)
+        self.assertFalse(build_pool(self.dataset, valid)[0]['confidence'] > 1)
 
     def test_numeric_claim_field_binding(self):
         item = semantic_candidate(self.dataset)
