@@ -1,7 +1,5 @@
 """Auditable pipeline: Analyst -> Editorial Moments -> Script Engine -> one Final Writer -> Presentation."""
-from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 from typing import Callable
 
@@ -24,51 +22,6 @@ from .utils import dumps
 from .semantic_validator import validate_semantic_findings
 
 ARCHETYPE_FILMS = 4
-
-
-@dataclass
-class _LegacyGenerationConfig:
-    model: str = 'gemini-flash-latest'
-    language: str = 'pt-BR'
-    max_context: int = 1000000
-    max_beats: int = 8
-    writer_max_context: int = 60000
-    max_lines: int = 3
-    max_words: int = 24
-    analyst_temperature: float = .2
-    writer_temperature: float = .7
-    fallback_models: tuple[str, ...] = ()
-    discover_models: bool = True
-    humor_templates: bool = False
-    include_raw_export: bool = True
-
-    @classmethod
-    def from_env(cls) -> 'GenerationConfig':
-        config = cls(os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), os.getenv('JUDGE_LANGUAGE', 'pt-BR'),
-                     int(os.getenv('MAX_CONTEXT_CHARS', '1000000')), int(os.getenv('SCRIPT_MAX_BEATS', '8')),
-                     int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '60000')), int(os.getenv('WRITER_MAX_LINES', '3')),
-                     int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
-                     float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models(),
-                     os.getenv('MODEL_DISCOVERY', '1') not in {'0', 'false', 'no'},
-                     os.getenv('JUDGE_HUMOR_TEMPLATES', '0') in {'1', 'true', 'yes'},
-                     os.getenv('ANALYST_RAW_EXPORT', '1') not in {'0', 'false', 'no'})
-        if not 1 <= config.max_beats <= 12 or not 1 <= config.max_lines <= 3 or not 2 <= config.max_words <= 40:
-            raise ValueError('Limites inválidos: beats 1–12; linhas 1–3; palavras 2–40.')
-        if not 0 <= config.analyst_temperature <= 2 or not 0 <= config.writer_temperature <= 2:
-            raise ValueError('Temperaturas devem estar entre 0 e 2.')
-        return config
-
-
-def fallback_models() -> tuple[str, ...]:
-    """GEMINI_FALLBACK_MODELS (vírgula ou espaço) sem repetir o modelo principal."""
-    declared = os.getenv('GEMINI_FALLBACK_MODELS', '') or os.getenv('GEMINI_FALLBACK_MODEL', '')
-    seen = {os.getenv('GEMINI_MODEL', 'gemini-flash-latest').strip()}
-    models = []
-    for candidate in declared.replace(',', ' ').split():
-        if candidate not in seen:
-            seen.add(candidate)
-            models.append(candidate)
-    return tuple(models)
 
 
 def failure_hint(code: int | None) -> str:
