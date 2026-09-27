@@ -68,8 +68,10 @@ def partition(models: list[dict]) -> tuple[list[str], list[dict]]:
 
 
 def build_chain(primary: str, configured: list[str], discovered: list[str],
-                limit: int = DISCOVERED_CHAIN_LIMIT) -> tuple[list[str], list[dict]]:
+                limit: int | None = None) -> tuple[list[str], list[dict]]:
     """Primary first; all remaining candidates are quality-ranked, with Lite last."""
+    if limit is None:
+        limit = int(os.getenv('MODEL_DISCOVERY_CHAIN_LIMIT', str(DISCOVERED_CHAIN_LIMIT)))
     rejected: list[dict] = []
     chain: list[str] = []
     combined = list(dict.fromkeys([*configured, *discovered]))
