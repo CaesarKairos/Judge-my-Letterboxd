@@ -53,11 +53,18 @@ def build_dataset(profile: UserProfile, analysis: dict, findings: list[Finding],
     reviews = [{'id': r.id, 'film_key': r.film_key, 'date': r.date, 'logged_date': r.logged_date,
                 'review_rating': r.rating, 'rewatch': r.rewatch, 'tags': r.tags, 'uri': r.uri, 'text': r.text}
                for r in profile.reviews]
-    tags = [{k: v for k, v in t.items() if k in {'tag', 'film_count', 'sessions', 'reviews',
-             'current_film_ratings', 'session_ratings', 'explicit_rewatches', 'unique_session_films',
+    tags = [{k: v for k, v in t.items() if k in {'tag', 'film_count', 'sessions', 'session_ids', 'reviews',
+             'review_ids', 'current_film_ratings', 'session_ratings', 'explicit_rewatches', 'unique_session_films',
              'rated_session_ids', 'film_keys'}} for t in analysis['tags']]
-    lists = [{k: v for k, v in item.items() if k in {'id', 'name', 'description', 'tags', 'members', 'film_count', 'ratings'}}
-             for item in analysis['lists']]
+    lists = [{k: v for k, v in item.items() if k in {
+                'id', 'name', 'description', 'tags', 'members', 'film_count', 'ratings',
+                'member_ratings', 'favorites', 'with_reviews', 'with_rewatches', 'member_details'
+             }} for item in analysis['lists']]
+    review_style = analysis.get('review_style') or {}
+    review_style_items = []
+    for group in ('phrases', 'openings', 'closings', 'intersections'):
+        review_style_items.extend(review_style.get(group, []))
+    review_style_items.extend((review_style.get('markup') or {}).values())
 
     normalized = redact(replace_keys({
         'task': ('Read the complete raw Letterboxd export, discover genuinely interesting editorial moments, '
@@ -73,9 +80,17 @@ def build_dataset(profile: UserProfile, analysis: dict, findings: list[Finding],
             'tags': 'contextual means use rated diary rows; association is not causation',
             'rewatch': 'explicit flags and observed repeats overlap; never add them',
             'unknown': 'null or missing is unknown; no external chronology/popularity is supplied',
-            'evidence_ids': 'film:key; review:id; diary:id; tag:tag; list:id; finding:id; stats:overview; rewatch:film_key',
+            'evidence_ids': ('film:key; review:id; diary:id; tag:tag; list:id; finding:id; '
+                             'stats:overview|review_coverage; rewatch:film_key; review_style:id'),
         },
         'stats': analysis['overview'],
+        'review_coverage': analysis.get('review_coverage', {}),
+        'rating_scale': analysis.get('rating_scale', {}),
+        'watchlist_summary': analysis.get('watchlist', {}),
+        'likes_summary': analysis.get('likes', {}),
+        'favorites': analysis.get('favorites', []),
+        'review_style': review_style,
+        'review_style_items': review_style_items,
         'films': films,
         'diary': diary,
         'reviews': reviews,
