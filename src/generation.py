@@ -19,7 +19,7 @@ from .resources import bundle
 from .run_storage import cache_response, no_judgment, read_cached
 from .script_engine import build_script, final_writer_input
 from .utils import dumps
-from .validator import validate_semantic_findings
+from .semantic_validator import validate_semantic_findings
 
 ARCHETYPE_FILMS = 4
 
