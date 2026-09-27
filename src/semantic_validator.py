@@ -264,6 +264,9 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
                 for kind, source_id in cited
             ):
                 errors.append('session claim lacks diary/rewatch/review_coverage evidence')
+            if any(word in item['observation'].casefold() for word in ('comentario', 'comentário', 'review', 'texto')):
+                if sum(kind == 'review' for kind, _ in cited) < 2:
+                    errors.append('session review comparison requires multiple review records')
 
         numbers: set[float] = set()
         for key in cited:
