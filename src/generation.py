@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from .ai_schemas import ANALYST_PROMPT_VERSION, WRITER_PROMPT_VERSION
+from .config_v2 import GenerationConfig
 from .context_builder import build_context, build_dataset, film_ids
 from .final_writer_v2 import validate_final_writer
 from .finding_pool import build_pool
@@ -26,7 +27,7 @@ ARCHETYPE_FILMS = 4
 
 
 @dataclass
-class GenerationConfig:
+class _LegacyGenerationConfig:
     model: str = 'gemini-flash-latest'
     language: str = 'pt-BR'
     max_context: int = 1000000
@@ -72,8 +73,8 @@ def fallback_models() -> tuple[str, ...]:
 
 def failure_hint(code: int | None) -> str:
     if code == 429:
-        return ('Cota esgotada não se recupera repetindo agora: aguarde o RPD renovar (meia-noite do Pacífico, '
-                '04h em Brasília), defina GEMINI_FALLBACK_MODELS no .env ou rode --no-analyst.')
+        return ('Cota esgotada não se recupera repetindo agora: aguarde o limite renovar ou configure '
+                'GEMINI_ANALYST_FALLBACK_MODELS / GEMINI_WRITER_FALLBACK_MODELS. Flash-Lite fica por último.')
     if code in (401, 403):
         return 'Credencial recusada: confira GEMINI_API_KEY no .env do projeto.'
     return ''
