@@ -1,6 +1,7 @@
 """Terminal orchestration; local measurements and AI stages remain separate."""
 import argparse
 from dataclasses import asdict
+import json
 import os
 from pathlib import Path
 import sys
@@ -22,8 +23,13 @@ ROOT = Path(__file__).resolve().parent
 console = Console(markup=False, highlight=False)
 GENERATED = ('profile_summary.json', 'extracted_profile.json', 'findings.json', 'deterministic_findings.json',
              'semantic_findings.json', 'semantic_validation.json', 'finding_pool.json', 'script.json',
-             'writer_inputs.json', 'judgment.json', 'ai_context.json', 'ai_request.json', 'ai_response.json',
-             'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt', 'run_status.json')
+             'editorial_moments.json', 'model_discovery.json', 'final_writer_request.json',
+             'final_writer_response.json', 'presentation_script.json', 'ai_context.json', 'ai_request.json',
+             'ai_response.json', 'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt',
+             'run_status.json')
+# Outputs da arquitetura antiga (uma chamada Writer por beat): removidos sem arquivar,
+# porque o equivalente atual vive em editorial_moments/final_writer_response/presentation.
+RETIRED = ('writer_inputs.json', 'judgment.json')
 
 
 def choose_zip(directory: Path) -> Path | None:
@@ -61,13 +67,35 @@ def show_profile(analysis: dict, findings: list, show_all: bool) -> None:
         console.print(Text(f'  {finding.score:3} · {finding.summary}'))
 
 
-def show_script(script: dict) -> None:
-    table = Table(title='Roteiro selecionado pelo Python', header_style='bold cyan')
-    for label in ('#', 'Tipo', 'Origem', 'Finding'):
+def show_moments(moments: list[dict]) -> None:
+    table = Table(title='Momentos editoriais selecionados pelo Python (display-first)', header_style='bold cyan')
+    for label in ('#', 'Tipo', 'Papel', 'Display', 'Origem', 'Finding'):
         table.add_column(label)
-    for beat in script['beats']:
-        table.add_row(str(beat['position']), beat['beat_type'], beat['origin'], Text(', '.join(beat['finding_ids']) or 'overview'))
+    for moment in moments:
+        table.add_row(moment['beat_id'], moment['moment_type'], moment.get('role', 'moment'),
+                      moment['display'].get('kind', '-'), moment['origin'],
+                      Text(', '.join(moment['finding_ids'])))
     console.print(table)
+
+
+def show_presentation(script: dict) -> None:
+    """Read the experience as the frontend will: typing, pause, correction, data, reaction."""
+    from src.presentation import event_text
+
+    console.rule('EXPERIÊNCIA (presentation_script.json)', style='magenta')
+    for event in script['events']:
+        kind, text = event['type'], event_text(event).strip()
+        if kind == 'typing':
+            console.print(Text(f'  … ({event["duration"]})', style='dim'))
+        elif kind == 'pause':
+            console.print(Text('  ·', style='dim'))
+        elif kind in {'correction', 'strike'}:
+            console.print(Text(f'  {text}', style='yellow'))
+        elif kind == 'message':
+            console.print(Text(f'  {text}'))
+        else:
+            console.print(Text(f'  [{kind}] {text}', style='cyan'))
+    console.rule(style='magenta')
 
 
 def run() -> int:
@@ -77,10 +105,12 @@ def run() -> int:
     parser.add_argument('--no-analyst', action='store_true',
                         help='Pula o Analyst e escreve o julgamento apenas com findings determinísticos')
     parser.add_argument('--show-findings', action='store_true', help='Mostra todos os findings determinísticos')
+    parser.add_argument('--show-events', action='store_true', help='Mostra o presentation_script.json completo')
     args = parser.parse_args()
     load_dotenv(ROOT / '.env')
     config = GenerationConfig.from_env()
-    console.print(Panel(Text('Judge My Letterboxd\nBackend Prototype · Analyst → Script Engine → Writer'), border_style='cyan'))
+    console.print(Panel(Text('Judge My Letterboxd\nBackend · Analyst → Momentos → Script Engine → Final Writer → Presentation'),
+                        border_style='cyan'))
     path = choose_zip(Path.cwd())
     if path is None:
         return 0
@@ -88,6 +118,8 @@ def run() -> int:
     output.mkdir(exist_ok=True)
     previous = archive_run(output, GENERATED)
     for name in GENERATED:
+        (output / name).unlink(missing_ok=True)
+    for name in RETIRED:
         (output / name).unlink(missing_ok=True)
     no_judgment(output, 'A geração ainda não foi concluída.')
     save(output / 'run_status.json', {'status': 'started', 'previous_run': previous})
@@ -107,11 +139,15 @@ def run() -> int:
                                         os.getenv('GEMINI_API_KEY', '').strip(), args.dry_run,
                                         args.analyze_only, args.no_analyst,
                                         lambda text: console.print(Text(text)))
-    show_script(script)
-    if judgment:
-        console.rule('JUDGMENT', style='cyan')
-        console.print(Text(judgment))
-        console.rule(style='cyan')
+    show_moments(script['moments'])
+    presentation = json.loads((output / 'presentation_script.json').read_text(encoding='utf-8'))
+    show_presentation(presentation)
+    if args.show_events:
+        console.print(Text(json.dumps(presentation, ensure_ascii=False, indent=2)))
+    console.print(f"Chamadas de IA: {presentation['ai'].get('calls', 0)}"
+                  f" (origin: {presentation['ai'].get('origin', 'none')},"
+                  f" modelo: {presentation['render'].get('served_model') or presentation['render']['model']})",
+                  style='green')
     console.print('Arquivos de auditoria salvos em output/', style='green')
     if failed:
         console.print('Execução parcial: consulte run_status.json e as validações por etapa.', style='yellow')

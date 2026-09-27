@@ -1,7 +1,7 @@
-import unittest
-from unittest.mock import patch
+﻿import unittest
+from unittest.mock import MagicMock, patch
 
-from src.gemini_client import RETRYABLE_CODES, error_info, make_request, models_for, write_beat
+from src.gemini_client import RETRYABLE_CODES, error_info, list_models, make_request, models_for, write_final
 
 
 class QuotaError(Exception):
@@ -34,12 +34,11 @@ class GeminiClientTests(unittest.TestCase):
         request = make_request('primary', 'system', 'message', .2, 'writer')
         self.assertEqual(request['fallback_models'], [])
         self.assertEqual(models_for(request), ['primary'])
-
     def test_quota_moves_to_next_model_and_reports_which_one_answered(self):
         request = make_request('primary', 'system', 'message', .2, 'writer', ('fallback', 'unused'))
         notes: list[str] = []
         with patch('src.gemini_client._call', side_effect=[QuotaError(), ('{"lines": []}', {'text': '{}'})]) as call:
-            raw, response = write_beat('synthetic-key', request, notes.append)
+            raw, response = write_final('synthetic-key', request, notes.append)
         self.assertEqual(raw, '{"lines": []}')
         self.assertEqual(response['served_model'], 'fallback')
         self.assertEqual(response['model_attempts'], [{'model': 'primary', 'code': 429,
@@ -47,10 +46,19 @@ class GeminiClientTests(unittest.TestCase):
         self.assertEqual([item.args[1] for item in call.call_args_list], ['primary', 'fallback'])
         self.assertEqual(len(notes), 2)
 
+    def test_list_models_uses_the_official_models_list(self):
+        entry = MagicMock()
+        entry.model_dump.return_value = {'name': 'models/gemini-flash-latest',
+                                         'supportedGenerationMethods': ['generateContent']}
+        with patch('google.genai.Client') as client:
+            client.return_value.__enter__.return_value.models.list.return_value = [entry]
+            self.assertEqual(list_models('synthetic-key'),
+                             [{'name': 'models/gemini-flash-latest', 'supportedGenerationMethods': ['generateContent']}])
+
     def test_primary_model_is_used_when_it_answers(self):
         request = make_request('primary', 'system', 'message', .2, 'writer', ('fallback',))
         with patch('src.gemini_client._call', return_value=('{"lines": []}', {'text': '{}'})) as call:
-            raw, response = write_beat('synthetic-key', request)
+            raw, response = write_final('synthetic-key', request)
         self.assertEqual(raw, '{"lines": []}')
         self.assertEqual(response, {'text': '{}', 'served_model': 'primary'})
         self.assertEqual(call.call_count, 1)
@@ -59,7 +67,7 @@ class GeminiClientTests(unittest.TestCase):
         request = make_request('primary', 'system', 'message', .2, 'analyst', ('fallback',))
         with patch('src.gemini_client._call', side_effect=[QuotaError(), MissingModelError()]):
             try:
-                write_beat('synthetic-key', request)
+                write_final('synthetic-key', request)
                 self.fail('a corrente esgotada precisa propagar o erro')
             except MissingModelError as exc:
                 info = error_info(exc)
@@ -71,7 +79,7 @@ class GeminiClientTests(unittest.TestCase):
     def test_non_fallback_code_stops_before_the_next_model(self):
         request = make_request('primary', 'system', 'message', .2, 'writer', ('fallback',))
         with patch('src.gemini_client._call', side_effect=BadRequestError()) as call:
-            self.assertRaises(BadRequestError, write_beat, 'synthetic-key', request)
+            self.assertRaises(BadRequestError, write_final, 'synthetic-key', request)
         self.assertEqual(call.call_count, 1)
 
     def test_quota_error_is_explained_with_recovery_hint(self):

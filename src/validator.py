@@ -4,7 +4,7 @@ import math
 import re
 from typing import Any
 
-from .ai_schemas import SEMANTIC_SCHEMA, WRITER_SCHEMA
+from .ai_schemas import SEMANTIC_SCHEMA
 from .utils import plain_text
 
 
@@ -176,22 +176,4 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
     return accepted, rejected
 
 
-def validate_writer(raw: str, beat: dict, max_lines: int = 3, max_words: int = 24) -> tuple[list[str], list[str]]:
-    try:
-        parsed = json.loads(raw)
-    except (ValueError, TypeError):
-        return [], ['invalid JSON']
-    errors = schema_errors(parsed, WRITER_SCHEMA)
-    if errors:
-        return [], errors
-    lines = parsed['lines']
-    if len(lines) > max_lines or (not lines and not beat['allow_silence']):
-        errors.append('line count outside beat limits')
-    for line in lines:
-        if not line.strip() or '\n' in line or '\r' in line or len(line.split()) > max_words or len(line) > 300:
-            errors.append('empty, multiline or oversized line')
-    # Structural/numeric checks are conservative guards, not a semantic fact checker.
-    supplied = json.dumps(beat['evidence'], ensure_ascii=False)
-    if numeric_tokens(' '.join(lines)) - numeric_tokens(supplied):
-        errors.append('unsupported numeric token')
-    return ([], errors) if errors else (lines, [])
+

@@ -1,7 +1,7 @@
 """SDK calls: retry transient errors, fall back to another model, allowlisted error metadata."""
 from typing import Any, Callable
 
-from .ai_schemas import SEMANTIC_SCHEMA, WRITER_SCHEMA, wire_schema
+from .ai_schemas import FINAL_WRITER_SCHEMA, SEMANTIC_SCHEMA, wire_schema
 
 # Retried inside a single call by the SDK; mirrors the SDK defaults plus 5xx.
 RETRYABLE_CODES = [408, 429, 500, 502, 503, 504]
@@ -15,7 +15,7 @@ def make_request(model: str, system: str, message: str, temperature: float, stag
         'system_instruction': system, 'temperature': temperature,
         'automatic_function_calling': {'disable': True},
         'response_mime_type': 'application/json',
-        'response_json_schema': wire_schema(SEMANTIC_SCHEMA if stage == 'analyst' else WRITER_SCHEMA)}}
+        'response_json_schema': wire_schema(SEMANTIC_SCHEMA if stage == 'analyst' else FINAL_WRITER_SCHEMA)}}
 
 
 def models_for(request: dict) -> list[str]:
@@ -73,9 +73,18 @@ def analyze_semantically(api_key: str, request: dict[str, Any],
     return _generate(api_key, request, note)
 
 
-def write_beat(api_key: str, request: dict[str, Any],
-               note: Callable[[str], None] | None = None) -> tuple[str, dict]:
+def write_final(api_key: str, request: dict[str, Any],
+                note: Callable[[str], None] | None = None) -> tuple[str, dict]:
+    """The single Final Writer call: every moment in one request."""
     return _generate(api_key, request, note)
+
+
+def list_models(api_key: str) -> list[dict]:
+    """Official models.list discovery, once per run; metadata only."""
+    from google import genai
+
+    with genai.Client(api_key=api_key) as client:
+        return [entry.model_dump(mode='json', exclude_none=True) for entry in client.models.list()]
 
 
 def error_info(exc: Exception) -> dict:

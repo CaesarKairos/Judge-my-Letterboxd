@@ -1,0 +1,73 @@
+{
+  "locale": "en-US",
+  "phrases": {
+    "opening.intro_before_archetype": "You must be the...",
+    "opening.archetype_question": "...?",
+    "opening.archetype_too_long": "Way too long.",
+    "opening.fallback_name": "Let's just call you {name}.",
+    "opening.fallback_name_missing": "I'll just use your username, then.",
+    "opening.taste_prefix": "They told me you have a",
+    "opening.taste_suffix": "taste for movies.",
+    "opening.serious": "But seriously.",
+    "opening.judge_line": "Only I get to judge this.",
+    "opening.look": "Let me take a look.",
+    "opening.reveal_dots": "...!",
+    "closing.done": "That's it."
+  },
+  "pools": {
+    "salutations": [
+      "Hi.",
+      "Hello.",
+      "Right.",
+      "So.",
+      "Hm.",
+      "Okay."
+    ],
+    "taste_adjective_pairs": [
+      {"negative": "awful", "positive": "excellent"},
+      {"negative": "doubtful", "positive": "flawless"},
+      {"negative": "questionable", "positive": "wonderful"},
+      {"negative": "horrible", "positive": "incredible"},
+      {"negative": "unacceptable", "positive": "beautiful"}
+    ],
+    "archetype_notes": [
+      "genre",
+      "atmosphere",
+      "setting",
+      "archetype",
+      "theme",
+      "narrative element"
+    ]
+  },
+  "stat_labels": {
+    "watched_films": "films watched",
+    "rated_films": "ratings",
+    "reviews": "reviews",
+    "diary_entries": "sessions",
+    "rewatches": "rewatches",
+    "watchlist": "watchlist",
+    "own_lists": "own lists",
+    "rating": "rating",
+    "count": "films",
+    "share": "share",
+    "films": "films",
+    "films_a": "films in A",
+    "films_b": "films in B",
+    "shared_films": "shared films",
+    "jaccard": "similarity",
+    "session_mean": "session mean",
+    "rated_sessions": "rated sessions",
+    "unique_films": "distinct films",
+    "delta": "difference",
+    "reviews_count": "reviews"
+  },
+  "moment_labels": {
+    "rating_group": "ratings",
+    "review_spotlight": "review",
+    "rewatch": "sessions",
+    "tag": "tag",
+    "list": "list",
+    "writing_pattern": "phrase",
+    "semantic": "observation"
+  }
+}

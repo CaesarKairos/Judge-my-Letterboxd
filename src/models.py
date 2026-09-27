@@ -61,6 +61,8 @@ class UserProfile:
     favorites: list[dict[str, Any]] = field(default_factory=list)
     inventory: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    handle: str = ''
+    display_name: str = ''
 
 
 @dataclass

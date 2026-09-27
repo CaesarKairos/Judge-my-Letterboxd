@@ -84,6 +84,9 @@ def read_export(path: Path) -> UserProfile:
             if source == 'profile.csv':
                 for row in data:
                     favorite_refs.extend(parse_tags(row.get('Favorite Films', '')))
+                    # Public identity only, for the opening salutation; every other field is discarded.
+                    profile.handle = profile.handle or row.get('Username', '').strip()
+                    profile.display_name = profile.display_name or row.get('Name', '').strip()
             elif source in {'comments.csv', 'likes/reviews.csv', 'likes/lists.csv'}:
                 target = {'comments.csv': profile.comments, 'likes/reviews.csv': profile.liked_reviews,
                           'likes/lists.csv': profile.liked_lists}[source]

@@ -1,0 +1,73 @@
+{
+  "locale": "pt-BR",
+  "phrases": {
+    "opening.intro_before_archetype": "Você deve ser o...",
+    "opening.archetype_question": "...?",
+    "opening.archetype_too_long": "Grande demais.",
+    "opening.fallback_name": "Pode ser só {name}.",
+    "opening.fallback_name_missing": "Vou só pelo username, então.",
+    "opening.taste_prefix": "Me falaram que você tem um",
+    "opening.taste_suffix": "gosto pra filmes.",
+    "opening.serious": "Mas fala sério.",
+    "opening.judge_line": "Só quem pode julgar isso sou eu.",
+    "opening.look": "Deixa eu ver.",
+    "opening.reveal_dots": "...!",
+    "closing.done": "É isso aí."
+  },
+  "pools": {
+    "salutations": [
+      "Oi.",
+      "Olá.",
+      "Certo.",
+      "Então.",
+      "Hm.",
+      "Okay."
+    ],
+    "taste_adjective_pairs": [
+      {"negative": "péssimo", "positive": "ótimo"},
+      {"negative": "duvidoso", "positive": "impecável"},
+      {"negative": "questionável", "positive": "excelente"},
+      {"negative": "horrível", "positive": "incrível"},
+      {"negative": "inaceitável", "positive": "maravilhoso"}
+    ],
+    "archetype_notes": [
+      "genero",
+      "atmosfera",
+      "cenario",
+      "arquetipo",
+      "tematica",
+      "elemento narrativo"
+    ]
+  },
+  "stat_labels": {
+    "watched_films": "filmes vistos",
+    "rated_films": "ratings",
+    "reviews": "reviews",
+    "diary_entries": "sessões",
+    "rewatches": "rewatches",
+    "watchlist": "watchlist",
+    "own_lists": "listas próprias",
+    "rating": "nota",
+    "count": "filmes",
+    "share": "participação",
+    "films": "filmes",
+    "films_a": "filmes em A",
+    "films_b": "filmes em B",
+    "shared_films": "filmes em comum",
+    "jaccard": "semelhança",
+    "session_mean": "média das sessões",
+    "rated_sessions": "sessões avaliadas",
+    "unique_films": "filmes distintos",
+    "delta": "diferença",
+    "reviews_count": "reviews"
+  },
+  "moment_labels": {
+    "rating_group": "notas",
+    "review_spotlight": "review",
+    "rewatch": "sessões",
+    "tag": "tag",
+    "list": "lista",
+    "writing_pattern": "expressão",
+    "semantic": "observação"
+  }
+}

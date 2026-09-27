@@ -4,27 +4,49 @@ Protótipo de terminal em Python. O ZIP oficial é interpretado localmente; o Ge
 recebe JSON. Sem frontend, Flask, banco de dados, scraping ou API externa de filmes.
 O terminal usa Rich para painéis, tabelas, cores e indicador de leitura.
 
+## Princípio: conteúdo é uma coisa, apresentação é outra
+
+O backend escolhe o que é interessante. A IA descobre significado. A interface atua.
+Ninguém improvisa coreografia.
+
+- O backend decide quais informações são interessantes (findings determinísticos e
+  Editorial Moments display-first).
+- O AI Analyst ajuda a descobrir significado (candidatos semânticos com evidência
+  citada; nunca escreve o julgamento).
+- O Script Engine decide a sequência (seleção, diversidade, papéis, ordem).
+- A IA final escreve as falas (uma única chamada para o roteiro inteiro).
+- A apresentação é estruturada: `typing`, `pause`, `message`, `correction`, `strike`,
+  `profile_stats`, `film`, `film_pair`, `film_group`, `review_quote`, `tag`, `list`,
+  `rating`, `rewatch`, `phrase`, `stat`. A IA nunca escreve `~~riscado~~`, `*correção`
+  nem milissegundos: efeitos são campos estruturados e durações são enums
+  (`instant`, `short`, `medium`, `long`).
+
+Quanto mais expressiva a interface, mais simples pode ser o texto.
+
 ## Pipeline
 
 ```text
 ZIP → parser → perfil unificado → analyzer → findings determinísticos
-                                             ↓
-                        contexto → AI Analyst (JSON)
-                                             ↓
-                              validação de evidências
-                                             ↓
-                           Finding Pool com origem preservada
-                                             ↓
-                         Script Engine determinístico (até 10 beats)
-                                             ↓
-                   AI Writer (uma chamada pequena por beat, JSON)
-                                             ↓
-                        validação → julgamento no terminal
+                                              ↓
+                        contexto → AI Analyst (JSON, 1 chamada)
+                                              ↓
+                               validação de evidências
+                                              ↓
+                            Finding Pool com origem preservada
+                                              ↓
+                          Script Engine determinístico
+                                              ↓
+                     Editorial Moments display-first (o dado já é a cena)
+                                              ↓
+              AI Writer final — UMA chamada para o roteiro inteiro
+                                              ↓
+                       Presentation Builder → presentation_script.json
 ```
 
-Python mede. Analyst identifica relações semânticas e cita fontes. Script Engine
-escolhe assunto, ordem e modo. Writer apenas reage às evidências do beat atual.
-Não existe mais chamada que recebe a conta inteira e escreve o julgamento direto.
+Python mede e seleciona. O Analyst identifica relações semânticas e cita fontes. O
+Script Engine escolhe assunto, ordem e modo. O Writer reage ao roteiro inteiro sem
+poder mudá-lo. O Presentation Builder traduz tudo em eventos: é o contrato do
+frontend futuro, legível sem HTML.
 
 ## Instalação
 
@@ -50,40 +72,43 @@ python app.py --dry-run
 python app.py --analyze-only
 python app.py --no-analyst
 python app.py --show-findings
+python app.py --show-events
 ```
 
-- Normal: análise local, Analyst, roteiro e uma chamada Writer por beat.
-- `--dry-run`: nenhuma chamada à IA, mesmo com chave; monta roteiro determinístico.
-- `--analyze-only`: chama Analyst, valida e mostra o roteiro; nunca chama Writer.
-- `--no-analyst`: pula o Analyst e deixa o Writer julgar somente com findings
-  determinísticos (útil quando a cota do modelo grande acabou); `semantic_findings.json`
-  fica vazio e `run_status.json` registra `analyst: skipped_by_flag`.
+- Normal: análise local, uma chamada de Analyst, momentos editoriais e UMA chamada de
+  Writer para o roteiro inteiro; o terminal imprime a experiência evento a evento.
+- `--dry-run`: nenhuma chamada à IA, mesmo com chave; ainda produz
+  `presentation_script.json` com abertura estrutural, dados e silêncio.
+- `--analyze-only`: chama Analyst e Script Engine; nunca chama Writer.
+- `--no-analyst`: pula o Analyst; o roteiro usa apenas findings determinísticos.
+- `--show-findings`: mostra todos os findings determinísticos.
+- `--show-events`: imprime o `presentation_script.json` completo.
 - Sem chave: qualquer modo conclui a parte local e informa que pulou a IA.
-- `--show-findings`: mostra todos os findings determinísticos. Pode combinar flags;
-  `--dry-run` sempre prevalece sobre chamadas à IA.
+- `--dry-run` sempre prevalece sobre chamadas à IA.
 
-Uma execução completa pode fazer até 13 chamadas lógicas (1 Analyst + 12 Writer),
-com custo e tempo maiores que a antiga chamada única. Falhas transitórias HTTP
+Uma execução completa faz no máximo **duas chamadas lógicas**: 1 Analyst + 1 Final
+Writer. `run_status.json` registra `calls`. Respostas validadas ficam em cache local e
+uma segunda execução idêntica não consome cota. Falhas transitórias HTTP
 408/429/500/502/503/504 têm até três tentativas dentro da mesma chamada, com atraso
 limitado; timeout de 120s por tentativa. HTTP 400 não recebe repetição automática.
-Falha no Analyst preserva o roteiro local e pula Writer; falha em um beat preserva
-os demais. Saída parcial fica explicitamente marcada e retorna código 1, nunca é
-disfarçada de sucesso.
+Falha no Analyst preserva o roteiro local e pula o Writer; falha no Writer preserva
+todos os dados e as falas já aceitas. Saída parcial fica marcada e retorna código 1.
 
-Quando o erro é 404/429/500/502/503/504, o modelo configurado é trocado pelos de
-`GEMINI_FALLBACK_MODELS` antes de desistir, e o modelo que respondeu aparece em
-`served_model`. Depois de HTTP 401/403/429 esgotar todos os modelos, os próximos
-beats são pulados para não insistir com credencial inválida ou cota esgotada.
+Quando o erro é 404/429/5xx, o modelo configurado é trocado pelo próximo da cadeia
+antes de desistir, e o modelo que respondeu aparece em `served_model`. Depois de
+401/403/429 esgotar toda a corrente, a execução para: insistir com credencial inválida
+ou cota esgotada só gasta tempo.
 
 ## Quando `judgment.txt` não traz um julgamento
 
-`judgment.txt` começa com `[STATUS DO PROGRAMA — NÃO É UM JULGAMENTO DA IA]` quando
-nenhuma linha do Writer passou na validação. Isso é intencional: o arquivo nunca
-finge ser uma resposta do modelo. Nesse caso, os fatos ficam em `run_status.json`
-(status das etapas, `analyst_error_code`, `reason`, `limit_window`, `attempted_models`),
-em `writer_inputs.json` (cada resposta bruta, mesmo rejeitada) e em `script.json`
-(roteiro determinístico completo). Execuções anteriores são copiadas para
-`output/runs/<timestamp>/` antes de qualquer limpeza.
+Com IA disponível, `judgment.txt` é a experiência como texto. Sem IA, ele começa com
+`[SEM REAÇÃO DE IA NESTA EXECUÇÃO — a estrutura e os dados abaixo são do backend]` e
+continua com a abertura estrutural, o reveal de números, os dados dos Editorial
+Moments e pausas no lugar das falas. Isso é deliberado: nunca inserimos uma frase
+fixa para fingir que houve julgamento. O status real fica em `presentation_script.json`
+(`render.ai_generation`), em `run_status.json` e em `final_writer_response.json`.
+Execuções anteriores são copiadas para `output/runs/<timestamp>/` antes de qualquer
+limpeza.
 
 Motivos mais comuns e o que fazer:
 
@@ -92,8 +117,8 @@ Motivos mais comuns e o que fazer:
 | `analyst: failed`, `error.code: 429`, `limit_window: day` | Cota diária (RPD) do modelo esgotada | RPD renova à meia-noite do Pacífico (04h em Brasília); ou usar `GEMINI_FALLBACK_MODELS` com outro modelo (a cota é por modelo e por projeto); ou rodar `--no-analyst` |
 | `analyst: failed`, `error.code: 429`, `limit_window: minute` | Limite por minuto | Esperar e repetir; reduzir `SCRIPT_MAX_BEATS` |
 | `analyst: failed`, `error.code: 401/403` | Credencial inválida | Conferir `GEMINI_API_KEY` no `.env` |
-| `writer: partial`, `error_code: 429` em um beat | Cota acabou no meio | Beat preserva o erro; repetir a execução depois da renovação (respostas já validadas vêm do cache local) |
-| `writer: partial`, `status: rejected` | Resposta fora das regras (linhas, palavras, números novos) | Ver `raw_response` e `errors` no beat; ajustar `WRITER_*` |
+| `writer: failed`, `error.code: 429` | Cota esgotada na chamada do Writer | A estrutura e os dados continuam em `presentation_script.json`; repetir depois da renovação reaproveita o cache |
+| `writer: rejected`, `error.reason: final_writer_contract` | A resposta do Writer violou o contrato (beat novo, efeito inválido, número solto, markdown) | Nenhum texto é aceito; ver `final_writer_response.json.errors` |
 
 ## Configuração
 
@@ -107,7 +132,15 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 | `JUDGE_LANGUAGE` | `pt-BR` | Idioma das observações e reações |
 | `MAX_CONTEXT_CHARS` | `300000` | Prompt + dados do Analyst |
 | `SCRIPT_MAX_BEATS` | `10` | Máximo entre 1 e 12; qualidade pode resultar em menos |
-| `WRITER_MAX_CONTEXT_CHARS` | `16000` | Prompt + dados de cada chamada Writer |
+| `WRITER_MAX_CONTEXT_CHARS` | `60000` | Prompt + o roteiro inteiro em UMA chamada Writer |
+| `WRITER_MAX_LINES` | `3` | Teto global; cada momento define seu próprio `max_lines` (2) |
+| `WRITER_MAX_WORDS_PER_LINE` | `24` | Teto rígido; preferência de estilo: 2–12 |
+| `ANALYST_TEMPERATURE` | `0.2` | Temperatura independente |
+| `WRITER_TEMPERATURE` | `0.7` | Temperatura independente |
+| `MODEL_DISCOVERY` | `1` | Descoberta dinâmica via `models.list` antes do Writer |
+| `MODEL_DISCOVERY_CHAIN_LIMIT` | `5` | Quantos modelos descobertos entram na corrente |
+| `MODEL_DISCOVERY_TTL_MINUTES` | `30` | Validade do cache local de descoberta (desligado por padrão no fluxo) |
+| `JUDGE_HUMOR_TEMPLATES` | `0` | `1` habilita momentos HUMAN_TEMPLATE quando o template casar |
 | `WRITER_MAX_LINES` | `3` | Máximo entre 1 e 3 linhas geradas por beat |
 | `WRITER_MAX_WORDS_PER_LINE` | `24` | Teto rígido; preferência de estilo: 2–12 |
 | `ANALYST_TEMPERATURE` | `0.2` | Temperatura independente |
@@ -129,12 +162,12 @@ produziram HTTP 400 no modelo configurado durante o teste real.
 
 ## Auditoria: por que essa frase apareceu?
 
-Comece pelo beat em `judgment.json`, siga seus `finding_ids` para `script.json`
-e `finding_pool.json`. Em `writer_inputs.json`, confira o pedido exato, as fontes,
-a resposta bruta e o resultado da validação. Um texto gerado não recebe novas
+Comece pelo beat em `presentation_script.json` (bloco `beats`), siga `finding_ids`
+para `editorial_moments.json`, `script.json` e `finding_pool.json`. Em
+`final_writer_request.json` está o pedido exato do Writer (o roteiro inteiro que ele
+viu) e em `final_writer_response.json` a resposta bruta, o contrato validado ou
+recusado, os avisos e as linhas descartadas. Um texto gerado não recebe novas
 evidências por ter sido escrito pelo Writer.
-
-Cada execução com ZIP substitui somente os arquivos gerados conhecidos em `output/`:
 
 | Arquivo | Conteúdo |
 | --- | --- |
@@ -149,20 +182,99 @@ Cada execução com ZIP substitui somente os arquivos gerados conhecidos em `out
 | `semantic_findings.json` | Somente candidatos aceitos, com evidências resolvidas |
 | `semantic_validation.json` | Rejeitados com motivos; não entram no pool |
 | `finding_pool.json` | Findings normalizados, mantendo origin deterministic ou semantic |
-| `script.json` | Ordem, categoria, finding, motivo/penalidades de seleção, modo e evidência de cada beat; excluídos com motivo |
-| `writer_inputs.json` | Por beat: versão, evidência, contexto anterior, pedido exato, resposta bruta, parsed_lines (inclusive rejeitadas), accepted_lines, erros, status, `served_model`, `model_attempts` e `dropped_display_repeats` |
-| `judgment.json` | Linhas exibidas pelo Python e linhas geradas, separadas por beat |
-| `judgment.txt` | Texto final exibido, montado com quebras de linha e espaços entre beats |
-| `run_status.json` | Estado real das etapas, modelo, cadeia de reserva, versões dos prompts, origem (api/cache) e tentativas por modelo |
-| `debug_report.txt` | Inventário, avisos, cobertura e estado da execução |
+| `script.json` | Seleção: ordem, categoria, finding, motivo/penalidades; excluídos com motivo |
+| `editorial_moments.json` | Os Editorial Moments selecionados: tipo, papel, display estruturado, evidência, `max_lines`, silêncio permitido |
+| `model_discovery.json` | Principal, fallbacks configurados, modelos descobertos, rejeitados com motivo, corrente final e estado da descoberta |
+| `final_writer_request.json` | A UMA chamada do Writer: payload completo (o roteiro inteiro), request exato, tamanho e momentos removidos pelo orçamento |
+| `final_writer_response.json` | Resposta bruta, `served_model`, tentativas, contrato validado ou recusado, avisos e linhas descartadas |
+| `presentation_script.json` | Contrato do frontend: versão, locale, perfil, reveal, aberturas, `render`, `ai`, beats e a lista de `events` |
+| `judgment.txt` | Projeção terminal da experiência (eventos em texto), com cabeçalho de status quando não houve IA |
+| `run_status.json` | Estado real das etapas, modelo, corrente, `calls`, versões dos prompts, origem (api/cache) e tentativas por modelo |
+| `debug_report.txt` | Inventário, avisos, cobertura, descoberta de modelos, render e estado da execução |
 
-`judgment.txt` não é mais a resposta de uma chamada única. As respostas brutas de
-cada chamada Writer estão em `writer_inputs.json`, mesmo se rejeitadas. No modo
-local/analyze-only, o julgamento fica vazio, o roteiro permanece inspecionável.
-Uma preparação de pedido não significa envio: confira os status. Os artefatos do
-Writer são persistidos após cada beat, para auditoria de execuções parciais.
-Mesmo em dry-run/analyze-only, os pedidos Writer ficam preparados com status skipped,
-para inspecionar o escopo sem consumir chamadas.
+`writer_inputs.json` e `judgment.json` não existem mais: as chamadas por beat
+desapareceram. O que eles auditavam agora está em `editorial_moments.json`,
+`final_writer_response.json` e `presentation_script.json`.
+
+## Abertura: template do Script Engine, slots da IA
+
+A abertura é um template do backend com variação controlada. A IA preenche apenas
+slots, dentro de pools localizados:
+
+```text
+typing → saudação → typing → "Você deve ser o..." → arquétipo (4 conceitos)
+→ pause → "...?" → pause → "Grande demais." → "Pode ser só {nome}."
+→ typing → "Me falaram que você tem um" → [strike negativo] → pause
+→ [correction negativo→positivo] → "gosto pra filmes."
+→ "Mas fala sério." → "Só quem pode julgar isso sou eu."
+→ typing → "Deixa eu ver." → typing → "...!" → profile reveal → reação opcional
+```
+
+- A saudação é sorteada de um pool pequeno por locale, de forma estável por conta
+  (mesma conta, mesma identidade; contas diferentes, identidades diferentes).
+- O par de adjetivos vem de `taste_adjective_pairs`: a IA pode escolher um par
+  inteiro, nunca misturar palavras de pares diferentes; fora do pool, o par do Script
+  Engine é mantido e o descarte fica registrado em `ai.warnings`.
+- `top_four_archetype` exige exatamente quatro conceitos, de uma ou duas palavras,
+  distintos, sobre TEMA/atmosfera/cenário/elemento narrativo dos quatro favoritos —
+  nunca um diagnóstico da pessoa. Menos de quatro (ou conceito fora das regras) →
+  o bloco do arquétipo é omitido e a abertura segue sem ele.
+- A reação do reveal é opcional (0 ou 1 linha, no máximo 14 palavras) e só pode citar
+  números já exibidos.
+- A graça do "título grande demais" é o fracasso deliberado do template: a IA cria o
+  título, o Judge percebe, abandona e usa o nome.
+
+## Presentation Script (contrato do frontend)
+
+`presentation_script.json` é independente de HTML e legível como experiência:
+
+```json
+{"type": "message", "segments": [{"text": "Me falaram que você tem um "},
+                                 {"text": "duvidoso", "effect": "strike"},
+                                 {"text": " ótimo", "effect": "correction"}]}
+```
+
+Tipos suportados: `typing`, `pause`, `message`, `correction`, `strike`,
+`profile_stats`, `film`, `film_pair`, `film_group`, `review_quote`, `tag`, `list`,
+`rating`, `rewatch`, `phrase`, `stat`. Durações: `instant`, `short`, `medium`, `long`.
+Nenhum evento carrega milissegundos nem Markdown. Um momento pode ter falas vazias:
+aí entram só os dados e uma pausa, e isso é decisão de roteiro, não falha.
+
+## Localização e HUMAN_TEMPLATE
+
+- `resources/locales/{pt-BR,en-US}.json`: frases estruturais, pools (saudações,
+  pares de adjetivos) e rótulos de estatísticas. Nada é traduzido em tempo de
+  execução, e a IA não reinventa a abertura: ela preenche slots.
+- `resources/humor/{pt-BR,en}.json`: linhas escritas por gente, marcadas como
+  `render_strategy: human_template` e `source: human_template:<id>` em cada beat.
+  Desligado por padrão (`JUDGE_HUMOR_TEMPLATES=1` habilita).
+- A identidade da conta vem de `profile.csv` (`Username`/`Name`); todo o resto desse
+  arquivo continua descartado.
+
+## Descoberta de modelos e fallback
+
+A corrente é montada nesta ordem, sem duplicatas: `GEMINI_MODEL` →
+`GEMINI_FALLBACK_MODELS` → modelos descobertos por `models.list` (até
+`MODEL_DISCOVERY_CHAIN_LIMIT`). O filtro aceita apenas o que serve para
+`generateContent` de texto e rejeita, com motivo registrado, embeddings, TTS, áudio,
+imagem, live, transcrição, Lyria, robotics e modelos com ciclo de vida encerrado;
+a preferência é Flash estável, depois Flash `latest`, depois Flash-Lite, e preview/experimental
+perdem pontos quando há alternativa. A descoberta acontece **uma vez por execução** e
+apenas antes do Writer.
+
+Como `models.list` não devolve capacidades para todo projeto, o filtro é heurístico e
+documentado; o que escapar é resolvido em tempo de execução: 404/incompatibilidade,
+429 ou 5xx levam ao próximo modelo da corrente, com `model_attempts` e
+`served_model` gravados. 401/403 é falha global de credencial e para a execução.
+
+## Fallback local (sem IA, sem fingimento)
+
+Sem Analyst, sem chave, em `--dry-run` ou com o Writer recusado, o
+`presentation_script.json` continua válido: abertura estrutural (sem arquétipo, que é
+slot de IA), reveal de números, todos os Editorial Moments com seus dados, pôsteres
+identificados por `film_key` e pausas no lugar das falas. Os campos de reação ficam
+vazios e `render.ai_generation` diz `skipped` ou `failed`. Nenhuma frase fixa é
+inserida para parecer julgamento.
 
 ## Regras de análise e validação
 
@@ -213,34 +325,44 @@ A checagem não entende todos os números por extenso nem todas as formas de par
 
 O Script Engine combina score × confiança com penalidades por tipo, filmes e tags
 repetidos; descarta duplicatas por evidências, filmes e similaridade de texto.
-Usa até dois beats por categoria, inclui abertura factual e pode reservar um finding
-semântico forte como closer. Não preenche categorias vazias nem inventa callbacks.
-Modes disponíveis: raw_reveal, short_reaction, contrast, quote_reaction,
-semantic_punch, callback e closer. Callback fica reservado para vínculo explícito;
-o seletor atual nunca o cria por inferência.
+Usa até dois momentos por categoria e pode reservar um finding semântico forte como
+closer. Não preenche categorias vazias nem inventa callbacks. O que sai do seletor
+são Editorial Moments display-first: cada um carrega o dado estruturado que o
+frontend mostra sozinho (pós-ter com `film_key`, nota, trecho de review, sessões de
+rewatch, tag com estatística, lista com membros, expressão recorrente com exemplos) e
+só depois a fala. Momentos sem display suficiente são marcados e não valem uma cena.
 
-Writer recebe só o beat: evidências, identidade mínima dos filmes, modo, idioma,
-display e previous_context vazio (salvo futuro callback explícito). Reviews citadas
-chegam como excertos verificados, não como a coleção inteira. O validator rejeita
-JSON inválido, excesso de linhas/palavras, quebras internas, números novos e linhas
-idênticas já emitidas. Uma linha que apenas repete o display do próprio beat é
-descartada do texto e registrada em `dropped_display_repeats` do beat, sem reprovar
-a execução. Não há retry criativo automático nem fallback de piadas.
-Silêncio é permitido quando o Python já exibe um dado ou citação.
+O Final Writer recebe o roteiro INTEIRO de uma vez: o que o usuário já viu em cada
+momento, a evidência de cada momento e os slots da abertura. Ele não pode adicionar,
+remover, reordenar, renomear beat nem inventar filme, número ou contexto. Cada linha
+é `{text, effect}`; `effect` é `none`, `strike` ou `correction`. O validator rejeita
+JSON inválido, beat_id desconhecido ou ausente, excesso de linhas/palavras, quebras
+internas, números fora da tela, Markdown cru, tokens de tempo e mais de 3 palavras em
+um conceito do arquétipo. Uma linha que apenas repete o display do próprio momento é
+descartada do texto e contada em `dropped_lines`, sem reprovar a execução. Não há
+retry criativo automático nem fallback de piadas: silêncio é decisão válida.
 
 ## Prompts e módulos
 
-`prompts/analyst.txt` tem tom editorial; `prompts/writer.txt` contém a persona e as
-regras de reações curtas em português brasileiro. São enviados como instruções de
-sistema separadas. Versões `ANALYST_PROMPT_VERSION` e `WRITER_PROMPT_VERSION` estão
-em `src/ai_schemas.py` e aparecem nos outputs. A versão não altera comportamento.
-`prompts/judge.txt` foi preservado como histórico e não é mais usado na geração.
+`prompts/analyst.txt` tem tom editorial e devolve candidatos semânticos com evidência.
+`prompts/writer.txt` é o Final Writer: ele vê o roteiro inteiro, preenche os slots da
+abertura e as falas de cada `beat_id`, e é instruído a NÃO inventar coreografia — a
+interface já pausa, mostra pôsteres e risca texto, então o texto deve ficar mais
+simples, não mais teatral. Os dois vão como instruções de sistema separadas.
+Versões `ANALYST_PROMPT_VERSION` (v1) e `WRITER_PROMPT_VERSION` (v2) ficam em
+`src/ai_schemas.py` e aparecem nos outputs; a versão não altera comportamento.
+`prompts/judge.txt` foi preservado como histórico e não é mais usado.
 
 `app.py` cuida da CLI/Rich; `parser.py`, `models.py`, `analyzer.py`, `findings.py` e
 `utils.py` mantêm a camada local. `context_builder.py` prepara o Analyst;
-`validator.py` verifica contratos; `finding_pool.py` normaliza origens;
-`script_engine.py` seleciona; `generation.py` orquestra e audita; `gemini_client.py`
-separa `analyze_semantically(...)` e `write_beat(...)`.
+`validator.py` verifica candidatos semânticos; `finding_pool.py` normaliza origens;
+`script_engine.py` seleciona momentos e monta o pedido do Writer; `editorial.py`
+constrói o display de cada momento; `opening.py` monta a abertura por template;
+`presentation.py` é o Presentation Builder e o contrato de eventos; `final_writer.py`
+valida a resposta do Writer (ids, efeitos, números, tempo, arquétipo);
+`resources.py` carrega locales e humor templates; `model_discovery.py` filtra e ordena
+modelos; `generation.py` orquestra e audita; `gemini_client.py` separa
+`analyze_semantically(...)`, `write_final(...)` e `list_models(...)`.
 
 ## Privacidade e testes
 
@@ -260,55 +382,45 @@ python app.py
 
 Os testes usam dados sintéticos. Cobrem parser/listas/Unicode, médias, entidades de
 rating, tags por sessão e amostra mínima, evidências e números inválidos, deduplicação,
-diversidade/limite de beats, categorias ausentes, orçamento, escopo do Writer,
-modos sem IA/sem Writer, `--no-analyst`, cadeia de modelos de reserva (troca em 404/429,
-parada em 400, erro final com tentativas registradas), SDK com mock e rastreabilidade
-dos pedidos.
+diversidade/limite de momentos, orçamento, escopo do Writer, construitura da
+abertura (typing/strike/correction/pausa/reveal), arquétipo de exatamente quatro
+conceitos, eventos e enum de duração, marcação e tempo cru recusados, momento com
+silêncio, Presentation Script válido sem resposta de IA, recursos de locale,
+descoberta de modelos (filtro de `generateContent`, exclusão de TTS/imagem/live/
+embedding/lyria/transcribe, ordem e dedup da corrente, limite da escada, cache curto),
+duas chamadas no máximo, Writer incapaz de adicionar beats, cache validado, SDK com
+mock e rastreabilidade dos pedidos.
 
-### Validação desta refatoração
+### Validação desta versão
 
 O export real preservou 106 vistos, 92 ratings, 110 sessões, 103 reviews e 2 listas.
-O dry-run final produziu 63 findings e 8 beats. O contexto Analyst ficou em cerca
-de 199 mil caracteres, com todas as reviews, contra aproximadamente 261 mil antes.
-As chamadas Writer observadas ficaram entre 6,1 mil e 9,3 mil caracteres.
+O contexto do Analyst ficou em cerca de 200 mil caracteres, com todas as reviews. Os
+findings grew para 65 com o novo tipo determinístico `own_list` (listas próprias com
+composição medida), o que habilita momentos do tipo LIST.
 
-O Analyst real retornou 11 candidatos. A validação final aceita 7: rejeita referências
-inválidas, associação incorreta de membro de lista e afirmação de sessões sem diary.
-O Writer real gerou reações curtas; um número sem suporte foi rejeitado. A execução
-completa ficou parcial por erros do serviço e HTTP 429 de cota do plano gratuito
-(limite informado: 20 requisições). Não houve nova chamada após confirmar a cota.
-Portanto, a qualidade de um roteiro completo com as últimas correções ainda requer
-nova execução quando a cota permitir. Não há promessa de humor ou semântica perfeitos.
+Execução real (27/09/2026): descoberta dinâmica encontrou 19 modelos textuais
+utilizáveis entre 61 listados e montou a corrente
+`gemini-flash-latest → gemini-flash-lite-latest → gemini-2.5-flash → …`. O Analyst
+veio do cache (1 candidato aceito, 3 rejeitados), o Script Engine selecionou 9
+momentos (8 mids + 1 closer semântico) e o Final Writer respondeu em **uma** chamada
+de ~31 mil caracteres, atendida por `gemini-flash-lite-latest` depois do 429 do modelo
+principal. `presentation_script.json` saiu com 53 eventos cobrindo 12 tipos, validado
+por `validate_presentation` e lido de ponta a ponta no terminal.
 
-Os outputs da última chamada real foram preservados localmente em
-`output/validation_runs/live_before_final_validation/`, com
-`final_revalidation.json` mostrando as rejeições adicionais das checagens finais.
-Esse arquivo é uma revalidação offline, não uma nova resposta da IA. O `output/`
-principal contém o dry-run final, sem julgamento gerado.
+O `--dry-run` produz o mesmo roteiro sem nenhuma chamada: 8 momentos, 35 eventos,
+`render.ai_generation: skipped` e `judgment.txt` com o cabeçalho de status. Nada de
+frase fixa substitui reação de IA.
 
-### Execução de 26/09/2026: por que não houve julgamento
+Limitações conhecidas: o filtro de modelos é heurístico porque `models.list` não
+expõe capacidades para este projeto; quotes de review aparecem com 180 caracteres
+(no frontend, o Recorte final fica a cargo do component de review); e o arquétipo só
+existe quando há exatamente quatro favoritos resolvidos.
 
-A execução registrada em `output/runs/20260927T001615678505Z/` terminou em
-`analysis_partial` porque a única chamada do Analyst recebeu HTTP 429 do Gemini —
-cota esgotada, com `limit_window: day`. Não foi bug de escrita: o Writer nunca foi
-chamado, por regra, e por isso `judgment.txt` recebeu apenas a explicação. Nada foi
-perdido: o roteiro de 8 beats ficou em `script.json` e os 63 findings locais seguem
-em `findings.json`.
+### Histórico: 26/09/2026, a execução que não teve julgamento
 
-A cota por dia (RPD) é contada por modelo e por projeto e renova à meia-noite do
-Pacífico (04h em Brasília). Para não depender de um único modelo, esta versão passou
-a tentar `GEMINI_FALLBACK_MODELS` em 404/429/5xx, a repetir 429 dentro da mesma
-chamada (o SDK já repetia, mas o código excluía 429 da lista) e a oferecer
-`--no-analyst`, que julga apenas com findings determinísticos. A explicação em
-`judgment.txt` agora termina com a dica correspondente.
-
-Sondagem real desta chave em 26/09/2026: `gemini-flash-latest` devolveu 429,
-`gemini-flash-lite-latest` respondeu e `gemini-2.5-flash-lite` devolveu 404 (nome
-indisponível). Por isso o `.env.example` traz apenas `gemini-flash-lite-latest`:
-um nome inválido não quebra a execução, mas polui a cadeia com um erro alheio.
-
-Com a cadeia configurada, a mesma conta gerou julgamento completo (`status: complete`,
-`judgment_generated: true`): Analyst aceitou 2 candidatos e rejeitou 2, o roteiro
-ficou com 9 beats e os 9 beats foram validados pelo modelo de reserva. A execução
-seguinte reaproveitou o cache local, sem novas chamadas, e o texto final saiu sem a
-linha que repetia o display do primeiro beat.
+A execução arquivada em `output/runs/20260927T001615678505Z/` terminou em
+`analysis_partial` porque a chamada do Analyst recebeu HTTP 429 (cota esgotada,
+`limit_window: day`) na arquitetura antiga, que fazia uma chamada Writer por beat.
+Foi essa falha que motivou a cadeia de fallback, a descoberta de modelos, a
+apresentação estruturada e a troca por uma única chamada de Writer. A execução real
+mais recente está descrita em "Validação desta versão".

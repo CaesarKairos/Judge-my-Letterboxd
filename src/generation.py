@@ -1,4 +1,4 @@
-"""Auditable Analyst -> validation -> pool -> script -> per-beat Writer pipeline."""
+"""Auditable pipeline: Analyst -> Editorial Moments -> Script Engine -> one Final Writer -> Presentation."""
 from dataclasses import dataclass
 import json
 import os
@@ -7,13 +7,21 @@ from typing import Callable
 
 from .ai_schemas import ANALYST_PROMPT_VERSION, WRITER_PROMPT_VERSION
 from .context_builder import build_context, build_dataset, film_ids
+from .final_writer import validate_final_writer
 from .finding_pool import build_pool
-from .gemini_client import analyze_semantically, error_info, make_request, write_beat
+from .gemini_client import analyze_semantically, error_info, list_models, make_request, write_final
+from .model_discovery import build_chain, partition, record as discovery_record
 from .models import Finding, UserProfile
-from .script_engine import build_script, writer_input
-from .utils import dumps
-from .validator import validate_semantic_findings, validate_writer
+from .opening import build_events as build_opening_events
+from .opening import build_plan
+from .presentation import build_presentation, script_text, validate_presentation
+from .resources import bundle
 from .run_storage import cache_response, no_judgment, read_cached
+from .script_engine import build_script, final_writer_input
+from .utils import dumps
+from .validator import validate_semantic_findings
+
+ARCHETYPE_FILMS = 4
 
 
 @dataclass
@@ -22,20 +30,24 @@ class GenerationConfig:
     language: str = 'pt-BR'
     max_context: int = 300000
     max_beats: int = 10
-    writer_max_context: int = 16000
+    writer_max_context: int = 60000
     max_lines: int = 3
     max_words: int = 24
     analyst_temperature: float = .2
     writer_temperature: float = .7
     fallback_models: tuple[str, ...] = ()
+    discover_models: bool = True
+    humor_templates: bool = False
 
     @classmethod
     def from_env(cls) -> 'GenerationConfig':
         config = cls(os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), os.getenv('JUDGE_LANGUAGE', 'pt-BR'),
                      int(os.getenv('MAX_CONTEXT_CHARS', '300000')), int(os.getenv('SCRIPT_MAX_BEATS', '10')),
-                     int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '16000')), int(os.getenv('WRITER_MAX_LINES', '3')),
+                     int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '60000')), int(os.getenv('WRITER_MAX_LINES', '3')),
                      int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
-                     float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models())
+                     float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models(),
+                     os.getenv('MODEL_DISCOVERY', '1') not in {'0', 'false', 'no'},
+                     os.getenv('JUDGE_HUMOR_TEMPLATES', '0') in {'1', 'true', 'yes'})
         if not 1 <= config.max_beats <= 12 or not 1 <= config.max_lines <= 3 or not 2 <= config.max_words <= 40:
             raise ValueError('Limites inválidos: beats 1–12; linhas 1–3; palavras 2–40.')
         if not 0 <= config.analyst_temperature <= 2 or not 0 <= config.writer_temperature <= 2:
@@ -73,35 +85,53 @@ def reason_with_hint(problem: dict, fallback: str) -> str:
     return f'{message}\n{hint}' if hint else message
 
 
+def top_four_favorites(profile: UserProfile, ids: dict[str, str]) -> list[dict]:
+    """The four favorite films, in export order. Short IDs keep the writer payload consistent."""
+    chosen: list[dict] = []
+    seen: set[str] = set()
+    for favorite in profile.favorites:
+        for key in favorite.get('film_keys', []):
+            if key in seen or len(chosen) >= ARCHETYPE_FILMS:
+                continue
+            seen.add(key)
+            film = profile.films[key]
+            chosen.append({'film_key': ids.get(key, key), 'title': film.name, 'year': film.year,
+                           'tags': film.tags[:6]})
+    return chosen
+
+
 def save(path: Path, value: object) -> None:
     path.write_text(dumps(value), encoding='utf-8', newline='')
+
 
 
 def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root: Path, config: GenerationConfig,
              api_key: str, dry_run: bool, analyze_only: bool, skip_analyst: bool,
              report: Callable[[str], None]) -> tuple[dict, str, bool]:
+    """Two AI calls at most: one Analyst, one Final Writer. Everything else is local and auditable."""
     output = root / 'output'
+    locale = bundle(config.language)
     analyst_prompt = (root / 'prompts' / 'analyst.txt').read_text(encoding='utf-8')
     writer_prompt = (root / 'prompts' / 'writer.txt').read_text(encoding='utf-8')
     context, message = build_context(profile, analysis, findings, analyst_prompt, config.max_context, config.language)
     full_dataset = build_dataset(profile, analysis, findings, config.language)
-    save(output / 'ai_id_map.json', film_ids(profile))
+    ids = film_ids(profile)
+    save(output / 'ai_id_map.json', ids)
     (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
     request = make_request(config.model, analyst_prompt, message, config.analyst_temperature, 'analyst',
                            config.fallback_models)
     save(output / 'ai_request.json', request)
-    state = {'status': 'running', 'analyst': 'pending', 'writer': 'pending',
-             'judgment_generated': False,
-             'model': config.model, 'fallback_models': list(config.fallback_models),
-             'prompt_versions': {'analyst': ANALYST_PROMPT_VERSION, 'writer': WRITER_PROMPT_VERSION}}
+    state: dict = {'status': 'running', 'analyst': 'pending', 'writer': 'pending', 'judgment_generated': False,
+                   'model': config.model, 'fallback_models': list(config.fallback_models),
+                   'locale': locale.locale, 'calls': 0,
+                   'prompt_versions': {'analyst': ANALYST_PROMPT_VERSION, 'writer': WRITER_PROMPT_VERSION}}
     status_path = output / 'run_status.json'
     if status_path.exists():
         state['previous_run'] = json.loads(status_path.read_text(encoding='utf-8')).get('previous_run')
     save(output / 'run_status.json', state)
     report(f"Contexto Analyst: {len(analyst_prompt) + len(message):,} caracteres; "
            f"{len(context['reviews'])}/{len(profile.reviews)} reviews.")
-    semantic, rejected = [], []
-    failed = False
+    semantic, rejected, failed = [], [], False
     if dry_run or not api_key:
         state['analyst'] = 'skipped'
         state['gemini'] = 'skipped'
@@ -119,6 +149,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root
         try:
             cached = read_cached(output, 'analyst', request)
             raw, response = cached or analyze_semantically(api_key, request, report)
+            state['calls'] += 0 if cached else 1
             state['analyst_response_origin'] = 'cache' if cached else 'api'
             if cached:
                 report('Analyst: resposta local reaproveitada para o mesmo pedido, sem consumir nova chamada.')
@@ -147,113 +178,176 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root
                 report(state['error']['hint'])
     save(output / 'semantic_findings.json', semantic)
     save(output / 'semantic_validation.json', {'prompt_version': ANALYST_PROMPT_VERSION, 'rejected': rejected,
-                                              'accepted_count': len(semantic), 'status': state['analyst']})
+                                               'accepted_count': len(semantic), 'status': state['analyst']})
     pool = build_pool(full_dataset, semantic)
     save(output / 'finding_pool.json', pool)
-    # Reserve overhead for instructions and structured fields; final request is checked again.
-    evidence_budget = max(0, config.writer_max_context - len(writer_prompt) - 1800)
-    script = build_script(pool, analysis['overview'], config.max_beats, evidence_budget)
-    script['prompt_versions'] = state['prompt_versions']
+    report(f"Analyst: {len(semantic)} candidatos aceitos, {len(rejected)} rejeitados.")
+
+
+    # Editorial Moments: selected and display-first, before any AI call.
+    evidence_budget = max(0, config.writer_max_context - len(writer_prompt) - 4000)
+    script = build_script(pool, config.max_beats, evidence_budget, locale)
+    moments = script['moments']
+    save(output / 'editorial_moments.json', {'count': len(moments), 'moments': moments,
+                                             'selection': script['selection'], 'excluded': script['excluded'],
+                                             'policy': script['policy']})
+    closer = next((m for m in moments if m.get('role') == 'closer'), None)
+    beats = [m for m in moments if m.get('role') != 'closer']
     save(output / 'script.json', script)
-    inputs, judgments = [], []
-    for beat in script['beats']:
-        payload = writer_input(beat, config.language, config.max_lines, config.max_words)
-        writer_message = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
-        writer_request = make_request(config.model, writer_prompt, writer_message, config.writer_temperature, 'writer',
-                                      config.fallback_models)
-        inputs.append({'beat_id': beat['id'], 'writer_mode': beat['writer_mode'], 'prompt_version': WRITER_PROMPT_VERSION,
-                       'evidence': payload['evidence'], 'previous_context': payload['previous_context'],
-                       'request': writer_request, 'request_chars': len(writer_prompt) + len(writer_message),
-                       'raw_response': None, 'parsed_lines': [], 'accepted_lines': [], 'errors': [], 'status': 'prepared'})
-    save(output / 'writer_inputs.json', inputs)
-    save(output / 'judgment.json', {'beats': judgments, 'prompt_versions': state['prompt_versions']})
-    report(f"Analyst: {len(semantic)} candidatos aceitos, {len(rejected)} rejeitados. Roteiro: {len(script['beats'])} beats.")
+    report(f"Momentos editoriais: {len(moments)} ({len(beats)} mids"
+           f"{', 1 closer reservado' if closer else ', sem closer'}).")
+
+    # Model discovery happens once per run, before the Writer request is built.
+    discovered, rejected_models = [], []
+    discovery_state: dict = {'status': 'skipped', 'source': 'disabled'}
+    if api_key and not dry_run and config.discover_models:
+        try:
+            listing = list_models(api_key)
+            discovered, refused = partition(listing)
+            rejected_models = refused
+            discovery_state = {'status': 'ok', 'source': 'api', 'listed': len(listing), 'usable': len(discovered)}
+            report(f"Descoberta de modelos: {len(discovered)} utilizáveis de {len(listing)} listados.")
+        except Exception as exc:
+            discovery_state = {'status': 'failed', 'source': 'api', **error_info(exc)}
+            report(f"Descoberta de modelos indisponível: {discovery_state.get('message', '')}".strip())
+    chain, duplicates = build_chain(config.model, list(config.fallback_models), discovered)
+    rejected_models += duplicates
+    state['model_chain'] = chain
+    discovery_payload = discovery_record(config.model, list(config.fallback_models), discovered, rejected_models,
+                                         chain, discovery_state)
+    save(output / 'model_discovery.json', discovery_payload)
+    plan = build_plan(profile, analysis['overview'], locale)
+    top_four = top_four_favorites(profile, ids)
+    plan['archetype_requested'] = len(top_four) == ARCHETYPE_FILMS
+    trimmed: list[str] = []
+    while True:
+        payload = final_writer_input(beats, closer, plan, locale, top_four if plan['archetype_requested'] else [],
+                                    config.max_lines, config.max_words)
+        payload['opening_slots']['archetype']['enabled'] = plan['archetype_requested']
+        size = len(writer_prompt) + len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
+        if size <= config.writer_max_context or len(beats) <= 3:
+            break
+        trimmed.append(beats.pop()['beat_id'])
+    writer_request = make_request(config.model, writer_prompt, json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
+                                  config.writer_temperature, 'writer', tuple(chain[1:]))
+    save(output / 'final_writer_request.json', {'payload': payload, 'request': writer_request, 'request_chars': size,
+                                                'trimmed_moments': trimmed, 'model_chain': chain})
+    report(f"Pedido do Writer único: {size:,} caracteres; {len(beats)} mids"
+           f"{f', {len(trimmed)} removidos pelo orçamento' if trimmed else ''}.")
+
+    # One Final Writer call for the whole script, or a structural-only presentation.
+    result, entries, closer_entry = None, [], None
+    audit: dict = {'status': 'skipped', 'errors': [], 'warnings': []}
     if dry_run or not api_key or analyze_only or state['analyst'] == 'failed':
-        for audit in inputs:
-            audit['status'] = 'skipped'
-        save(output / 'writer_inputs.json', inputs)
         state['writer'] = 'skipped'
-        state['status'] = 'analysis_complete' if not failed else 'analysis_partial'
-        reason = (reason_with_hint(state.get('error', {}), 'Writer não executado.') if 'error' in state else
-                  'Modo --analyze-only: geração do Writer desativada.' if analyze_only and not dry_run else
-                  state.get('reason', 'Writer não executado.'))
-        state['writer_skip_reason'] = reason
-        no_judgment(output, reason)
-        save(output / 'judgment.json', {'status': 'not_generated', 'reason': reason, 'beats': [],
-                                      'prompt_versions': state['prompt_versions']})
-        report('Nenhum julgamento novo. judgment.txt contém a explicação; script.json contém somente o roteiro.')
+        state['writer_skip_reason'] = (reason_with_hint(state.get('error', {}), 'Writer não executado.') if 'error' in state
+                                       else 'Modo --analyze-only: reação do Writer desativada.' if analyze_only and not dry_run
+                                       else state.get('reason', 'Writer não executado.'))
+        audit['reason'] = state['writer_skip_reason']
+        report(f"Writer pulado: {state['writer_skip_reason']}")
+    else:
+        state['writer'] = 'running'
         save(output / 'run_status.json', state)
-        save(output / 'debug_report.txt', {'inventory': profile.inventory, 'warnings': profile.warnings, 'coverage': context['coverage'], 'run': state})
-        return script, '', failed
-    state['writer'] = 'running'
-    save(output / 'run_status.json', state)
-    emitted: set[str] = set()
-    blocked_code: int | None = None
-    for beat, audit in zip(script['beats'], inputs):
-        request = audit['request']
-        report(f"Writer {beat['position']}/{len(script['beats'])}: {beat['beat_type']} ({audit['request_chars']:,} caracteres)")
-        lines = []
-        if blocked_code is not None:
-            audit.update(status='skipped', errors=['previous API failure prevents further calls'], error_code=blocked_code)
-        elif audit['request_chars'] > config.writer_max_context:
-            audit.update(status='rejected', errors=['request exceeds writer budget'])
-        else:
-            try:
-                cached = read_cached(output, 'writer', request)
-                raw, response = cached or write_beat(api_key, request, report)
-                audit['response_origin'] = 'cache' if cached else 'api'
-                audit.update(raw_response=raw, sdk_response=response)
-                if response.get('served_model'):
-                    audit['served_model'] = response['served_model']
-                if response.get('model_attempts'):
-                    audit['model_attempts'] = response['model_attempts']
-                try:
-                    parsed_response = json.loads(raw)
-                    if isinstance(parsed_response, dict) and isinstance(parsed_response.get('lines'), list):
-                        audit['parsed_lines'] = parsed_response['lines']
-                except ValueError:
-                    pass
-                lines, errors = validate_writer(raw, beat, config.max_lines, config.max_words)
-                if not errors:
-                    cache_response(output, 'writer', request, raw, response)
-                audit.update(errors=errors, status='validated' if not errors else 'rejected')
-                # A linha que apenas repete o display do próprio beat sai do texto, mas fica registrada.
-                displayed = {line.strip().casefold() for line in beat['display']['lines'] if line.strip()}
-                repeats = [line for line in lines if line.strip().casefold() in displayed]
-                if repeats:
-                    lines = [line for line in lines if line.strip().casefold() not in displayed]
-                    audit['dropped_display_repeats'] = repeats
-                # Reject duplicate generated lines across beats without hiding the raw response.
-                if any(line.strip().casefold() in emitted for line in lines):
-                    audit.update(status='rejected', errors=['duplicate line from earlier beat'])
-                    lines = []
-            except Exception as exc:
-                audit.update(status='failed', errors=[type(exc).__name__], error_code=getattr(exc, 'code', None))
-                audit['error_details'] = error_info(exc)
-                state['error'] = audit['error_details']
-                report(audit['error_details']['message'])
-                if getattr(exc, 'code', None) in (401, 403, 429):
-                    blocked_code = exc.code
-                    report(f'Gemini HTTP {blocked_code}: chamadas restantes puladas; resultados já obtidos preservados.')
-                    hint = failure_hint(blocked_code)
-                    if hint:
-                        report(hint)
-        if audit['status'] != 'validated':
+        report('AI Writer final: uma chamada para o roteiro inteiro...')
+        try:
+            cached = read_cached(output, 'writer', writer_request)
+            raw, response = cached or write_final(api_key, writer_request, report)
+            state['calls'] += 0 if cached else 1
+            audit['response_origin'] = 'cache' if cached else 'api'
+            audit['raw_response'] = raw
+            if response.get('served_model'):
+                audit['served_model'] = response['served_model']
+            if response.get('model_attempts'):
+                audit['model_attempts'] = response['model_attempts']
+            result, errors = validate_final_writer(raw, beats, closer, plan, locale, analysis['overview'],
+                                                   config.max_lines, config.max_words)
+            audit['errors'] = errors
+            if result is None:
+                failed = True
+                audit['status'] = 'rejected'
+                state['error'] = {'type': 'ContractViolation', 'code': None, 'reason': 'final_writer_contract',
+                                  'message': 'Resposta do Writer fora do contrato; nenhum texto foi aceito.'}
+                report('Resposta do Writer fora do contrato: ' + '; '.join(errors[:3]))
+            else:
+                state['writer'] = 'complete'
+                audit['status'] = 'validated'
+                audit['warnings'] = result['warnings']
+                audit['dropped_lines'] = result['dropped_lines']
+                cache_response(output, 'writer', writer_request, raw, response)
+                plan['salutation'] = result['opening']['salutation']
+                plan['adjective_pair'] = result['opening']['adjective_pair']
+                plan['archetype'] = result['opening']['archetype']
+                plan['archetype_text'] = '-'.join(result['opening']['archetype'])
+                plan['profile_reaction'] = result['opening']['profile_reaction']
+                for warning in result['warnings'][:3]:
+                    report(f'Aviso do Writer: {warning}')
+        except Exception as exc:
+            state['error'] = error_info(exc)
             failed = True
-        audit['accepted_lines'] = lines
-        emitted.update(line.strip().casefold() for line in lines)
-        judgments.append({'beat_id': beat['id'], 'finding_ids': beat['finding_ids'], 'beat_type': beat['beat_type'],
-                          'display_lines': beat['display']['lines'], 'lines': lines, 'status': audit['status']})
-        save(output / 'writer_inputs.json', inputs)
-        save(output / 'judgment.json', {'beats': judgments, 'prompt_versions': state['prompt_versions']})
-        text = '\n\n'.join('\n'.join(j['display_lines'] + j['lines']) for j in judgments if j['display_lines'] or j['lines'])
-        (output / 'judgment.txt').write_text(text, encoding='utf-8', newline='')
-    state.update(status='partial' if failed else 'complete', writer='partial' if failed else 'complete')
-    state['judgment_generated'] = any(j['status'] == 'validated' for j in judgments)
-    if not state['judgment_generated']:
-        reason = reason_with_hint(state.get('error', {}), 'Nenhuma resposta do Writer passou na validação.')
-        no_judgment(output, reason)
-        report('Nenhum julgamento foi gerado; judgment.txt explica o motivo.')
+            audit.update(status='failed', errors=[type(exc).__name__], error_code=getattr(exc, 'code', None),
+                         error_details=state['error'])
+            report(state['error']['message'])
+            hint = failure_hint(getattr(exc, 'code', None))
+            if hint:
+                report(hint)
+    lines = result['beats'] if result else {}
+    for moment in beats:
+        template = humor_entry(moment, locale, config)
+        moment_lines = template['lines'] if template else lines.get(moment['beat_id'], [])
+        entries.append({'moment': moment, 'lines': moment_lines,
+                        'render_strategy': template['render_strategy'] if template else 'ai',
+                        'source': template['source'] if template else ('ai' if result else 'none'),
+                        'status': 'written' if moment_lines else 'silence'})
+    if closer:
+        closer_lines = result['closer'] if result else []
+        closer_entry = {'moment': closer, 'lines': closer_lines, 'render_strategy': 'ai',
+                        'source': 'ai' if result else 'none', 'status': 'written' if closer_lines else 'silence'}
+    plan['opening_events'] = build_opening_events(plan, plan['archetype_text'] or None, plan['profile_reaction'], locale)
+    render = {'ai_generation': 'complete' if result else ('skipped' if audit['status'] == 'skipped' else 'failed'),
+              'model': config.model, 'served_model': audit.get('served_model'), 'fallback_models': chain[1:],
+              'human_templates': config.humor_templates}
+    ai_meta = {'origin': audit.get('response_origin', 'none'), 'attempts': audit.get('model_attempts', []),
+               'warnings': audit.get('warnings', []), 'calls': state['calls']}
+    presentation = build_presentation(plan, entries, closer_entry, render, ai_meta, locale)
+    presentation_errors = validate_presentation(presentation)
+    if presentation_errors:
+        failed = True
+        state['presentation_errors'] = presentation_errors
+    save(output / 'presentation_script.json', presentation)
+    save(output / 'final_writer_response.json', {**audit, 'prompt_version': WRITER_PROMPT_VERSION,
+                                                 'parsed': result, 'presentation_errors': presentation_errors})
+    text = script_text(presentation)
+    if render['ai_generation'] != 'complete':
+        reason = state.get('writer_skip_reason') or state.get('error', {}).get('message', 'Sem reação de IA.')
+        text = ('[SEM REAÇÃO DE IA NESTA EXECUÇÃO — a estrutura e os dados abaixo são do backend]\n'
+                f'{reason}\nConsulte run_status.json; execuções anteriores em output/runs/.\n\n{text}')
+    (output / 'judgment.txt').write_text(text, encoding='utf-8', newline='')
+    ai_done = render['ai_generation'] == 'complete'
+    state['status'] = 'partial' if failed else ('complete' if ai_done else 'local_only')
+    state['writer'] = 'complete' if ai_done else state['writer']
+    state['judgment_generated'] = ai_done
     save(output / 'run_status.json', state)
-    save(output / 'debug_report.txt', {'inventory': profile.inventory, 'warnings': profile.warnings, 'coverage': context['coverage'], 'run': state})
-    return script, (output / 'judgment.txt').read_text(encoding='utf-8') if state['judgment_generated'] else '', failed
+    save(output / 'debug_report.txt', {'inventory': profile.inventory, 'warnings': profile.warnings,
+                                       'coverage': context['coverage'], 'model_discovery': discovery_payload,
+                                       'render': render, 'run': state})
+    return script, text, failed
+
+
+def condition_matches(condition: str | None, moment: dict) -> bool:
+    if condition in (None, 'always'):
+        return True
+    if condition == 'all_sessions_same_rating':
+        ratings = [s.get('rating') for s in moment['display'].get('sessions') or []]
+        return len(ratings) >= 2 and None not in ratings and len(set(ratings)) == 1
+    return False
+
+
+def humor_entry(moment: dict, locale, config: GenerationConfig) -> dict | None:
+    """HUMAN_TEMPLATE moments are written by us, never by the AI, and are labelled as such."""
+    if not config.humor_templates:
+        return None
+    for template in locale.human_templates(moment['moment_type']):
+        if condition_matches(template.get('condition'), moment):
+            return {'lines': [{'text': text, 'effect': 'none'} for text in template.get('lines', [])],
+                    'render_strategy': 'human_template', 'source': f"human_template:{template['id']}"}
+    return None

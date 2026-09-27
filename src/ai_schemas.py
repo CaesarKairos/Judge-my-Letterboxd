@@ -1,7 +1,7 @@
 """Wire schemas and prompt identifiers; no behavior depends on version labels."""
 from typing import Any
 ANALYST_PROMPT_VERSION = 'v1'
-WRITER_PROMPT_VERSION = 'v1'
+WRITER_PROMPT_VERSION = 'v2'
 
 
 def obj(properties: dict) -> dict:
@@ -26,7 +26,20 @@ SEMANTIC_SCHEMA = obj({'semantic_findings': array(obj({
     'evidence': array(REF, 6), 'film_keys': array(STRING, 8),
     'related_tags': array(STRING, 5), 'related_lists': array(STRING, 5),
     'numeric_claims': array(NUMBER_CLAIM, 10)}), 24)})
-WRITER_SCHEMA = obj({'lines': array(STRING, 3)})
+WRITER_SCHEMA = obj({'lines': array(STRING, 3)})  # kept for historical per-beat audits
+LINE_ITEM = {'type': 'object', 'properties': {'text': STRING,
+                                             'effect': {'type': 'string', 'enum': ['none', 'strike', 'correction']}},
+             'required': ['text']}
+FINAL_WRITER_SCHEMA = obj({
+    'opening': {'type': 'object', 'properties': {
+        'salutation': STRING, 'top_four_archetype': array(STRING, 4),
+        'negative_adjective': STRING, 'positive_adjective': STRING,
+        'profile_reaction': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 1}},
+     'required': ['salutation', 'top_four_archetype', 'negative_adjective', 'positive_adjective', 'profile_reaction'],
+     'additionalProperties': False},
+    'beats': array(obj({'beat_id': STRING, 'lines': array(LINE_ITEM, 3)}), 12),
+    'closer': {'type': 'object', 'properties': {'lines': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 3}},
+               'required': ['lines'], 'additionalProperties': False}})
 
 
 def wire_schema(schema: dict) -> dict:
