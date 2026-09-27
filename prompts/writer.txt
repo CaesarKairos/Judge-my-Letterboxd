@@ -35,7 +35,10 @@ Prefira conceitos concretos e reconhecíveis:
 Evite conceitos genéricos quando houver algo mais visual:
 "drama", "história", "emocional", "inteligência", "cinema".
 
-Cada conceito deve ter uma ou duas palavras.
+Os conceitos são pistas para auditoria; podem conter expressões curtas e compostas.
+Cada um dos quatro filmes deve contribuir semanticamente, sem correspondência mecânica de uma palavra por filme.
+Não inclua Markdown, aspas externas, quebra de linha ou ponto final em archetype_phrase.
+O apelido descreve elementos DOS FILMES; não infira identidade da pessoa.
 Os conceitos descrevem os FILMES, nunca identidade sensível ou diagnóstico da pessoa.
 
 negative_adjective / positive_adjective:
