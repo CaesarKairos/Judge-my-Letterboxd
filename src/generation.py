@@ -138,7 +138,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     # quality-ranked chains for Analyst and Writer.
     discovered, rejected_models = [], []
     discovery_state: dict = {'status': 'skipped', 'source': 'disabled'}
-    if api_key and not dry_run and config.discover_models:
+    if api_key and not dry_run and not context_error and not skip_analyst and config.discover_models:
         try:
             listing = list_models(api_key)
             discovered, rejected_models = partition(listing)
