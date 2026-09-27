@@ -60,6 +60,7 @@ class UserProfile:
     comments: list[dict[str, str]] = field(default_factory=list)
     favorites: list[dict[str, Any]] = field(default_factory=list)
     inventory: list[dict[str, Any]] = field(default_factory=list)
+    raw_export: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
