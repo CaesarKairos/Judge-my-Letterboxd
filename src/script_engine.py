@@ -3,6 +3,7 @@ from collections import Counter
 import json
 import re
 
+from .editorial_priority import closer_key
 from .editorial_v2 import make_moment
 
 # Deterministic findings are measurements. Only a small subset is intrinsically
@@ -143,7 +144,7 @@ def build_script(pool: list[dict], max_beats: int = 12, max_evidence_chars: int 
     if len(selected) >= 3:
         semantic_indices = [i for i, item in enumerate(selected) if item['origin'] == 'semantic']
         if semantic_indices:
-            best = max(semantic_indices, key=lambda i: selected[i]['score'] * selected[i]['confidence'])
+            best = max(semantic_indices, key=lambda i: closer_key(selected[i]))
             selected.append(selected.pop(best))
 
     moments = [make_moment(item, position, locale) for position, item in enumerate(selected, 1)]
