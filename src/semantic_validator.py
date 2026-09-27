@@ -139,6 +139,7 @@ def _grounded_films(cited: set[tuple[str, str]], registry: dict) -> set[str]:
         if source.get('film_key'):
             films.add(source['film_key'])
         films.update(source.get('film_keys', []))
+        films.update(source.get('films', []))
         for field in ('members', 'member_details'):
             films.update(
                 member.get('film_key') for member in source.get(field, [])
@@ -190,6 +191,45 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
                 continue
             cited.add(key)
             materialized.append(materialize_reference(ref, registry, notes))
+
+        # Repair redundant omissions locally. The model already named these
+        # entities in structured fields; Python can materialize their canonical
+        # records instead of rejecting an otherwise useful idea.
+        auto_refs = []
+        for film_id in item['film_keys']:
+            key = ('film', film_id)
+            if key in registry and key not in cited:
+                auto_refs.append({'source_type': 'film', 'source_id': film_id, 'focus_text': ''})
+        for tag in item['related_tags']:
+            key = ('tag', tag)
+            if key in registry and key not in cited:
+                auto_refs.append({'source_type': 'tag', 'source_id': tag, 'focus_text': ''})
+        for list_id in item['related_lists']:
+            key = ('list', list_id)
+            if key in registry and key not in cited:
+                auto_refs.append({'source_type': 'list', 'source_id': list_id, 'focus_text': ''})
+
+        # Session/rewatch prose often names the film but forgets the aggregate
+        # rewatch record. Add it when the backend has exactly that film rewatch.
+        if item['type'] == 'rewatch_pattern' or re.search(
+            r'\b(?:sessões|sessão|sessions?|rewatches?|reassist)', item['observation'], re.I
+        ):
+            for film_id in item['film_keys']:
+                key = ('rewatch', film_id)
+                if key in registry and key not in cited:
+                    auto_refs.append({'source_type': 'rewatch', 'source_id': film_id, 'focus_text': ''})
+
+        if auto_refs:
+            notes['auto_materialized_evidence'] = [
+                f"{ref['source_type']}:{ref['source_id']}" for ref in auto_refs
+            ]
+            for ref in auto_refs:
+                key = (ref['source_type'], ref['source_id'])
+                if key in cited:
+                    continue
+                cited.add(key)
+                materialized.append(materialize_reference(ref, registry, notes))
+
         if not cited:
             errors.append('evidence required')
 
@@ -201,14 +241,10 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
         for tag in item['related_tags']:
             if ('tag', tag) not in registry:
                 errors.append(f'tag absent: {tag}')
-            elif ('tag', tag) not in cited and not any(tag in registry[key].get('tags', []) for key in cited):
-                errors.append(f'tag uncited: {tag}')
 
         for list_id in item['related_lists']:
             if ('list', list_id) not in registry:
                 errors.append(f'list absent: {list_id}')
-            elif ('list', list_id) not in cited:
-                errors.append(f'list uncited: {list_id}')
 
         if item['type'] == 'list_meaning' and item['related_lists']:
             members = {
@@ -223,7 +259,7 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
         if re.search(r'\b(?:sessões|sessão|sessions?|rewatches?|reassist)', item['observation'], re.I):
             if not any(
                 kind in {'diary', 'rewatch'}
-                or (kind == 'finding' and registry[(kind, source_id)].get('type') == 'rewatch')
+                or (kind == 'finding' and registry[(kind, source_id)].get('type') in {'rewatch', 'tag_rating_difference'})
                 or (kind == 'stats' and source_id == 'review_coverage')
                 for kind, source_id in cited
             ):
