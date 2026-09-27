@@ -1,7 +1,7 @@
 """Wire schemas and prompt identifiers; no behavior depends on version labels."""
 from typing import Any
-ANALYST_PROMPT_VERSION = 'v1'
-WRITER_PROMPT_VERSION = 'v2'
+ANALYST_PROMPT_VERSION = 'v2'
+WRITER_PROMPT_VERSION = 'v3'
 
 
 def obj(properties: dict) -> dict:
