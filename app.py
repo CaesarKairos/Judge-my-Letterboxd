@@ -15,7 +15,8 @@ from rich.text import Text
 
 from src.analyzer import analyze
 from src.findings import build_findings
-from src.generation import GenerationConfig, generate, save
+from src.config_v2 import GenerationConfig
+from src.generation import generate, save
 from src.parser import read_export
 from src.raw_export import read_raw_export
 from src.run_storage import archive_run, no_judgment
