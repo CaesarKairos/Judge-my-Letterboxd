@@ -74,7 +74,7 @@ class GeminiClientTests(unittest.TestCase):
         self.assertEqual(info['code'], 404)
         self.assertEqual([item['model'] for item in info['attempted_models']], ['primary', 'fallback'])
         self.assertEqual(info['reason'], 'api_failure')
-        self.assertIn('GEMINI_FALLBACK_MODELS', info['hint'])
+        self.assertIn('fallback', info['hint'].casefold())
 
     def test_non_fallback_code_stops_before_the_next_model(self):
         request = make_request('primary', 'system', 'message', .2, 'writer', ('fallback',))
@@ -86,8 +86,7 @@ class GeminiClientTests(unittest.TestCase):
         info = error_info(QuotaError())
         self.assertEqual(info['reason'], 'rate_limit_or_quota_exhausted')
         self.assertIn('429', info['message'])
-        self.assertIn('--no-analyst', info['hint'])
-        self.assertIn('GEMINI_FALLBACK_MODELS', info['hint'])
+        self.assertIn('fallback', info['hint'].casefold())
 
     def test_raw_error_details_never_leak_into_allowlisted_metadata(self):
         class SyntheticError(Exception):

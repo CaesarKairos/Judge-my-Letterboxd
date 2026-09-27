@@ -37,11 +37,17 @@ def schema_errors(value: Any, schema: dict, path: str = '$') -> list[str]:
 
 
 def evidence_registry(context: dict) -> dict[tuple[str, str], dict]:
-    registry = {('stats', 'overview'): context['stats']}
-    for kind, collection, key in [('film', 'films', 'key'), ('review', 'reviews', 'id'),
-                                  ('diary', 'diary', 'id'), ('tag', 'tags', 'tag'), ('list', 'lists', 'id'),
-                                  ('finding', 'deterministic_findings', 'id'), ('rewatch', 'rewatches', 'film_key')]:
-        registry.update({(kind, item[key]): item for item in context.get(collection, [])})
+    registry = {
+        ('stats', 'overview'): context.get('stats', {}),
+        ('stats', 'review_coverage'): context.get('review_coverage', {}),
+    }
+    for kind, collection, key in [
+        ('film', 'films', 'key'), ('review', 'reviews', 'id'),
+        ('diary', 'diary', 'id'), ('tag', 'tags', 'tag'), ('list', 'lists', 'id'),
+        ('finding', 'deterministic_findings', 'id'), ('rewatch', 'rewatches', 'film_key'),
+        ('review_style', 'review_style_items', 'id')
+    ]:
+        registry.update({(kind, item[key]): item for item in context.get(collection, []) if key in item})
     return registry
 
 
@@ -116,12 +122,30 @@ def quote_style(quote: str, texts: list[str]) -> str:
     return ''
 
 
-def materialize_reference(ref: dict, registry: dict) -> dict:
+def materialize_reference(ref: dict, registry: dict, notes: dict) -> dict:
+    """Resolve model-selected IDs to original backend data.
+
+    Review focus_text is only a hint. A bad hint never kills a good finding:
+    the backend keeps the original full review and chooses a safe excerpt.
+    """
     source = registry[(ref['source_type'], ref['source_id'])]
     if ref['source_type'] == 'review':
-        # Writer sees exactly the cited excerpt, never the entire review collection.
-        data = {k: source[k] for k in ('id', 'film_key', 'date', 'review_rating', 'tags')}
-        data.update(excerpt=ref['quote'], excerpt_only=True)
+        focus = str(ref.get('focus_text') or '').strip()
+        body = str(source.get('text') or '')
+        plain = plain_text(body)
+        resolved = ''
+        if focus:
+            style = quote_style(focus, [body, plain])
+            if style:
+                fragments = quote_fragments(focus)
+                resolved = fragments[0] if fragments else focus
+                notes.setdefault('focus_text', {})[ref['source_id']] = style
+            else:
+                notes.setdefault('focus_text', {})[ref['source_id']] = 'unresolved_hint_ignored'
+        if not resolved:
+            resolved = plain[:900].rsplit(' ', 1)[0] if len(plain) > 900 else plain
+        data = {k: source.get(k) for k in ('id', 'film_key', 'date', 'logged_date', 'review_rating', 'rewatch', 'tags')}
+        data.update(full_text=body, excerpt=resolved, excerpt_only=len(resolved) < len(plain))
     else:
         data = source
     return {'source_type': ref['source_type'], 'source_id': ref['source_id'], 'data': data}
@@ -154,7 +178,8 @@ SOURCE_ALIASES = {'film': 'film', 'films': 'film', 'ratings': 'film', 'watched':
                   'review': 'review', 'reviews': 'review', 'diary': 'diary', 'diary_entries': 'diary',
                   'tag': 'tag', 'tags': 'tag', 'list': 'list', 'lists': 'list',
                   'rewatch': 'rewatch', 'rewatches': 'rewatch', 'finding': 'finding', 'findings': 'finding',
-                  'deterministic_findings': 'finding', 'stats': 'stats', 'overview': 'stats'}
+                  'deterministic_findings': 'finding', 'stats': 'stats', 'overview': 'stats',
+                  'review_style': 'review_style', 'reviewstyle': 'review_style'}
 ROUNDING_TOLERANCE = 5e-3  # 0.5%: accepts 1.67 for 1.6667, rejects an invented 4.2 for 3.8
 
 

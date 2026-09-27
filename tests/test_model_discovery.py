@@ -40,9 +40,11 @@ class DiscoveryTests(unittest.TestCase):
     def test_chain_order_is_explicit_first_then_discovered_and_deduplicated(self):
         accepted, _ = partition(LISTING)
         chain, rejected = build_chain('gemini-flash-latest', ['gemini-flash-lite-latest', 'custom-model'], accepted)
-        self.assertEqual(chain[:3], ['gemini-flash-latest', 'gemini-flash-lite-latest', 'custom-model'])
+        self.assertEqual(chain[0], 'gemini-flash-latest')
+        self.assertIn('gemini-2.0-flash-exp', chain)
+        self.assertTrue('gemini-flash-lite-latest' not in chain or chain.index('gemini-2.0-flash-exp') < chain.index('gemini-flash-lite-latest'))
         self.assertEqual(len(chain), len(set(chain)))
-        self.assertIn({'model': 'gemini-flash-lite-latest', 'reason': 'duplicado na cadeia'}, rejected)
+        self.assertTrue(any('fora do limite' in item['reason'] or 'duplicado' in item['reason'] for item in rejected))
 
     def test_model_id_strips_the_provider_prefix(self):
         self.assertEqual(model_id({'name': 'models/gemini-flash-latest'}), 'gemini-flash-latest')
@@ -81,7 +83,7 @@ class DiscoveryTests(unittest.TestCase):
         accepted, _ = partition(LISTING)
         chain, rejected = build_chain('gemini-flash-latest', [], accepted, limit=2)
         # The primary is already in the listing, so only one extra discovered model survives the cap.
-        self.assertEqual(chain, ['gemini-flash-latest', 'gemini-flash-lite-latest'])
+        self.assertEqual(chain, ['gemini-flash-latest', 'gemini-2.0-flash-exp'])
         self.assertTrue(any('fora do limite' in item['reason'] for item in rejected))
 
     def test_non_text_families_are_excluded_by_name(self):

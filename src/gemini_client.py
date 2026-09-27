@@ -102,9 +102,8 @@ def error_info(exc: Exception) -> dict:
                            'Consulte os limites do projeto em https://aistudio.google.com/usage?tab=rate-limit. '
                            'Tente novamente quando houver cota disponível; repetir agora pode continuar falhando.')
         info['hint'] = ('Cota por dia (RPD) renova à meia-noite do Pacífico — 04h em Brasília. Se o limite for por '
-                        'minuto, espere um pouco. Alternativas: definir GEMINI_FALLBACK_MODELS no .env '
-                        '(ex.: gemini-flash-lite-latest; nome indisponível responde 404 e a cadeia segue), '
-                        'reduzir SCRIPT_MAX_BEATS e/ou rodar com --no-analyst.')
+                        'minuto, espere um pouco. Alternativas: configure fallbacks específicos do Analyst/Writer; '
+                        'o model discovery prioriza modelos textuais completos e deixa variantes Lite por último.')
     else:
         info['reason'] = 'api_failure'
         info['message'] = f'Gemini falhou ({type(exc).__name__}, HTTP {code}); a chamada não produziu resposta.'
