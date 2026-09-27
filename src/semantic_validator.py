@@ -182,6 +182,12 @@ def validate_semantic_findings(raw: str, context: dict) -> tuple[list[dict], lis
         ):
             errors.append('external release chronology is not supplied by this dataset')
 
+        explicit_types = {
+            ref.get('source_type') for ref in item['evidence'] if isinstance(ref, dict)
+        }
+        if item['type'] in {'review_spotlight', 'self_irony'} and 'review' not in explicit_types:
+            errors.append('review-focused finding requires an explicit review reference')
+
         cited: set[tuple[str, str]] = set()
         materialized = []
         for ref in item['evidence']:
