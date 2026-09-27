@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {unzipText} from '../functions/_lib/zip.js';
 import {parseExport,analyzeExport} from '../functions/_lib/letterboxd.js';
+import {buildPresentation} from '../functions/_lib/judge.js';
 import {onRequestPost} from '../functions/api/judge.js';
 
 const encoder=new TextEncoder();
@@ -24,7 +25,7 @@ const fixture={
  'watched.csv':'Date,Name,Year,Letterboxd URI\n2026-01-01,Alpha,2000,https://boxd.it/a\n2026-01-01,Beta,2001,https://boxd.it/b\n2026-01-01,Gamma,2002,https://boxd.it/c\n2026-01-01,Delta,2003,https://boxd.it/d\n',
  'ratings.csv':'Date,Name,Year,Letterboxd URI,Rating\n2026-01-01,Alpha,2000,https://boxd.it/a,1\n2026-01-01,Beta,2001,https://boxd.it/b,5\n',
  'diary.csv':'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n2026-01-01,Beta,2001,https://boxd.it/b,5,,comfort,2026-01-01\n2026-02-01,Beta,2001,https://boxd.it/b,5,Yes,comfort,2026-02-01\n',
- 'reviews.csv':'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n2026-01-01,Alpha,2000,https://boxd.it/a,1,,"Dito isso: ruim.",,2026-01-01\n2026-02-01,Beta,2001,https://boxd.it/b,5,,"Dito isso: perfeito.",,2026-02-01\n',
+ 'reviews.csv':'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n2026-01-01,Alpha,2000,https://boxd.it/a,1,,"Dito isso: ruim.<blockquote>""Nunca mais."" — Alpha</blockquote>",,2026-01-01\n2026-02-01,Beta,2001,https://boxd.it/b,5,,"Dito isso: perfeito.",,2026-02-01\n',
  'lists/favorites.csv':'Letterboxd list export v7\nDate,Name,Tags,URL,Description\n2026-01-01,My list,,https://boxd.it/list,Description\n\nPosition,Name,Year,URL,Description\n1,Beta,2001,https://boxd.it/b,\n'
 };
 
@@ -32,6 +33,11 @@ test('ZIP parser and independent web analyzer read an official export shape',asy
  const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files),analysis=analyzeExport(profile,'pt-BR');
  assert.equal(profile.handle,'critic');assert.equal(profile.topFour.length,4);assert.equal(profile.reviews.length,2);
  assert.ok(analysis.moments.some(row=>row.type==='film_pair'));assert.ok(analysis.moments.some(row=>row.type==='rewatch'));assert.ok(analysis.moments.some(row=>row.type==='phrase'));
+ // Evidence sent to the model is parsed, so a quoted review never leaks its markup.
+ const quoted=profile.reviews.find(review=>review.segments.some(segment=>segment.type==='blockquote'));
+ assert.ok(quoted);assert.equal(quoted.text.includes('<'),false);
+ assert.equal(quoted.segments.at(-1).text,'"Nunca mais." — Alpha');
+ assert.equal(JSON.stringify(analysis.moments).includes('<blockquote>'),false);
 });
 
 test('Pages Function falls back across models and returns Presentation without Python',async t=>{
@@ -49,4 +55,22 @@ test('Pages Function reports missing secret and malformed exports clearly',async
  let result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{}});assert.equal(result.status,503);assert.equal((await result.json()).error,'missing_gemini_key');
  form=new FormData();form.set('export',new File([storedZip({'other.csv':'A\nB\n'})],'letterboxd.zip'));
  result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'x'}});assert.equal(result.status,422);
+});
+
+
+test('judge lines become quote segments and AI durations reach the queue',async()=>{
+ const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files),analysis=analyzeExport(profile,'pt-BR');
+ const beat=analysis.moments[0].id;
+ const writing={greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:[{id:beat,lines:['Você escreveu <blockquote>"Nunca mais."</blockquote> e ficou por isso.','Segunda linha.'],
+  evidence_pause:'long',after_evidence:'medium',typing:'long',between_lines:'long',after_reaction:'short'}]};
+ const script=buildPresentation({profile,analysis,writing,locale:'pt-BR'});
+ const start=script.events.findIndex(event=>event.type==='phrase');
+ const quote=script.events[start+5];
+ assert.equal(quote.type,'message');
+ assert.deepEqual(quote.segments.map(segment=>[segment.effect,segment.text]),[['none','Você escreveu'],['quote','"Nunca mais."'],['none','e ficou por isso.']]);
+ assert.equal(JSON.stringify(script.events).includes('<blockquote>'),false);
+ // The model directs the rhythm: suspense, reading time, hesitation, breath.
+ assert.deepEqual(script.events.slice(start-1,start+9).map(event=>`${event.type}:${event.duration||''}`),
+  ['pause:long','phrase:','review_quote:','review_quote:','pause:medium','typing:long','message:','pause:long','message:','pause:short']);
+ assert.deepEqual(script.beats[0].lines.map(line=>line.effect),['none','quote','none','none']);
 });

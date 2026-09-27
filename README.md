@@ -27,12 +27,17 @@ pois `/api/judge` é executado como Pages Function.
 - `js/app.js`: estados e cancelamento; `api.js`: multipart `export` + `locale`,
   timeout e erros; `upload.js`: extensão, assinatura ZIP e limite inicial de 50 MB.
   A Function repete a validação no servidor antes de processar o arquivo.
-- `chat-renderer.js` e `animations.js`: fila assíncrona, pausa, 1×/1.5×/2×,
-  skip, digitação rápida, raros erros cosméticos corrigidos e strike sem Markdown.
-  Os tempos ficam em `timing`. Ao subir a página, o acompanhamento automático para.
+- `chat-renderer.js` e `animations.js`: fila assíncrona, digitação rápida, raros erros
+  cosméticos corrigidos e strike sem Markdown. Não existe controle de pausa, velocidade
+  ou skip: a IA dirige o ritmo pelos enums `short`, `medium` e `long`, e as evidências
+  ficam no ar tempo suficiente para serem lidas (`readWait` cresce com o texto, com teto
+  em `timing.readMax`). O `messageGap` mantém as falas espaçadas. Ao subir a página, o
+  acompanhamento automático para.
 - `event-renderer.js`: evidências tipadas, sem HTML da IA; reviews estruturadas
-  são construídas com elementos seguros. Eventos desconhecidos são ignorados.
-- `i18n.js`: interface pt-BR/en-US, com detecção do navegador. O roteiro nunca é traduzido.
+  são construídas com elementos seguros, então um `<blockquote>` do export vira um
+  `blockquote` de verdade em vez de texto literal. Eventos desconhecidos são ignorados.
+- `i18n.js`: interface pt-BR/en-US, com detecção do navegador e um `details`/listbox
+  próprio no header (sem `<select>` nativo). O roteiro nunca é traduzido.
 - `opening.top_four` contém identidade dos favoritos; `cue: top_four_reveal` na
   mensagem de apresentação dispara a faixa antes de `role: archetype_phrase`.
   A faixa permanece no histórico. Zero a quatro favoritos são suportados.

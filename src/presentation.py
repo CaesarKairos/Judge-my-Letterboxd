@@ -10,14 +10,15 @@ class ReviewSegments(HTMLParser):
         self.stack = []
 
     def handle_starttag(self, tag, attrs):
-        if tag in {'blockquote', 'strong', 'em'}:
-            self.stack.append(tag)
+        if tag in {'blockquote', 'strong', 'b', 'em', 'i'}:
+            self.stack.append({'b': 'strong', 'i': 'em'}.get(tag, tag))
         elif tag in {'br', 'p'} and self.segments:
             self.handle_data('\n')
 
     def handle_endtag(self, tag):
-        if tag in self.stack:
-            self.stack = self.stack[:len(self.stack) - 1 - self.stack[::-1].index(tag)]
+        alias = {'b': 'strong', 'i': 'em'}.get(tag, tag)
+        if alias in self.stack:
+            self.stack = self.stack[:len(self.stack) - 1 - self.stack[::-1].index(alias)]
 
     def handle_data(self, data):
         if data:
@@ -45,7 +46,7 @@ def review_event(review: dict) -> dict:
 EVENT_TYPES = ('typing', 'pause', 'message', 'correction', 'strike', 'profile_stats', 'film', 'film_pair',
                'film_group', 'review_quote', 'tag', 'list', 'rating', 'rewatch', 'phrase', 'stat')
 DURATIONS = ('instant', 'short', 'medium', 'long')
-SEGMENT_EFFECTS = ('none', 'strike', 'correction')
+SEGMENT_EFFECTS = ('none', 'strike', 'correction', 'quote')
 TIMING_TOKENS = re.compile(r'\b\d+\s*(?:ms|mseg|milissegundos?|segundos?|s)\b', re.I)
 RAW_MARKUP = re.compile(r'~~|\*\*|^\s*[*_]{1,3}')
 MAX_EXAMPLE_QUOTES = 2
@@ -53,8 +54,15 @@ PERCENT_KEYS = {'share', 'jaccard', 'percent_a_in_b', 'percent_b_in_a', 'delta'}
 
 
 def message(text: str, effect: str = 'none') -> dict:
-    """One message; effects are semantic fields, never Markdown in the text."""
-    return {'type': 'message', 'segments': [{'text': text, 'effect': effect}]}
+    """One message; effects are semantic fields, never Markdown in the text.
+
+    A quote copied from an export becomes a real `quote` segment instead of literal
+    `<blockquote>` markup, mirroring the frontend renderer.
+    """
+    parts = clean_review(text)[1] or [{'type': 'text', 'text': text}]
+    return {'type': 'message', 'segments': [
+        {'text': part['text'], 'effect': 'quote' if part['type'] == 'blockquote' else effect}
+        for part in parts]}
 
 
 def typing(duration: str = 'short') -> dict:
