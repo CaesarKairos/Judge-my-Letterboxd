@@ -24,7 +24,7 @@ assert.equal(await page.locator('.review img').count(),0);assert.ok(await page.l
 await page.goto(base);await page.locator('#export').setInputFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from('x')});await page.locator('#upload-error').filter({hasText:'ZIP'}).waitFor();
 await page.route('**/api/judge',route=>route.fulfill({status:501,json:{error:'not_connected'}}));
 await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:Buffer.from([80,75,3,4,0,0])});
-assert.equal(await page.locator('#selected').isVisible(),true);await page.locator('#judge').click();await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/backend web/);
+assert.equal(await page.locator('#selected').isVisible(),true);await page.locator('#judge').click();await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);
 await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#chat .typing').waitFor();
 await page.locator('#controls summary').click();await page.locator('#pause').click();const before=await page.locator('#chat').textContent();await page.waitForTimeout(300);assert.equal(await page.locator('#chat').textContent(),before);
 await page.locator('#speed').click();assert.equal(await page.locator('#speed').textContent(),'1.5×');await page.locator('#pause').click();

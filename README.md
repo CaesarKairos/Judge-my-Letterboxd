@@ -1,7 +1,14 @@
 # Judge My Letterboxd
 
-Experiência web em HTML/CSS/JavaScript e pipeline local em Python. O terminal continua
-funcionando com Rich; o frontend reproduz o contrato `presentation-v1` do Python.
+Dois aplicativos independentes que compartilham o contrato `presentation-v1`:
+
+| Aplicativo | Runtime | Entrada | Execução |
+| --- | --- | --- | --- |
+| Web | HTML/CSS/JS + Cloudflare Pages Functions | Upload no navegador | ZIP → parser JS → análise JS → Gemini → Presentation Script |
+| Local | Python via `app.py` | ZIP no computador | Pipeline Python completo → Presentation Script + auditoria local |
+
+O Cloudflare não executa, importa ou chama `app.py`. A aplicação local continua
+funcionando por conta própria, mesmo que o site não esteja publicado.
 
 ## Frontend web
 
@@ -10,10 +17,8 @@ python -m http.server 8080 --bind 127.0.0.1
 ```
 
 Abra http://localhost:8080 e http://localhost:8080/?demo=1. Não use `file://`.
-O servidor estático serve a interface e a demo; não executa Pages Functions.
-O upload só envia após o CTA. `/api/judge` é uma fronteira explícita: a Function
-retorna 501 até a integração com um serviço de análise. Nesse caso a interface
-oferece a demo, sem inventar um julgamento do arquivo enviado.
+Esse servidor testa apenas os assets e a demo. Para testar upload e IA, use Wrangler,
+pois `/api/judge` é executado como Pages Function.
 
 ### Arquitetura e reprodução
 
@@ -21,7 +26,7 @@ oferece a demo, sem inventar um julgamento do arquivo enviado.
   fontes do sistema, layout estreito, teclado e reduced motion.
 - `js/app.js`: estados e cancelamento; `api.js`: multipart `export` + `locale`,
   timeout e erros; `upload.js`: extensão, assinatura ZIP e limite inicial de 50 MB.
-  Isso não substitui a validação completa do ZIP no futuro backend.
+  A Function repete a validação no servidor antes de processar o arquivo.
 - `chat-renderer.js` e `animations.js`: fila assíncrona, pausa, 1×/1.5×/2×,
   skip, digitação rápida, raros erros cosméticos corrigidos e strike sem Markdown.
   Os tempos ficam em `timing`. Ao subir a página, o acompanhamento automático para.
@@ -37,6 +42,10 @@ oferece a demo, sem inventar um julgamento do arquivo enviado.
 - `functions/api/poster.js`: consulta TMDB no servidor, aceita apenas correspondência
   exata de título/ano e única; resultados ambíguos usam fallback. Cache HTTP de 7 dias
   para sucesso e curto para falhas. Nenhum rating ou evidência é alterado.
+- `functions/api/judge.js` e `functions/_lib/`: backend web independente. Descompacta
+  o ZIP com APIs do runtime Workers, interpreta os CSVs, calcula estatísticas e
+  momentos editoriais, chama Gemini com saída estruturada e monta o Presentation Script.
+  Não há dependência de Python, subprocesso ou serviço externo próprio.
 
 ### Atualizar a demo
 
@@ -67,9 +76,23 @@ npx wrangler pages deploy dist --project-name judge-my-letterboxd
 ```
 
 O `_routes.json` envia somente `/api/*` às Functions. Configure `TMDB_API_KEY`
-como secret nas configurações do Pages; localmente use `.dev.vars` (ignorado).
-`GEMINI_API_KEY` continua no backend Python; só será necessária no serviço web
-quando ele existir. Não inserir secrets no código público nem commitar `.env`.
+e `GEMINI_API_KEY` como secrets nas configurações do Pages. `GEMINI_MODEL` e
+`GEMINI_FALLBACK_MODELS` são variáveis opcionais; os padrões formam uma cadeia entre
+`gemini-flash-latest`, `gemini-2.5-flash` e `gemini-2.5-flash-lite`. Configure os secrets nos
+ambientes Production e Preview que você usa e faça um novo deploy. Eles ficam em
+`context.env` da Function e nunca são enviados ao navegador.
+
+Para desenvolvimento local, copie `.dev.vars.example` para `.dev.vars`, preencha as
+chaves e execute:
+
+```powershell
+Copy-Item .dev.vars.example .dev.vars
+python scripts/prepare-web.py
+npx wrangler pages dev dist
+```
+
+Abra a URL exibida pelo Wrangler. Não inserir secrets no código público nem commitar
+`.env`/`.dev.vars`.
 Referências oficiais: [desenvolvimento local](https://developers.cloudflare.com/pages/functions/local-development/),
 [rotas](https://developers.cloudflare.com/pages/functions/routing/),
 [busca TMDB](https://developer.themoviedb.org/reference/search-movie).
@@ -94,8 +117,10 @@ pôster ausentes, markup hostil e favoritos. O smoke automatizado usa 360×800,
 
 Compartilhamento usa Web Share, clipboard ou download de texto; não há URL persistida.
 O SVG de Open Graph é um placeholder: algumas redes exigem PNG/JPEG para preview.
-Sem secret TMDB os cartazes usam fallback. A demo é pt-BR, mesmo com UI em inglês.
-O backend de análise web, persistência e deployment real não fazem parte desta etapa.
+Sem secret TMDB os cartazes usam fallback. Sem `GEMINI_API_KEY`, o upload informa
+claramente que falta configurar o Judge web. A demo é pt-BR, mesmo com UI em inglês.
+A análise web prioriza uma experiência rápida e não grava o ZIP nem os resultados;
+o pipeline Python permanece mais profundo e mantém todos os artefatos de auditoria.
 
 ## Princípio: conteúdo é uma coisa, apresentação é outra
 

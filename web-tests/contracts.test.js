@@ -2,8 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {validateScript} from '../js/utils.js';
-import {matchMovie,onRequestGet} from '../functions/api/poster.js';
-import {onRequestPost} from '../functions/api/judge.js';
+import {matchMovie,onRequestGet as getPoster} from '../functions/api/poster.js';
+import {onRequestGet as getJudge} from '../functions/api/judge.js';
 test('real fixture preserves all original narrative and evidence',()=>{
  const demo=JSON.parse(readFileSync('data/demo-presentation.json','utf8'));validateScript(demo);
  const original=JSON.parse(readFileSync('output/presentation_script.json','utf8'));
@@ -19,8 +19,8 @@ test('poster matches require exact identity and reject ambiguous remakes',()=>{
  assert.equal(matchMovie([movie],'A Movie','2000'),movie);assert.equal(matchMovie([movie],'Another Movie','2000'),null);assert.equal(matchMovie([movie],'A Movie','2001'),null);
  assert.equal(matchMovie([movie,{...movie,id:2}],'A Movie','2000'),null);
 });
-test('poster without secret falls back; invalid query returns 400; judge is explicitly unavailable',async()=>{
- const result=await onRequestGet({request:new Request('https://example.com/api/poster?title=Movie'),env:{}});assert.equal((await result.json()).resolved,false);
- assert.equal((await onRequestGet({request:new Request('https://example.com/api/poster?title=Movie&year=bad'),env:{}})).status,400);
- assert.equal(onRequestPost().status,501);
+test('poster without secret falls back; invalid query returns 400; web judge health is live',async()=>{
+ const result=await getPoster({request:new Request('https://example.com/api/poster?title=Movie'),env:{}});assert.equal((await result.json()).resolved,false);
+ assert.equal((await getPoster({request:new Request('https://example.com/api/poster?title=Movie&year=bad'),env:{}})).status,400);
+ assert.equal(getJudge().status,200);assert.equal((await getJudge().json()).runtime,'cloudflare-pages');
 });
