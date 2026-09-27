@@ -80,8 +80,15 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(profile.lists[0].name, 'Minha lista')
         self.assertEqual(profile.lists[0].description, 'Descrição')
         self.assertEqual(len(profile.lists[0].members), 1)
-        self.assertNotIn('private@example.com', str(asdict(profile)))
-        self.assertNotIn('PRIVATE_LOCATION', str(asdict(profile)))
+        # The normalized profile still ignores personal fields, but raw_export deliberately
+        # preserves the ZIP exactly because the AI full-export mode needs complete input.
+        normalized_without_raw = asdict(profile)
+        normalized_without_raw.pop('raw_export')
+        self.assertNotIn('private@example.com', str(normalized_without_raw))
+        self.assertNotIn('PRIVATE_LOCATION', str(normalized_without_raw))
+        self.assertIn('private@example.com', str(profile.raw_export))
+        self.assertIn('unknown.csv', [item['file'] for item in profile.raw_export])
+        self.assertIn('deleted/ratings.csv', [item['file'] for item in profile.raw_export])
         self.assertEqual(analyze(self.export({}))['overview']['ratings']['mean'], None)
 
     def test_statistics_rewatches_and_review_lengths(self):
@@ -128,12 +135,14 @@ class PipelineTests(unittest.TestCase):
         context, text = build_context(profile, analysis, findings, 'system', 300000, 'pt-BR')
         self.assertEqual(len(context['reviews']), len(profile.reviews))
         self.assertEqual(context['reviews'][0]['text'], profile.reviews[0].text)
-        self.assertNotIn('private@example.com', text)
-        context, text = build_context(profile, analysis, findings, 'system', 6500, 'pt-BR')
-        self.assertLessEqual(len(text) + len('system'), 6500)
-        self.assertTrue(any(context['coverage']['omitted'].values()))
-        for review in context['reviews']:
-            self.assertIn(review['text'], [r.text for r in profile.reviews])
+        self.assertIn('private@example.com', text)
+        self.assertEqual(context['coverage']['zip_files_included'], len(profile.raw_export))
+        self.assertEqual(context['coverage']['omitted_files'], 0)
+        self.assertFalse(context['coverage']['truncated'])
+        self.assertIn('unknown.csv', text)
+        self.assertIn('deleted/ratings.csv', text)
+        with self.assertRaises(ValueError):
+            build_context(profile, analysis, findings, 'system', 6500, 'pt-BR')
         with self.assertRaises(ValueError):
             build_context(profile, analysis, findings, 'system', 100, 'pt-BR')
 
