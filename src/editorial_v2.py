@@ -76,6 +76,8 @@ def make_moment(finding: dict, position: int, locale) -> dict:
     moment['max_lines'] = 4
     moment['why_interesting'] = finding.get('why_interesting', '')
     moment['cultural_angle'] = finding.get('cultural_angle', '')
+    moment['interestingness'] = finding.get('interestingness')
+    moment['confidence'] = finding.get('confidence')
 
     if finding.get('type') == 'recurring_idea':
         _review_style_display(finding, moment)

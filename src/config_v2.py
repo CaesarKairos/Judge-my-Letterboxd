@@ -23,6 +23,7 @@ class GenerationConfig:
     max_words: int = 14
     analyst_temperature: float = .2
     writer_temperature: float = .75
+    writer_acid_level: float = .75
     analyst_model: str = 'gemini-flash-latest'
     writer_model: str = 'gemini-flash-latest'
     analyst_fallback_models: tuple[str, ...] = ()
@@ -52,6 +53,7 @@ class GenerationConfig:
             max_words=int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '14')),
             analyst_temperature=float(os.getenv('ANALYST_TEMPERATURE', '.2')),
             writer_temperature=float(os.getenv('WRITER_TEMPERATURE', '.75')),
+            writer_acid_level=float(os.getenv('WRITER_ACID_LEVEL', '.75')),
             analyst_model=os.getenv('GEMINI_ANALYST_MODEL', legacy_model),
             writer_model=os.getenv('GEMINI_WRITER_MODEL', legacy_model),
             analyst_fallback_models=_models('GEMINI_ANALYST_FALLBACK_MODELS', 'GEMINI_FALLBACK_MODELS'),
@@ -68,4 +70,6 @@ class GenerationConfig:
             raise ValueError('WRITER_MAX_WORDS_PER_LINE deve estar entre 2 e 24.')
         if not 0 <= config.analyst_temperature <= 2 or not 0 <= config.writer_temperature <= 2:
             raise ValueError('Temperaturas devem estar entre 0 e 2.')
+        if not 0 <= config.writer_acid_level <= 1:
+            raise ValueError('WRITER_ACID_LEVEL deve estar entre 0 e 1.')
         return config

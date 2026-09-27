@@ -1,5 +1,45 @@
 """Presentation builder: the Script Engine decides content, this module decides how it is shown."""
 import re
+from html.parser import HTMLParser
+
+
+class ReviewSegments(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.segments = []
+        self.stack = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {'blockquote', 'strong', 'em'}:
+            self.stack.append(tag)
+        elif tag in {'br', 'p'} and self.segments:
+            self.handle_data('\n')
+
+    def handle_endtag(self, tag):
+        if tag in self.stack:
+            self.stack = self.stack[:len(self.stack) - 1 - self.stack[::-1].index(tag)]
+
+    def handle_data(self, data):
+        if data:
+            kind = self.stack[-1] if self.stack else 'text'
+            if self.segments and self.segments[-1]['type'] == kind:
+                self.segments[-1]['text'] += data
+            else:
+                self.segments.append({'type': kind, 'text': data})
+
+
+def clean_review(text: str) -> tuple[str, list[dict]]:
+    parser = ReviewSegments()
+    parser.feed(text or '')
+    parser.close()
+    segments = [{'type': row['type'], 'text': row['text'].strip()}
+                for row in parser.segments if row['text'].strip()]
+    return '\n'.join(row['text'] for row in segments), segments
+
+
+def review_event(review: dict) -> dict:
+    plain, segments = clean_review(review.get('text', ''))
+    return {**review, 'text': plain, 'segments': segments}
 
 # Contract vocabulary for the future frontend. Durations are enums, never milliseconds.
 EVENT_TYPES = ('typing', 'pause', 'message', 'correction', 'strike', 'profile_stats', 'film', 'film_pair',
@@ -75,9 +115,9 @@ def film_event(film: dict) -> dict:
 
 
 def _quote(review: dict) -> dict:
-    return {'type': 'review_quote', 'review_id': review.get('review_id'), 'film_key': review.get('film_key'),
+    return review_event({'type': 'review_quote', 'review_id': review.get('review_id'), 'film_key': review.get('film_key'),
             'title': review.get('title', ''), 'year': review.get('year', ''), 'rating': review.get('rating'),
-            'text': review.get('text', '')}
+            'text': review.get('text', '')})
 
 
 def _with_film_titles(review: dict, films: list[dict]) -> dict:
@@ -112,19 +152,19 @@ def display_events(moment: dict) -> list[dict]:
         events = [{'type': 'phrase', 'phrase': display.get('phrase', ''),
                    'stats': [s for s in display.get('stats', []) if s.get('value') is not None]}]
         for example in display.get('examples', [])[:MAX_EXAMPLE_QUOTES]:
-            events.append({'type': 'review_quote', 'film_key': None, 'title': '', 'year': '', 'rating': None,
-                           'text': example, 'review_id': None})
+            events.append(review_event({'type': 'review_quote', 'film_key': None, 'title': '', 'year': '', 'rating': None,
+                           'text': example, 'review_id': None}))
         return events
     if kind == 'review_group':
         by_key = {f['film_key']: f for f in films}
         events = []
         for review in display.get('reviews', [])[:MAX_EXAMPLE_QUOTES]:
             film = by_key.get(review.get('film_key'))
-            events.append({'type': 'review_quote', 'film_key': review.get('film_key'),
+            events.append(review_event({'type': 'review_quote', 'film_key': review.get('film_key'),
                            'title': film.get('title', '') if film else '',
                            'year': film.get('year', '') if film else '',
                            'rating': review.get('rating'), 'text': review.get('text', ''),
-                           'review_id': review.get('review_id')})
+                           'review_id': review.get('review_id')}))
         return events
     if films:
         return [{'type': 'film_group', 'films': [dict(f) for f in films[:3]]},
@@ -243,7 +283,9 @@ def event_text(event: dict) -> str:
     if kind == 'review_quote':
         where = f" — {event['title']} ({event['year']})" if event.get('title') else ''
         note = f", {fmt_value('rating', event['rating'])}" if event.get('rating') is not None else ''
-        return f'"{event["text"]}"{where}{note}'
+        rows = event.get('segments') or [{'type': 'text', 'text': event['text']}]
+        formatted = '\n'.join(('> ' if row['type'] == 'blockquote' else '') + row['text'] for row in rows)
+        return f'"{formatted}"{where}{note}'
     if kind == 'tag':
         related = f' + {event["related_tag"]}' if event.get('related_tag') else ''
         return f'{event["tag"]}{related}: {fmt_stats(event.get("stats", []))}'.rstrip(': ')
