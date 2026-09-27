@@ -28,7 +28,8 @@ GENERATED = ('profile_summary.json', 'extracted_profile.json', 'findings.json', 
              'editorial_moments.json', 'model_discovery.json', 'final_writer_request.json',
              'final_writer_response.json', 'presentation_script.json', 'ai_context.json', 'ai_request.json',
              'ai_response.json', 'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt',
-             'run_status.json', 'raw_export.json')
+             'run_status.json', 'raw_export.json', 'review_style.json', 'review_coverage.json',
+             'quality_report.json', 'editorial_dossier.json')
 # Outputs da arquitetura antiga (uma chamada Writer por beat): removidos sem arquivar,
 # porque o equivalente atual vive em editorial_moments/final_writer_response/presentation.
 RETIRED = ('writer_inputs.json', 'judgment.json')
@@ -136,6 +137,8 @@ def run() -> int:
     save(output / 'raw_export.json', raw_export)
     save(output / 'extracted_profile.json', asdict(profile))
     save(output / 'profile_summary.json', analysis)
+    save(output / 'review_style.json', analysis.get('review_style', {}))
+    save(output / 'review_coverage.json', analysis.get('review_coverage', {}))
     for name in ('findings.json', 'deterministic_findings.json'):
         save(output / name, [asdict(f) for f in findings])
     show_profile(analysis, findings, args.show_findings)
