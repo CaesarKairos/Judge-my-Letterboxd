@@ -2,7 +2,7 @@
 from typing import Any
 
 ANALYST_PROMPT_VERSION = 'v3'
-WRITER_PROMPT_VERSION = 'v4'
+WRITER_PROMPT_VERSION = 'v5'
 
 
 def obj(properties: dict) -> dict:
@@ -49,12 +49,13 @@ LINE_ITEM = {'type': 'object', 'properties': {
 FINAL_WRITER_SCHEMA = obj({
     'opening': {'type': 'object', 'properties': {
         'salutation': STRING,
-        'top_four_archetype': array(STRING, 4),
+        'archetype_concepts': array(STRING, 4),
+        'archetype_phrase': STRING,
         'negative_adjective': STRING,
         'positive_adjective': STRING,
         'profile_reaction': {'type': 'array', 'items': LINE_ITEM, 'maxItems': 1},
     }, 'required': [
-        'salutation', 'top_four_archetype', 'negative_adjective',
+        'salutation', 'archetype_concepts', 'archetype_phrase', 'negative_adjective',
         'positive_adjective', 'profile_reaction'
     ], 'additionalProperties': False},
     'beats': array(obj({'beat_id': STRING, 'lines': array(LINE_ITEM, 4)}), 16),

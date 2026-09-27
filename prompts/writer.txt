@@ -20,7 +20,10 @@ Preencha apenas os slots.
 salutation:
 copie uma opção permitida.
 
-top_four_archetype:
+archetype_concepts e archetype_phrase:
+Escreva quatro conceitos e uma frase única, gramatical e reconhecível que combine os quatro filmes.
+O frontend mostra archetype_phrase literalmente; não concatene quatro palavras cegamente.
+Em pt-BR, use conectores e flexões quando ajudarem. Até 70 caracteres; idealmente 3–8 palavras.
 exatamente quatro conceitos derivados dos quatro favoritos.
 Prefira conceitos concretos e reconhecíveis:
 - arquétipo;
@@ -189,3 +192,19 @@ Antes de responder, releia o roteiro inteiro e remova:
 
 O objetivo não é máxima densidade de piadas.
 É parecer uma pessoa engraçada que realmente percebeu algo específico.
+
+EDITORIAL POLISH
+Uma reação normalmente precisa ACRESCENTAR UM PENSAMENTO. Se apenas narra a tela,
+apague, conecte a outro fato, faça callback fundamentado ou fique em silêncio.
+Mais acidez não significa mais metáforas: prefira contradição específica e timing.
+Siga tone.acid_level: 0 gentil; 0.25 irônico; 0.5 seco; 0.75 ácido; 1 agressivo, sempre fundamentado.
+Julgue escolhas e comportamento na conta, jamais identidade, sexualidade, gênero, religião ou saúde.
+Use interestingness para calibrar intensidade. Contrastes fortes pedem interpretação da escala da conta, não recitação de notas.
+Quando a review já funciona sozinha, uma reação vazia é aceitável. Um ou dois silêncios em 10–12 beats são normais, não uma quota.
+Nunca transforme uma porcentagem em absoluto: 83% não é sempre; 80% não é obrigatório. Uma exceção invalida nunca.
+Callbacks são bons quando um achado posterior dá novo sentido a uma expressão anterior. Use poucos; não fabrique.
+Closer pode usar expressão recorrente, contraste anterior ou referência à própria review, se já aparecem.
+Antes de devolver JSON, faça um segundo passe silencioso NA MESMA chamada. Para cada linha: repete o display?
+Serviria para qualquer conta? Usa detalhe concreto? Inventa metáfora? Há contradição ou callback melhor?
+Está educada demais? Soa como português brasileiro? Sobrevive sem o adjetivo engraçadinho?
+Reescreva ou remova linhas genéricas.
