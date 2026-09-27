@@ -1,5 +1,5 @@
 """Normalize candidates without erasing their origin or original measurements."""
-from .validator import evidence_registry
+from .semantic_validator import evidence_registry
 from .utils import plain_text
 
 
@@ -37,7 +37,8 @@ def build_pool(dataset: dict, semantic: list[dict]) -> list[dict]:
         pool.append({'id': item['id'], 'origin': 'semantic', 'type': item['type'],
                      'score': 100 * item['interestingness'], 'interestingness': item['interestingness'],
                      'confidence': item['confidence'], 'observation': item['observation'],
-                     'why_interesting': item['why_interesting'], 'film_keys': item['film_keys'],
+                     'why_interesting': item['why_interesting'], 'cultural_angle': item.get('cultural_angle', ''),
+                     'film_keys': item['film_keys'],
                      'related_tags': item['related_tags'], 'related_lists': item['related_lists'],
                      'evidence': evidence, 'sample_size': len(item['evidence'])})
     return sorted(pool, key=lambda f: (-f['score'] * f['confidence'], f['id']))

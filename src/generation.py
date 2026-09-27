@@ -1,13 +1,12 @@
 """Auditable pipeline: Analyst -> Editorial Moments -> Script Engine -> one Final Writer -> Presentation."""
-from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 from typing import Callable
 
 from .ai_schemas import ANALYST_PROMPT_VERSION, WRITER_PROMPT_VERSION
+from .config_v2 import GenerationConfig
 from .context_builder import build_context, build_dataset, film_ids
-from .final_writer import validate_final_writer
+from .final_writer_v2 import validate_final_writer
 from .finding_pool import build_pool
 from .gemini_client import analyze_semantically, error_info, list_models, make_request, write_final
 from .model_discovery import build_chain, partition, record as discovery_record
@@ -16,63 +15,19 @@ from .opening import build_events as build_opening_events
 from .opening import build_plan
 from .presentation import build_presentation, script_text, validate_presentation
 from .resources import bundle
+from .run_quality import analyst_quality, writer_quality
 from .run_storage import cache_response, no_judgment, read_cached
 from .script_engine import build_script, final_writer_input
 from .utils import dumps
-from .validator import validate_semantic_findings
+from .semantic_validator import validate_semantic_findings
 
 ARCHETYPE_FILMS = 4
 
 
-@dataclass
-class GenerationConfig:
-    model: str = 'gemini-flash-latest'
-    language: str = 'pt-BR'
-    max_context: int = 1000000
-    max_beats: int = 8
-    writer_max_context: int = 60000
-    max_lines: int = 3
-    max_words: int = 24
-    analyst_temperature: float = .2
-    writer_temperature: float = .7
-    fallback_models: tuple[str, ...] = ()
-    discover_models: bool = True
-    humor_templates: bool = False
-    include_raw_export: bool = True
-
-    @classmethod
-    def from_env(cls) -> 'GenerationConfig':
-        config = cls(os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), os.getenv('JUDGE_LANGUAGE', 'pt-BR'),
-                     int(os.getenv('MAX_CONTEXT_CHARS', '1000000')), int(os.getenv('SCRIPT_MAX_BEATS', '8')),
-                     int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '60000')), int(os.getenv('WRITER_MAX_LINES', '3')),
-                     int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
-                     float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models(),
-                     os.getenv('MODEL_DISCOVERY', '1') not in {'0', 'false', 'no'},
-                     os.getenv('JUDGE_HUMOR_TEMPLATES', '0') in {'1', 'true', 'yes'},
-                     os.getenv('ANALYST_RAW_EXPORT', '1') not in {'0', 'false', 'no'})
-        if not 1 <= config.max_beats <= 12 or not 1 <= config.max_lines <= 3 or not 2 <= config.max_words <= 40:
-            raise ValueError('Limites inválidos: beats 1–12; linhas 1–3; palavras 2–40.')
-        if not 0 <= config.analyst_temperature <= 2 or not 0 <= config.writer_temperature <= 2:
-            raise ValueError('Temperaturas devem estar entre 0 e 2.')
-        return config
-
-
-def fallback_models() -> tuple[str, ...]:
-    """GEMINI_FALLBACK_MODELS (vírgula ou espaço) sem repetir o modelo principal."""
-    declared = os.getenv('GEMINI_FALLBACK_MODELS', '') or os.getenv('GEMINI_FALLBACK_MODEL', '')
-    seen = {os.getenv('GEMINI_MODEL', 'gemini-flash-latest').strip()}
-    models = []
-    for candidate in declared.replace(',', ' ').split():
-        if candidate not in seen:
-            seen.add(candidate)
-            models.append(candidate)
-    return tuple(models)
-
-
 def failure_hint(code: int | None) -> str:
     if code == 429:
-        return ('Cota esgotada não se recupera repetindo agora: aguarde o RPD renovar (meia-noite do Pacífico, '
-                '04h em Brasília), defina GEMINI_FALLBACK_MODELS no .env ou rode --no-analyst.')
+        return ('Cota esgotada não se recupera repetindo agora: aguarde o limite renovar ou configure '
+                'GEMINI_ANALYST_FALLBACK_MODELS / GEMINI_WRITER_FALLBACK_MODELS. Flash-Lite fica por último.')
     if code in (401, 403):
         return 'Credencial recusada: confira GEMINI_API_KEY no .env do projeto.'
     return ''
@@ -131,15 +86,42 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     full_dataset = build_dataset(profile, analysis, findings, config.language)
     ids = film_ids(profile)
     save(output / 'ai_id_map.json', ids)
+
+    # Discover text models ONCE, before either AI stage, then build independent
+    # quality-ranked chains for Analyst and Writer.
+    discovered, rejected_models = [], []
+    discovery_state: dict = {'status': 'skipped', 'source': 'disabled'}
+    if api_key and not dry_run and not context_error and not skip_analyst and config.discover_models:
+        try:
+            listing = list_models(api_key)
+            discovered, rejected_models = partition(listing)
+            discovery_state = {'status': 'ok', 'source': 'api', 'listed': len(listing), 'usable': len(discovered)}
+            report(f"Descoberta de modelos: {len(discovered)} utilizáveis de {len(listing)} listados.")
+        except Exception as exc:
+            discovery_state = {'status': 'failed', 'source': 'api', **error_info(exc)}
+            report(f"Descoberta de modelos indisponível: {discovery_state.get('message', '')}".strip())
+
+    analyst_chain, analyst_dupes = build_chain(
+        config.analyst_model, list(config.analyst_fallback_models), discovered
+    )
+    writer_chain, writer_dupes = build_chain(
+        config.writer_model, list(config.writer_fallback_models), discovered
+    )
+    rejected_models = list(rejected_models) + analyst_dupes + writer_dupes
+
     if not context_error:
         (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
-        request = make_request(config.model, analyst_prompt, message, config.analyst_temperature, 'analyst',
-                               config.fallback_models)
+        request = make_request(
+            analyst_chain[0], analyst_prompt, message, config.analyst_temperature,
+            'analyst', tuple(analyst_chain[1:])
+        )
         save(output / 'ai_request.json', request)
     else:
         request = None
     state: dict = {'status': 'running', 'analyst': 'pending', 'writer': 'pending', 'judgment_generated': False,
-                   'model': config.model, 'fallback_models': list(config.fallback_models),
+                   'analyst_model': config.analyst_model, 'writer_model': config.writer_model,
+                   'analyst_fallback_models': list(config.analyst_fallback_models),
+                   'writer_fallback_models': list(config.writer_fallback_models),
                    'locale': locale.locale, 'calls': 0,
                    'prompt_versions': {'analyst': ANALYST_PROMPT_VERSION, 'writer': WRITER_PROMPT_VERSION}}
     status_path = output / 'run_status.json'
@@ -184,6 +166,9 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 report('Analyst: resposta local reaproveitada para o mesmo pedido, sem consumir nova chamada.')
             if response.get('served_model'):
                 state['analyst_model'] = response['served_model']
+                state['analyst_quality_degraded'] = 'lite' in response['served_model'].casefold()
+                report(f"Analyst servido por {response['served_model']}"
+                       f"{' [QUALIDADE DEGRADADA: Lite]' if state['analyst_quality_degraded'] else ''}.")
             if response.get('model_attempts'):
                 state['analyst_model_attempts'] = response['model_attempts']
             save(output / 'ai_response.json', response)
@@ -208,9 +193,22 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     save(output / 'semantic_findings.json', semantic)
     save(output / 'semantic_validation.json', {'prompt_version': ANALYST_PROMPT_VERSION, 'rejected': rejected,
                                                'accepted_count': len(semantic), 'status': state['analyst']})
+    quality = analyst_quality(analysis, semantic, rejected)
+    save(output / 'quality_report.json', {'analyst': quality})
+    report(f"Analyst: {quality['returned_candidates']} retornados; {quality['accepted_candidates']} aceitos; "
+           f"{quality['rejected_candidates']} rejeitados; mínimo editorial {quality['required_semantic_candidates']}.")
+    if state['analyst'] in {'validated', 'validated_with_rejections'} and not quality['passes']:
+        state['analyst'] = 'insufficient_editorial_material'
+        state['error'] = {
+            'type': 'EditorialQualityGate',
+            'code': None,
+            'reason': 'insufficient_editorial_material',
+            'message': 'O Analyst não produziu material semântico suficiente para um julgamento de qualidade.'
+        }
+        failed = True
     pool = build_pool(full_dataset, semantic)
     save(output / 'finding_pool.json', pool)
-    report(f"Analyst: {len(semantic)} candidatos aceitos, {len(rejected)} rejeitados.")
+    # Counts are reported by the quality gate above.
 
 
     # Editorial Moments: selected and display-first, before any AI call.
@@ -223,41 +221,87 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     closer = next((m for m in moments if m.get('role') == 'closer'), None)
     beats = [m for m in moments if m.get('role') != 'closer']
     save(output / 'script.json', script)
-    report(f"Momentos editoriais: {len(moments)} ({len(beats)} mids"
-           f"{', 1 closer reservado' if closer else ', sem closer'}).")
+    semantic_moments = sum(moment.get('origin') == 'semantic' for moment in moments)
+    deterministic_moments = len(moments) - semantic_moments
+    report(f"Script: {semantic_moments} semantic; {deterministic_moments} fallback determinístico; "
+           f"{len(moments)} momentos totais.")
+    quality_path = output / 'quality_report.json'
+    quality_payload = json.loads(quality_path.read_text(encoding='utf-8')) if quality_path.exists() else {}
+    quality_payload['script'] = {
+        'semantic_moments': semantic_moments,
+        'deterministic_fallbacks': deterministic_moments,
+        'total_moments': len(moments),
+        'passes': semantic_moments >= quality.get('required_semantic_candidates', 2)
+    }
+    save(quality_path, quality_payload)
+    if state['analyst'] in {'validated', 'validated_with_rejections'} and not quality_payload['script']['passes']:
+        state['analyst'] = 'insufficient_editorial_material'
+        state['error'] = {
+            'type': 'EditorialQualityGate',
+            'code': None,
+            'reason': 'insufficient_editorial_moments',
+            'message': 'Poucos momentos semânticos sobreviveram à seleção editorial.'
+        }
+        failed = True
 
-    # Model discovery happens once per run, before the Writer request is built.
-    discovered, rejected_models = [], []
-    discovery_state: dict = {'status': 'skipped', 'source': 'disabled'}
-    if api_key and not dry_run and config.discover_models:
-        try:
-            listing = list_models(api_key)
-            discovered, refused = partition(listing)
-            rejected_models = refused
-            discovery_state = {'status': 'ok', 'source': 'api', 'listed': len(listing), 'usable': len(discovered)}
-            report(f"Descoberta de modelos: {len(discovered)} utilizáveis de {len(listing)} listados.")
-        except Exception as exc:
-            discovery_state = {'status': 'failed', 'source': 'api', **error_info(exc)}
-            report(f"Descoberta de modelos indisponível: {discovery_state.get('message', '')}".strip())
-    chain, duplicates = build_chain(config.model, list(config.fallback_models), discovered)
-    rejected_models += duplicates
-    state['model_chain'] = chain
-    discovery_payload = discovery_record(config.model, list(config.fallback_models), discovered, rejected_models,
-                                         chain, discovery_state)
+    # Model discovery already ran once before the Analyst.
+    chain = writer_chain
+    state['analyst_model_chain'] = analyst_chain
+    state['writer_model_chain'] = writer_chain
+    discovery_payload = discovery_record(
+        config.writer_model, list(config.writer_fallback_models), discovered,
+        rejected_models, writer_chain, discovery_state
+    )
+    discovery_payload['analyst_chain'] = analyst_chain
+    discovery_payload['writer_chain'] = writer_chain
     save(output / 'model_discovery.json', discovery_payload)
     plan = build_plan(profile, analysis['overview'], locale)
     top_four = top_four_favorites(profile, ids)
     plan['archetype_requested'] = len(top_four) == ARCHETYPE_FILMS
     trimmed: list[str] = []
     while True:
-        payload = final_writer_input(beats, closer, plan, locale, top_four if plan['archetype_requested'] else [],
-                                    config.max_lines, config.max_words)
+        payload = final_writer_input(
+            beats, closer, plan, locale, top_four if plan['archetype_requested'] else [],
+            config.max_lines, config.max_words, analysis.get('overview'),
+            analysis.get('review_style'), analysis.get('review_coverage')
+        )
         payload['opening_slots']['archetype']['enabled'] = plan['archetype_requested']
+        save(output / 'editorial_dossier.json', {
+            'top_four_films': payload.get('top_four_films', []),
+            'editorial_dossier': payload.get('editorial_dossier', {}),
+            'moments': payload.get('moments', []),
+            'closer': payload.get('closer')
+        })
         size = len(writer_prompt) + len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
         if size <= config.writer_max_context or len(beats) <= 3:
             break
         trimmed.append(beats.pop()['beat_id'])
-    writer_request = make_request(config.model, writer_prompt, json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
+    writer_moment_count = len(beats) + (1 if closer else 0)
+    minimum_writer_moments = quality.get('required_semantic_candidates', 2)
+    if trimmed and writer_moment_count < minimum_writer_moments:
+        state['analyst'] = 'insufficient_editorial_material'
+        state['error'] = {
+            'type': 'EditorialQualityGate',
+            'code': None,
+            'reason': 'writer_context_trimmed_too_far',
+            'message': (
+                f'O budget do Writer reduziria o roteiro para {writer_moment_count} momentos; '
+                f'o mínimo editorial é {minimum_writer_moments}.'
+            )
+        }
+        failed = True
+        quality_path = output / 'quality_report.json'
+        quality_payload = json.loads(quality_path.read_text(encoding='utf-8')) if quality_path.exists() else {}
+        quality_payload['writer_context'] = {
+            'moments_after_trimming': writer_moment_count,
+            'minimum_required': minimum_writer_moments,
+            'trimmed_moments': trimmed,
+            'passes': False,
+        }
+        save(quality_path, quality_payload)
+
+    writer_request = make_request(config.writer_model, writer_prompt,
+                                  json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
                                   config.writer_temperature, 'writer', tuple(chain[1:]))
     save(output / 'final_writer_request.json', {'payload': payload, 'request': writer_request, 'request_chars': size,
                                                 'trimmed_moments': trimmed, 'model_chain': chain})
@@ -267,7 +311,7 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
     # One Final Writer call for the whole script, or a structural-only presentation.
     result, entries, closer_entry = None, [], None
     audit: dict = {'status': 'skipped', 'errors': [], 'warnings': []}
-    if dry_run or not api_key or analyze_only or state['analyst'] == 'failed':
+    if dry_run or not api_key or analyze_only or state['analyst'] not in {'validated', 'validated_with_rejections'}:
         state['writer'] = 'skipped'
         state['writer_skip_reason'] = (reason_with_hint(state.get('error', {}), 'Writer não executado.') if 'error' in state
                                        else 'Modo --analyze-only: reação do Writer desativada.' if analyze_only and not dry_run
@@ -302,6 +346,10 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
                 audit['status'] = 'validated'
                 audit['warnings'] = result['warnings']
                 audit['dropped_lines'] = result['dropped_lines']
+                live_quality = writer_quality(result, audit.get('served_model'))
+                report(f"Writer: {audit.get('served_model') or 'modelo desconhecido'}; "
+                       f"{live_quality['reaction_lines']} linhas; {live_quality['silent_moments']} momentos em silêncio"
+                       f"{'; QUALIDADE DEGRADADA (Lite)' if live_quality['quality_degraded'] else ''}.")
                 cache_response(output, 'writer', writer_request, raw, response)
                 plan['salutation'] = result['opening']['salutation']
                 plan['adjective_pair'] = result['opening']['adjective_pair']
@@ -332,8 +380,12 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_
         closer_entry = {'moment': closer, 'lines': closer_lines, 'render_strategy': 'ai',
                         'source': 'ai' if result else 'none', 'status': 'written' if closer_lines else 'silence'}
     plan['opening_events'] = build_opening_events(plan, plan['archetype_text'] or None, plan['profile_reaction'], locale)
+    writer_q = writer_quality(result, audit.get('served_model'))
+    prior_quality = json.loads((output / 'quality_report.json').read_text(encoding='utf-8')) if (output / 'quality_report.json').exists() else {}
+    save(output / 'quality_report.json', {**prior_quality, 'writer': writer_q})
     render = {'ai_generation': 'complete' if result else ('skipped' if audit['status'] == 'skipped' else 'failed'),
-              'model': config.model, 'served_model': audit.get('served_model'), 'fallback_models': chain[1:],
+              'model': config.writer_model, 'served_model': audit.get('served_model'), 'fallback_models': chain[1:],
+              'quality_degraded': writer_q['quality_degraded'],
               'human_templates': config.humor_templates}
     ai_meta = {'origin': audit.get('response_origin', 'none'), 'attempts': audit.get('model_attempts', []),
                'warnings': audit.get('warnings', []), 'calls': state['calls']}

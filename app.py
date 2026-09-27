@@ -15,7 +15,8 @@ from rich.text import Text
 
 from src.analyzer import analyze
 from src.findings import build_findings
-from src.generation import GenerationConfig, generate, save
+from src.config_v2 import GenerationConfig
+from src.generation import generate, save
 from src.parser import read_export
 from src.raw_export import read_raw_export
 from src.run_storage import archive_run, no_judgment
@@ -27,7 +28,8 @@ GENERATED = ('profile_summary.json', 'extracted_profile.json', 'findings.json', 
              'editorial_moments.json', 'model_discovery.json', 'final_writer_request.json',
              'final_writer_response.json', 'presentation_script.json', 'ai_context.json', 'ai_request.json',
              'ai_response.json', 'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt',
-             'run_status.json', 'raw_export.json')
+             'run_status.json', 'raw_export.json', 'review_style.json', 'review_coverage.json',
+             'quality_report.json', 'editorial_dossier.json')
 # Outputs da arquitetura antiga (uma chamada Writer por beat): removidos sem arquivar,
 # porque o equivalente atual vive em editorial_moments/final_writer_response/presentation.
 RETIRED = ('writer_inputs.json', 'judgment.json')
@@ -104,7 +106,7 @@ def run() -> int:
     parser.add_argument('--dry-run', action='store_true', help='Análise e roteiro locais; nenhuma chamada à IA')
     parser.add_argument('--analyze-only', action='store_true', help='Executa Analyst e Script Engine; pula Writer')
     parser.add_argument('--no-analyst', action='store_true',
-                        help='Pula o Analyst e escreve o julgamento apenas com findings determinísticos')
+                        help='Modo de debug: pula o Analyst, preserva findings locais e não chama o Writer')
     parser.add_argument('--show-findings', action='store_true', help='Mostra todos os findings determinísticos')
     parser.add_argument('--show-events', action='store_true', help='Mostra o presentation_script.json completo')
     args = parser.parse_args()
@@ -135,6 +137,8 @@ def run() -> int:
     save(output / 'raw_export.json', raw_export)
     save(output / 'extracted_profile.json', asdict(profile))
     save(output / 'profile_summary.json', analysis)
+    save(output / 'review_style.json', analysis.get('review_style', {}))
+    save(output / 'review_coverage.json', analysis.get('review_coverage', {}))
     for name in ('findings.json', 'deterministic_findings.json'):
         save(output / name, [asdict(f) for f in findings])
     show_profile(analysis, findings, args.show_findings)

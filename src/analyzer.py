@@ -6,7 +6,9 @@ from itertools import combinations
 from math import sqrt
 from typing import Any
 
+from .analysis_enrichment import enrich_lists, enrich_rewatches, match_reviews_to_diary, review_coverage
 from .models import UserProfile
+from .review_style import analyze_review_style
 from .utils import plain_text, stats, words
 
 
@@ -115,7 +117,7 @@ def tag_analysis(profile: UserProfile, rewatches: list[dict]) -> tuple[list[dict
     return tags, pairs[:50]
 
 
-def review_analysis(profile: UserProfile) -> dict[str, Any]:
+def review_analysis(profile: UserProfile, coverage: dict[str, Any]) -> dict[str, Any]:
     lengths = [{'id': r.id, 'film_key': r.film_key, 'rating': r.rating,
                 'characters': len(r.text), 'plain_text_characters': len(plain_text(r.text)),
                 'words': len(words(r.text))} for r in profile.reviews]
@@ -147,7 +149,9 @@ def review_analysis(profile: UserProfile) -> dict[str, Any]:
             'high_rating_short': [r for r in short if r['rating'] is not None and r['rating'] >= 4.5],
             'multiple_reviews': [{'film_key': f.key, 'review_ids': f.review_ids,
                                   'diary_sessions': len(f.diary_ids)} for f in profile.films.values() if len(f.review_ids) > 1],
-            'writing_patterns': writing_patterns(profile)}
+            'writing_patterns': writing_patterns(profile),
+            'review_style': analyze_review_style(profile.reviews),
+            'review_coverage': coverage}
 
 
 def analyze(profile: UserProfile) -> dict[str, Any]:
@@ -156,7 +160,9 @@ def analyze(profile: UserProfile) -> dict[str, Any]:
     ratings = [f.rating for f in rated]
     distribution = {str(i / 2): {'count': ratings.count(i / 2),
                     'percent': 100 * ratings.count(i / 2) / len(ratings) if ratings else 0} for i in range(1, 11)}
-    rewatches = rewatch_analysis(profile)
+    session_reviews, unmatched_reviews = match_reviews_to_diary(profile)
+    coverage = review_coverage(profile, session_reviews, unmatched_reviews)
+    rewatches = enrich_rewatches(profile, rewatch_analysis(profile), session_reviews)
     tags, overlaps = tag_analysis(profile, rewatches)
     lists = []
     repeat_keys = {r['film_key'] for r in rewatches}
@@ -167,6 +173,7 @@ def analyze(profile: UserProfile) -> dict[str, Any]:
                       'member_ratings': {f.key: f.rating for f in members},
                       'favorites': sum(f.favorite for f in members), 'with_reviews': sum(bool(f.review_ids) for f in members),
                       'with_rewatches': sum(f.key in repeat_keys for f in members)})
+    lists = enrich_lists(profile, lists, rewatches)
     watched = sum(f.watched for f in films)
     watchlist = [f for f in films if f.watchlist]
     mode_count = max((v['count'] for v in distribution.values()), default=0)
@@ -176,13 +183,15 @@ def analyze(profile: UserProfile) -> dict[str, Any]:
                 'own_lists': len(lists), 'ratings': stats(ratings), 'distribution': distribution,
                 'explicit_rewatches': sum(e.rewatch for e in profile.diary),
                 'observed_repeat_sessions': sum(r['observed_repeat_sessions'] for r in rewatches)}
+    reviews = review_analysis(profile, coverage)
     return {'overview': overview, 'session_rating_baseline': stats([e.rating for e in profile.diary if e.rating is not None]),
             'rating_groups': {str(i / 2): [f.key for f in rated if f.rating == i / 2] for i in range(1, 11)},
             'rating_scale': {'modes': [k for k, v in distribution.items() if v['count'] == mode_count and mode_count],
                              'top_two_share': sum(sorted((v['count'] for v in distribution.values()), reverse=True)[:2]) / len(ratings) if ratings else None,
                              'five_star_count': ratings.count(5), 'very_low_count': sum(r <= 1.5 for r in ratings),
                              'very_low_percent': 100 * sum(r <= 1.5 for r in ratings) / len(ratings) if ratings else 0},
-            'rewatches': rewatches, 'reviews': review_analysis(profile), 'tags': tags, 'tag_overlaps': overlaps,
+            'rewatches': rewatches, 'reviews': reviews, 'review_style': reviews['review_style'],
+            'review_coverage': coverage, 'tags': tags, 'tag_overlaps': overlaps,
             'lists': lists, 'favorites': profile.favorites,
             'likes': {'films': [f.key for f in films if f.liked],
                       'film_ratings': stats([f.rating for f in films if f.liked and f.rating is not None]),

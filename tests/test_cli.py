@@ -40,6 +40,30 @@ def writer_side_effect(line: str = 'Reação curta.', mutate=None):
     return lambda api_key, request, note=None: valid_response(request, line=line, mutate=mutate)
 
 
+def analyst_side_effect(count: int = 2):
+    def respond(api_key, request, note=None):
+        payload = json.loads(request['contents'])
+        films = payload['films']
+        findings = []
+        for index in range(min(count, len(films))):
+            film = films[index]
+            findings.append({
+                'id': f'semantic_{index:03}',
+                'type': 'meaningful_exception',
+                'interestingness': .9,
+                'confidence': .95,
+                'observation': 'Este filme cria um momento editorial específico.',
+                'why_interesting': 'É concreto o bastante para receber uma reação curta.',
+                'cultural_angle': '',
+                'evidence': [{'source_type': 'film', 'source_id': film['key'], 'focus_text': ''}],
+                'film_keys': [film['key']],
+                'related_tags': [],
+                'related_lists': [],
+            })
+        return json.dumps({'semantic_findings': findings}, ensure_ascii=False), {'served_model': 'synthetic-analyst'}
+    return respond
+
+
 class CLITests(unittest.TestCase):
     def prepare(self, root: Path, films: int = 8) -> None:
         (root / 'prompts').mkdir()
@@ -95,7 +119,7 @@ class CLITests(unittest.TestCase):
 
     def test_full_run_makes_at_most_two_ai_calls(self):
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})) as analyst, \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()) as analyst, \
                 patch('src.generation.write_final', side_effect=writer_side_effect()) as writer:
             root = Path(directory)
             self.prepare(root)
@@ -118,7 +142,7 @@ class CLITests(unittest.TestCase):
             body['beats'].append({'beat_id': 'beat_99', 'lines': [{'text': 'Beat fantasma.', 'effect': 'none'}]})
 
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})), \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()), \
                 patch('src.generation.write_final', side_effect=writer_side_effect(mutate=add_beat)):
             root = Path(directory)
             self.prepare(root)
@@ -134,7 +158,7 @@ class CLITests(unittest.TestCase):
             body['opening']['positive_adjective'] = 'podre'
 
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})), \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()), \
                 patch('src.generation.write_final', side_effect=writer_side_effect(mutate=odd_pair)):
             root = Path(directory)
             self.prepare(root)
@@ -149,7 +173,7 @@ class CLITests(unittest.TestCase):
             body['opening']['top_four_archetype'] = ARCHETYPE[:3]
 
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})), \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()), \
                 patch('src.generation.write_final', side_effect=writer_side_effect(mutate=three)):
             root = Path(directory)
             self.prepare(root)
@@ -172,11 +196,11 @@ class CLITests(unittest.TestCase):
             script = self.read(root, 'presentation_script.json')
             self.assertEqual(script['render']['ai_generation'], 'skipped')
             self.assertIn('SEM REAÇÃO DE IA', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8'))
-            self.assertIn('--no-analyst', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8'))
+            self.assertIn('fallback', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8').casefold())
 
     def test_analyze_only_never_calls_the_writer(self):
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})) as analyst, \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()) as analyst, \
                 patch('src.generation.write_final') as writer:
             root = Path(directory)
             self.prepare(root)
@@ -185,17 +209,18 @@ class CLITests(unittest.TestCase):
             writer.assert_not_called()
             self.assertEqual(self.read(root, 'run_status.json')['writer'], 'skipped')
             self.assertTrue(self.read(root, 'final_writer_request.json')['request'])
-    def test_no_analyst_flag_still_reaches_the_writer(self):
+    def test_no_analyst_flag_is_debug_only_and_never_fakes_a_judgment(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch('src.generation.analyze_semantically') as analyst, \
-                patch('src.generation.write_final', side_effect=writer_side_effect()):
+                patch('src.generation.write_final') as writer:
             root = Path(directory)
             self.prepare(root)
             self.assertEqual(self.run_app(root, ['--no-analyst'], 'synthetic-key'), 0)
             analyst.assert_not_called()
+            writer.assert_not_called()
             status = self.read(root, 'run_status.json')
             self.assertEqual(status['analyst'], 'skipped_by_flag')
-            self.assertTrue(status['judgment_generated'])
+            self.assertFalse(status['judgment_generated'])
 
     def test_model_discovery_runs_once_and_is_audited(self):
         listing = [{'name': 'models/gemini-flash-latest', 'supportedGenerationMethods': ['generateContent']},
@@ -203,7 +228,7 @@ class CLITests(unittest.TestCase):
                    {'name': 'models/gemini-2.5-flash-preview-tts', 'supportedGenerationMethods': ['generateContent']}]
         with tempfile.TemporaryDirectory() as directory, \
                 patch('src.generation.list_models', return_value=listing) as discovery, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})), \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()), \
                 patch('src.generation.write_final', side_effect=writer_side_effect()):
             root = Path(directory)
             self.prepare(root)
@@ -214,11 +239,12 @@ class CLITests(unittest.TestCase):
             self.assertEqual(record['discovered_models'], ['gemini-flash-latest'])
             self.assertEqual({item['model'] for item in record['rejected']},
                              {'text-embedding-004', 'gemini-2.5-flash-preview-tts'})
-            self.assertEqual(record['chain'], ['gemini-flash-latest'])
+            self.assertEqual(record['writer_chain'], ['gemini-flash-latest'])
+            self.assertEqual(record['analyst_chain'], ['gemini-flash-latest'])
 
     def test_validated_cache_avoids_repeating_calls(self):
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})) as analyst, \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()) as analyst, \
                 patch('src.generation.write_final', side_effect=writer_side_effect()) as writer:
             root = Path(directory)
             self.prepare(root)
@@ -266,7 +292,7 @@ class CLITests(unittest.TestCase):
 
     def test_raw_export_can_be_disabled_for_huge_exports(self):
         with tempfile.TemporaryDirectory() as directory, \
-                patch('src.generation.analyze_semantically', return_value=('{"semantic_findings": []}', {})) as analyst, \
+                patch('src.generation.analyze_semantically', side_effect=analyst_side_effect()) as analyst, \
                 patch('src.generation.write_final', side_effect=writer_side_effect()):
             root = Path(directory)
             self.prepare(root)
