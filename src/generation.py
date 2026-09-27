@@ -28,7 +28,7 @@ ARCHETYPE_FILMS = 4
 class GenerationConfig:
     model: str = 'gemini-flash-latest'
     language: str = 'pt-BR'
-    max_context: int = 300000
+    max_context: int = 1000000
     max_beats: int = 10
     writer_max_context: int = 60000
     max_lines: int = 3
@@ -42,7 +42,7 @@ class GenerationConfig:
     @classmethod
     def from_env(cls) -> 'GenerationConfig':
         config = cls(os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), os.getenv('JUDGE_LANGUAGE', 'pt-BR'),
-                     int(os.getenv('MAX_CONTEXT_CHARS', '300000')), int(os.getenv('SCRIPT_MAX_BEATS', '10')),
+                     int(os.getenv('MAX_CONTEXT_CHARS', '1000000')), int(os.getenv('SCRIPT_MAX_BEATS', '10')),
                      int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '60000')), int(os.getenv('WRITER_MAX_LINES', '3')),
                      int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
                      float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models(),
@@ -105,7 +105,8 @@ def save(path: Path, value: object) -> None:
 
 
 
-def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root: Path, config: GenerationConfig,
+def generate(profile: UserProfile, analysis: dict, findings: list[Finding], raw_export: dict,
+             root: Path, config: GenerationConfig,
              api_key: str, dry_run: bool, analyze_only: bool, skip_analyst: bool,
              report: Callable[[str], None]) -> tuple[dict, str, bool]:
     """Two AI calls at most: one Analyst, one Final Writer. Everything else is local and auditable."""
@@ -113,7 +114,10 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root
     locale = bundle(config.language)
     analyst_prompt = (root / 'prompts' / 'analyst.txt').read_text(encoding='utf-8')
     writer_prompt = (root / 'prompts' / 'writer.txt').read_text(encoding='utf-8')
-    context, message = build_context(profile, analysis, findings, analyst_prompt, config.max_context, config.language)
+    context, message = build_context(profile, analysis, findings, analyst_prompt, config.max_context,
+                                     config.language, raw_export)
+    # The pool/validator only needs the normalized evidence index; raw_export is already
+    # present in the Analyst request and is intentionally not duplicated here.
     full_dataset = build_dataset(profile, analysis, findings, config.language)
     ids = film_ids(profile)
     save(output / 'ai_id_map.json', ids)
@@ -129,8 +133,9 @@ def generate(profile: UserProfile, analysis: dict, findings: list[Finding], root
     if status_path.exists():
         state['previous_run'] = json.loads(status_path.read_text(encoding='utf-8')).get('previous_run')
     save(output / 'run_status.json', state)
-    report(f"Contexto Analyst: {len(analyst_prompt) + len(message):,} caracteres; "
-           f"{len(context['reviews'])}/{len(profile.reviews)} reviews.")
+    report(f"Contexto Analyst COMPLETO: {len(analyst_prompt) + len(message):,} caracteres; "
+           f"{context['coverage']['raw_export_files']} arquivos do ZIP; "
+           f"{len(context['reviews'])}/{len(profile.reviews)} reviews no índice normalizado; sem truncamento.")
     semantic, rejected, failed = [], [], False
     if dry_run or not api_key:
         state['analyst'] = 'skipped'
