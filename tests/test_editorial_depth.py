@@ -2,10 +2,11 @@ import unittest
 
 from src.analysis_enrichment import enrich_rewatches, match_reviews_to_diary, review_coverage
 from src.analyzer import rewatch_analysis
+from src.editorial_priority import closer_key
 from src.model_discovery import build_chain
 from src.models import DiaryEntry, FilmRecord, ReviewRecord, UserProfile
 from src.review_style import analyze_review_style
-from src.run_quality import analyst_quality, required_semantic_moments
+from src.run_quality import analyst_quality, required_semantic_moments, writer_quality
 
 
 def profile_with_reviews() -> UserProfile:
@@ -21,7 +22,7 @@ def profile_with_reviews() -> UserProfile:
         review = ReviewRecord(
             id=f'reviews:{index}', film_key='f1', date=diary.date, logged_date=diary.logged_date,
             rating=5, rewatch=diary.rewatch, tags=list(diary.tags), uri='', source='reviews.csv',
-            text='<blockquote>frase citada</blockquote> Dito isso, gostei muito.'
+            text='<blockquote>frase citada</blockquote> Corte seco, gostei muito.'
         )
         profile.diary.append(diary)
         profile.reviews.append(review)
@@ -77,6 +78,19 @@ class EditorialDepthTests(unittest.TestCase):
         report = analyst_quality(analysis, [{}] * 5, [{}] * 3)
         self.assertFalse(report['passes'])
         self.assertTrue(analyst_quality(analysis, [{}] * 6, [])['passes'])
+
+    def test_closer_prefers_self_reference_before_plain_score(self):
+        self.assertGreater(
+            closer_key({'type': 'self_irony', 'score': 70, 'confidence': .9}),
+            closer_key({'type': 'semantic_contrast', 'score': 99, 'confidence': 1})
+        )
+
+    def test_lite_writer_is_marked_as_degraded(self):
+        quality = writer_quality({'beats': {'b1': [], 'b2': [{'text': 'x'}]}, 'closer': []},
+                                 'gemini-flash-lite-latest')
+        self.assertTrue(quality['quality_degraded'])
+        self.assertEqual(quality['reaction_lines'], 1)
+        self.assertEqual(quality['silent_moments'], 2)
 
 
 if __name__ == '__main__':
