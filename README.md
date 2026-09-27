@@ -52,6 +52,15 @@ pois `/api/judge` é executado como Pages Function.
   momentos editoriais, chama Gemini com saída estruturada e monta o Presentation Script.
   Não há dependência de Python, subprocesso ou serviço externo próprio.
 
+  A resposta do modelo nunca vira roteiro sem validação: JSON cortado pelo limite de saída
+  é reparado, campos de ritmo ausentes usam padrões e cada rejeição volta para a IA com o
+  motivo e os ids que faltam. Se nada utilizável chegar, o julgamento sai parcial
+  (`render.ai_generation: partial`, `quality_degraded: true`, `ai.warnings`) com todas as
+  evidências, em vez de uma tela de erro; só resposta ilegível em todas as tentativas é
+  reportada como erro de formato.
+
+
+
 ### Atualizar a demo
 
 ```powershell

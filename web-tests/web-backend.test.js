@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {unzipText} from '../functions/_lib/zip.js';
 import {parseExport,analyzeExport} from '../functions/_lib/letterboxd.js';
 import {buildPresentation} from '../functions/_lib/judge.js';
+import {salvageJson,normalizeJudgment} from '../functions/_lib/gemini.js';
+
 import {onRequestPost} from '../functions/api/judge.js';
 
 const encoder=new TextEncoder();
@@ -74,3 +76,86 @@ test('judge lines become quote segments and AI durations reach the queue',async(
   ['pause:long','phrase:','review_quote:','review_quote:','pause:medium','typing:long','message:','pause:long','message:','pause:short']);
  assert.deepEqual(script.beats[0].lines.map(line=>line.effect),['none','quote','none','none']);
 });
+
+const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',...extra}});};
+const readExport=async()=>{const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files);return {profile,analysis:analyzeExport(profile,'pt-BR')};};
+
+test('a cut model answer is salvaged and then repaired instead of failing',async t=>{
+ const {profile,analysis}=await readExport(),ids=analysis.moments.map(moment=>moment.id);
+ const cut=`{"greeting":"Certo.","archetype_phrase":"quatro atos","profile_reaction":"","reactions":[{"id":"${ids[0]}","lines":["Primeira linha.","Segunda`;
+ const complete={greeting:'Certo.',archetype_phrase:'quatro atos',profile_reaction:'',reactions:ids.map(id=>({id,lines:[`Sobre ${id}.`],evidence_pause:'long',after_evidence:'long',typing:'medium',between_lines:'short',after_reaction:'long'}))};
+ const prompts=[];
+ t.mock.method(globalThis,'fetch',async(url,options)=>{prompts.push(JSON.parse(options.body).contents[0].parts[0].text);
+  if(prompts.length===1)return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:cut}]}}]});
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(complete)}]}}]});});
+ const result=await judge();assert.equal(result.status,200);
+ const script=await result.json();
+ // The truncated reaction is kept, the missing ids are requested again in one more call.
+ assert.equal(prompts.length,2);assert.match(prompts[1],/rejected/);assert.match(prompts[1],/still required/i);
+ assert.equal(script.render.quality_degraded,false);assert.equal(script.render.salvaged,true);assert.equal(script.ai.warnings.length,0);
+ assert.equal(script.beats.length,ids.length);
+ assert.deepEqual(script.beats[0].lines.map(line=>line.text),['Primeira linha.','Segunda']);
+ assert.equal(script.beats[0].event_count>0,true);
+});
+
+test('an unusable model answer degrades to a partial script instead of an error screen',async t=>{
+ const {analysis}=await readExport();
+ let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'{"greeting":"Oi'}]}}]});});
+ const result=await judge();assert.equal(result.status,200);
+ const script=await result.json();
+ assert.ok(calls>=4);assert.equal(script.render.quality_degraded,true);assert.equal(script.render.ai_generation,'partial');
+ assert.ok(script.ai.warnings.some(warning=>warning.includes('missing reactions')));
+ assert.equal(script.opening.salutation,'Oi');
+ assert.equal(script.beats.length,analysis.moments.length);
+ assert.equal(script.beats.every(beat=>beat.status==='silent'&&beat.render_strategy==='silence'),true);
+ // Evidence, stats and the opening are deterministic, so the judgment still happens.
+ assert.equal(script.events.some(event=>event.type==='profile_stats'),true);
+ assert.equal(script.events.filter(event=>event.type==='typing').length>0,true);
+});
+
+test('an unreadable model answer still reports a clear model error',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]}));
+ const result=await judge();assert.equal(result.status,502);assert.equal((await result.json()).error,'gemini_invalid_response');
+});
+
+
+test('a model that rejects thinkingConfig is retried without it',async t=>{
+ const {analysis}=await readExport(),ids=analysis.moments.map(moment=>moment.id);
+ const complete={greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:ids.map(id=>({id,lines:[`Sobre ${id}.`]}))};
+ const configs=[];
+ t.mock.method(globalThis,'fetch',async(url,options)=>{configs.push(JSON.parse(options.body).generationConfig);
+  if(configs.length===1)return Response.json({error:{message:'Request contains an invalid argument.'}},{status:400});
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(complete)}]}}]});});
+ const result=await judge();assert.equal(result.status,200);
+ // The output budget is never the reason the reply gets cut; a rejected thinking
+ // configuration is dropped on the spot instead of failing the whole judgment.
+ assert.deepEqual(configs[0].thinkingConfig,{thinkingBudget:0});assert.equal(configs[0].maxOutputTokens,8192);
+ assert.equal(configs[1].thinkingConfig,undefined);assert.equal(configs[1].maxOutputTokens,8192);
+ const script=await result.json();assert.equal(script.render.quality_degraded,false);assert.equal(script.beats.length,ids.length);
+});
+
+test('salvageJson keeps the readable part of a cut reply',()=>{
+ assert.deepEqual(salvageJson('{"greeting":"Oi","reactions":[{"id":"a","lines":["b","c'),{greeting:'Oi',reactions:[{id:'a',lines:['b','c']}]});
+ assert.deepEqual(salvageJson('```json\n{"a":"b"}\n```'),{a:'b'});
+ assert.deepEqual(salvageJson('aqui vem texto {"a":"b"} e mais prosa'),{a:'b'});
+ assert.equal(salvageJson('nenhum json aqui'),null);
+ assert.equal(salvageJson('{"a":'),null);
+ // Braces inside a string and a dangling separator must not confuse the repair.
+ assert.deepEqual(salvageJson('{"a":"}{[]","b":'),{a:'}{[]'});
+ assert.equal(salvageJson('{"a":"linha\nlinha2').a,'linha linha2');
+ assert.equal(salvageJson('{"a":"diz \\"oi').a,'diz "oi');
+});
+
+test('normalizeJudgment fills missing rhythm and flags unusable reactions',()=>{
+ const ids=['a','b'];
+ const ok=normalizeJudgment({greeting:'Certo.',archetype_phrase:'x',profile_reaction:'y',reactions:[{id:'a',lines:'uma linha'},{id:'b',lines:['b1'],evidence_pause:'long',typing:'nonsense'}]},ids);
+ assert.equal(ok.ok,true);assert.deepEqual(ok.missing,[]);assert.deepEqual(ok.problems,[]);
+ assert.deepEqual(ok.reactions.find(row=>row.id==='a'),{id:'a',lines:['uma linha'],evidence_pause:'medium',after_evidence:'long',typing:'short',between_lines:'medium',after_reaction:'medium'});
+ assert.equal(ok.reactions.find(row=>row.id==='b').evidence_pause,'long');assert.equal(ok.reactions.find(row=>row.id==='b').typing,'short');
+ const bad=normalizeJudgment({greeting:'',archetype_phrase:'x',profile_reaction:'y',reactions:[{id:'a',lines:['x']},{id:'extra',lines:['x']},{id:'a'}]},ids);
+ assert.equal(bad.ok,false);assert.deepEqual(bad.missing,['b']);
+ assert.equal(bad.problems.some(problem=>problem.includes('unknown evidence id')),true);
+ assert.equal(bad.problems.some(problem=>problem.includes('greeting is empty')),true);
+ assert.equal(normalizeJudgment(null,ids).ok,false);assert.equal(normalizeJudgment('nope',ids).ok,false);
+});
+
