@@ -185,6 +185,38 @@ def moment_payload(moment: dict, max_lines: int, max_words: int) -> dict:
     }
 
 
+def compact_review_style(style: dict | None) -> dict:
+    """Global style context for rhythm/callbacks, without shipping huge ID arrays twice."""
+    style = style or {}
+    def rows(name: str, limit: int):
+        return [
+            {key: row.get(key) for key in ('id', 'kind', 'phrase', 'markup', 'count', 'share',
+                                            'phrase_coverage', 'markup_coverage') if row.get(key) is not None}
+            for row in style.get(name, [])[:limit]
+        ]
+    return {
+        'review_count': style.get('review_count'),
+        'phrases': rows('phrases', 15),
+        'openings': rows('openings', 8),
+        'closings': rows('closings', 8),
+        'markup': {
+            key: {k: row.get(k) for k in ('id', 'kind', 'markup', 'count', 'share')}
+            for key, row in (style.get('markup') or {}).items()
+        },
+        'intersections': rows('intersections', 15),
+    }
+
+
+def compact_review_coverage(coverage: dict | None) -> dict:
+    coverage = coverage or {}
+    return {
+        key: coverage.get(key)
+        for key in ('diary_sessions', 'matched_sessions', 'matched_review_records',
+                    'sessions_without_review', 'reviewed_session_percent', 'matching_semantics')
+        if key in coverage
+    }
+
+
 def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, locale, top_four: list[dict],
                        max_lines: int = 4, max_words: int = 14, overview: dict | None = None,
                        review_style: dict | None = None, review_coverage: dict | None = None) -> dict:
@@ -195,8 +227,8 @@ def final_writer_input(moments: list[dict], closer: dict | None, plan: dict, loc
         'top_four_films': top_four,
         'editorial_dossier': {
             'profile_overview': overview or {},
-            'review_style': review_style or {},
-            'review_coverage': review_coverage or {},
+            'review_style': compact_review_style(review_style),
+            'review_coverage': compact_review_coverage(review_coverage),
             'note': 'Use this for global rhythm/callback context; beat facts still come from each moment evidence.'
         },
         'opening_slots': {
