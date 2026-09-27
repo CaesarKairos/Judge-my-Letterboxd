@@ -9,8 +9,8 @@ from .validator import numeric_tokens, schema_errors
 # Concepts that would turn a film theme into a claim about the person.
 FORBIDDEN_CONCEPT = re.compile(
     r'\b(gay|lesbi|homossex|trans|travesti|bi\s?sexual|relig|deus|igreja|católic|evang|islam|jud|comunist|socialis|'
-    r'polític|partido|eleitoral|depress|ansiedade|bipolar|esquiz|autis|psicopata|diagnóstic|terapia)\w*', re.I)
-ARCHETYPE_CONCEPT_WORDS = 2
+    r'polític|partido|eleitoral|depress|ansiedade|bipolar|esquiz|autis|psicopata|diagnóstic|terapia|'
+    r'raça|racial|etnia|étnic|negro|branco|indígena)\w*', re.I)
 PROFILE_REACTION_WORDS = 14
 TIMING_TOKEN = re.compile(r'\b\d+\s*(?:ms|mseg|milissegundos?|segundos?|s)\b', re.I)
 ABSOLUTES = {'pt-BR': re.compile(r'\b(sempre|nunca|nenhum[as]?|tod[ao]s?|toda vez|uma única|exclusivamente|obrigatoriamente|sem exceção|100%)\b', re.I),
@@ -102,32 +102,47 @@ def validate_lines(lines, moment: dict, max_lines: int, max_words: int) -> tuple
 
 
 def validate_archetype(concepts, locale) -> tuple[list[str], list[str]]:
-    """Exactly four short, distinct, theme-level concepts; never a statement about the person."""
+    """Audit the four film concepts without controlling the display phrase."""
     if not isinstance(concepts, list) or len(concepts) != 4:
-        return [], ['top_four_archetype must contain exactly four concepts']
+        return [], ['archetype_concepts must contain exactly four concepts']
     clean = []
     for concept in concepts:
-        text = str(concept or '').strip()
-        if not text or len(text.split()) > ARCHETYPE_CONCEPT_WORDS or numeric_tokens(text):
-            return [], ['archetype concept must be one or two plain words']
+        if not isinstance(concept, str):
+            return [], ['archetype concept is not text']
+        text = ' '.join(concept.split()).strip()
+        if not text or len(text) > 70 or re.search(r'[\x00-\x1f<>`*_#\[\]]', text):
+            return [], ['invalid archetype concept']
         if FORBIDDEN_CONCEPT.search(text):
-            return [], ['archetype concept describes the person instead of the film']
+            return [], ['archetype concept contains sensitive content']
         clean.append(text)
     if len({text.casefold() for text in clean}) != 4:
         return [], ['archetype concepts must be distinct']
     return clean, []
 
 
-def validate_archetype_phrase(phrase, overview: dict) -> tuple[str, list[str]]:
+def normalize_archetype_phrase(phrase, overview: dict) -> tuple[str, list[str], bool]:
+    """Only mechanical repairs; never compose a new nickname from concept tokens."""
     if not isinstance(phrase, str):
-        return '', ['archetype phrase is missing']
-    phrase = phrase.strip()
-    if (not phrase or len(phrase) > 70 or '\n' in phrase or '\r' in phrase
-            or re.search(r'[<>`*_#\[\]]', phrase) or FORBIDDEN_CONCEPT.search(phrase)
-            or numeric_tokens(phrase) or phrase.casefold() in {
+        return '', ['archetype phrase is missing'], False
+    original = phrase
+    if re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', phrase):
+        return '', ['archetype phrase contains control characters'], False
+    phrase = ' '.join(phrase.split()).strip(' \t\"“”‘’').strip().rstrip('.')
+    if len(phrase) > 70:
+        boundary = phrase[:71].rfind(' ')
+        if boundary < 3:
+            return '', ['archetype phrase exceeds 70 characters without word boundary'], False
+        phrase = phrase[:boundary].rstrip(' -')
+    if (not phrase or re.search(r'[<>`*_#\[\]]', phrase) or FORBIDDEN_CONCEPT.search(phrase)
+            or phrase.casefold() in {
                 str(overview.get(key, '')).casefold() for key in ('username', 'handle', 'name')}):
-        return '', ['invalid archetype phrase']
-    return phrase, []
+        return '', ['archetype phrase is empty, unsafe or a username'], False
+    return phrase, [], phrase != original
+
+
+def validate_archetype_phrase(phrase, overview: dict) -> tuple[str, list[str]]:
+    clean, errors, _ = normalize_archetype_phrase(phrase, overview)
+    return clean, errors
 
 
 def validate_opening(opening: dict, plan: dict, locale, overview: dict) -> tuple[dict, list[str]]:
@@ -150,9 +165,18 @@ def validate_opening(opening: dict, plan: dict, locale, overview: dict) -> tuple
     archetype, archetype_errors = validate_archetype(opening.get('archetype_concepts'), locale)
     result['archetype'] = archetype
     warnings.extend(archetype_errors)
-    phrase, phrase_errors = validate_archetype_phrase(opening.get('archetype_phrase'), overview)
-    result['archetype_phrase'] = phrase if archetype else ''
+    phrase, phrase_errors, repaired = normalize_archetype_phrase(opening.get('archetype_phrase'), overview)
+    result['archetype_phrase'] = phrase
     warnings.extend(phrase_errors)
+    result['top_four_archetype'] = {
+        'requested': bool(plan.get('archetype_requested')),
+        'concepts': archetype,
+        'phrase': phrase,
+        'valid': bool(phrase),
+        'repaired': repaired,
+        'fallback_used': bool(plan.get('archetype_requested') and not phrase),
+        'issues': archetype_errors + phrase_errors,
+    }
     reaction, problems = validate_lines(opening.get('profile_reaction') or [],
                                         {'display': [], 'evidence': [], 'max_lines': 1}, 1, PROFILE_REACTION_WORDS)
     revealed = numeric_tokens(json.dumps(overview, ensure_ascii=False))

@@ -195,6 +195,7 @@ def build_presentation(plan: dict, entries: list[dict], closer: dict | None, ren
                                                'adjective_pair': plan['adjective_pair'],
                                                'archetype': plan.get('archetype') or [],
                                                'archetype_text': plan.get('archetype_text', ''),
+                                               'top_four_archetype': plan.get('top_four_archetype', {}),
                                                'profile_reaction': plan.get('profile_reaction') or []},
             'render': render, 'ai': ai, 'beats': beats, 'events': events}
 
