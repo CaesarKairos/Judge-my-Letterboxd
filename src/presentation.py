@@ -227,7 +227,7 @@ def event_text(event: dict) -> str:
     if kind == 'strike':
         return f'~~{event["text"]}~~'
     if kind == 'correction':
-        return f'*{event["original"]} {event["replacement"]}'.strip()
+        return f'*{event["replacement"]}'.strip()
     if kind == 'profile_stats':
         return fmt_stats(event['stats'])
     if kind == 'stat':
