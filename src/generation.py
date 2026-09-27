@@ -29,7 +29,7 @@ class GenerationConfig:
     model: str = 'gemini-flash-latest'
     language: str = 'pt-BR'
     max_context: int = 1000000
-    max_beats: int = 10
+    max_beats: int = 8
     writer_max_context: int = 60000
     max_lines: int = 3
     max_words: int = 24
@@ -42,7 +42,7 @@ class GenerationConfig:
     @classmethod
     def from_env(cls) -> 'GenerationConfig':
         config = cls(os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), os.getenv('JUDGE_LANGUAGE', 'pt-BR'),
-                     int(os.getenv('MAX_CONTEXT_CHARS', '1000000')), int(os.getenv('SCRIPT_MAX_BEATS', '10')),
+                     int(os.getenv('MAX_CONTEXT_CHARS', '1000000')), int(os.getenv('SCRIPT_MAX_BEATS', '8')),
                      int(os.getenv('WRITER_MAX_CONTEXT_CHARS', '60000')), int(os.getenv('WRITER_MAX_LINES', '3')),
                      int(os.getenv('WRITER_MAX_WORDS_PER_LINE', '24')), float(os.getenv('ANALYST_TEMPERATURE', '.2')),
                      float(os.getenv('WRITER_TEMPERATURE', '.7')), fallback_models(),
