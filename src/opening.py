@@ -60,16 +60,20 @@ def build_events(plan: dict, archetype: str | None, profile_reaction: list[dict]
     events = [typing(rhythm['greeting']), message(plan['salutation'])]
     if archetype or plan.get('archetype_requested'):
         events.extend([typing(rhythm['before_archetype']), message(locale.phrase('opening.intro_before_archetype'))])
+        events[-1]['cue'] = 'top_four_reveal'
         if archetype:
             events.extend([message(archetype), pause(rhythm['archetype_pause']),
                            message(locale.phrase('opening.archetype_question')), pause(rhythm['archetype_pause']),
                            message(locale.phrase('opening.archetype_too_long'))])
+            events[-5]['role'] = 'archetype_phrase'
         else:
             events.extend([pause(rhythm['archetype_pause']), message(locale.phrase('opening.archetype_empty')),
                            pause(rhythm['archetype_pause']), message(locale.phrase('opening.archetype_give_up'))])
         events.extend([
                        message(locale.phrase('opening.fallback_name', name=plan['name']) if plan['name']
                                 else locale.phrase('opening.fallback_name_missing'))])
+    elif plan.get('top_four'):
+        events[-1]['cue'] = 'top_four_reveal'
     events.extend([typing('short'), message(locale.phrase('opening.taste_prefix')), strike(pair['negative']),
                    pause(rhythm['taste_pause']), correction(pair['negative'], pair['positive']),
                    message(f" {locale.phrase('opening.taste_suffix')}"),

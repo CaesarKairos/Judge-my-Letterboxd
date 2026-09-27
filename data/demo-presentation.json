@@ -1,0 +1,809 @@
+{
+  "version": "presentation-v1",
+  "template": "opening_v1",
+  "locale": "pt-BR",
+  "profile": {
+    "name": "CaesarKairos",
+    "handle": "CaesarKairos",
+    "display_name": "CaesarKairos"
+  },
+  "stats": [
+    {
+      "key": "watched_films",
+      "value": 106,
+      "label": "filmes vistos"
+    },
+    {
+      "key": "reviews",
+      "value": 103,
+      "label": "reviews"
+    },
+    {
+      "key": "diary_entries",
+      "value": 110,
+      "label": "sessões"
+    },
+    {
+      "key": "rated_films",
+      "value": 92,
+      "label": "ratings"
+    },
+    {
+      "key": "explicit_rewatches",
+      "value": 9,
+      "label": "rewatches"
+    }
+  ],
+  "opening": {
+    "salutation": "Certo.",
+    "adjective_pair": {
+      "negative": "questionável",
+      "positive": "excelente"
+    },
+    "archetype": [
+      "caubóis",
+      "engenharia genética",
+      "cabular aula",
+      "inteligência artificial"
+    ],
+    "archetype_text": "caubóis e andróides matando aula na distopia genética",
+    "top_four_archetype": {
+      "requested": true,
+      "concepts": [
+        "caubóis",
+        "engenharia genética",
+        "cabular aula",
+        "inteligência artificial"
+      ],
+      "phrase": "caubóis e andróides matando aula na distopia genética",
+      "valid": true,
+      "repaired": false,
+      "fallback_used": false,
+      "issues": []
+    },
+    "profile_reaction": [
+      {
+        "text": "Cento e três reviews para cento e seis filmes. Quase uma obrigação.",
+        "effect": "none"
+      }
+    ],
+    "top_four": [
+      {
+        "film_key": "f0042",
+        "title": "Brokeback Mountain",
+        "year": "2005"
+      },
+      {
+        "film_key": "f0089",
+        "title": "Gattaca",
+        "year": "1997"
+      },
+      {
+        "film_key": "f0083",
+        "title": "Ferris Bueller's Day Off",
+        "year": "1986"
+      },
+      {
+        "film_key": "f0011",
+        "title": "A.I. Artificial Intelligence",
+        "year": "2001"
+      }
+    ]
+  },
+  "events": [
+    {
+      "type": "typing",
+      "duration": "medium"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Certo.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "long"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Você deve ser o...",
+          "effect": "none"
+        }
+      ],
+      "cue": "top_four_reveal"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "caubóis e andróides matando aula na distopia genética",
+          "effect": "none"
+        }
+      ],
+      "role": "archetype_phrase"
+    },
+    {
+      "type": "pause",
+      "duration": "medium"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "...?",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "pause",
+      "duration": "medium"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Grande demais.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Pode ser só CaesarKairos.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Me falaram que você tem um",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "strike",
+      "text": "questionável"
+    },
+    {
+      "type": "pause",
+      "duration": "short"
+    },
+    {
+      "type": "correction",
+      "original": "questionável",
+      "replacement": "excelente"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": " gosto pra filmes.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Mas fala sério.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Só quem pode julgar isso sou eu.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "medium"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Deixa eu ver.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "medium"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "...!",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "profile_stats",
+      "stats": [
+        {
+          "key": "watched_films",
+          "value": 106,
+          "label": "filmes vistos"
+        },
+        {
+          "key": "reviews",
+          "value": 103,
+          "label": "reviews"
+        },
+        {
+          "key": "diary_entries",
+          "value": 110,
+          "label": "sessões"
+        },
+        {
+          "key": "rated_films",
+          "value": 92,
+          "label": "ratings"
+        },
+        {
+          "key": "explicit_rewatches",
+          "value": 9,
+          "label": "rewatches"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Cento e três reviews para cento e seis filmes. Quase uma obrigação.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "phrase",
+      "phrase": "dito isso",
+      "stats": [
+        {
+          "key": "reviews",
+          "value": 86,
+          "label": "reviews"
+        },
+        {
+          "key": "share",
+          "value": 0.8349514563106796,
+          "label": "share"
+        }
+      ]
+    },
+    {
+      "type": "review_quote",
+      "film_key": null,
+      "title": "",
+      "year": "",
+      "rating": null,
+      "text": "Dito isso:\n\"",
+      "review_id": null,
+      "segments": [
+        {
+          "type": "text",
+          "text": "Dito isso:"
+        },
+        {
+          "type": "blockquote",
+          "text": "\""
+        }
+      ]
+    },
+    {
+      "type": "review_quote",
+      "film_key": null,
+      "title": "",
+      "year": "",
+      "rating": null,
+      "text": "Dito isso:\n\"A sociedade sempre teve medo de mulheres que voam. Sejam elas bruxas, sejam elas livres\" — Ana Paula Renault.",
+      "review_id": null,
+      "segments": [
+        {
+          "type": "text",
+          "text": "Dito isso:"
+        },
+        {
+          "type": "blockquote",
+          "text": "\"A sociedade sempre teve medo de mulheres que voam. Sejam elas bruxas, sejam elas livres\" — Ana Paula Renault."
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Oitenta e seis vezes.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Você se recusa a terminar um texto sem mandar um Dito isso solene.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Mesmo que seja para citar a Ana Paula Renault em Abracadabra.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film_pair",
+      "films": [
+        {
+          "film_key": "f0063",
+          "title": "Dead Poets Society",
+          "year": "1989",
+          "rating": 1.5
+        },
+        {
+          "film_key": "f0251",
+          "title": "The Breakfast Club",
+          "year": "1985",
+          "rating": 1.5
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "caption": "",
+      "stats": []
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Clube dos Cinco e Sociedade dos Poetas Mortos ganham um vírgula cinco.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Mas Carros 2 é uma obra de arte de quatro estrelas e meia.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "O Relâmpago McQueen realmente mudou sua vida.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film",
+      "film": {
+        "film_key": "f0340",
+        "title": "Young Hearts",
+        "year": "2024",
+        "rating": 5.0
+      }
+    },
+    {
+      "type": "rewatch",
+      "film": {
+        "film_key": "f0340",
+        "title": "Young Hearts",
+        "year": "2024",
+        "rating": 5.0
+      },
+      "sessions": [
+        {
+          "diary_id": "diary.csv:13",
+          "date": "2026-01-01",
+          "logged_date": "2026-01-01",
+          "rating": 5.0,
+          "rewatch": false,
+          "tags": [
+            "→ watched via streaming 𖦹",
+            "→ eudaimonia 𖦹"
+          ],
+          "review_ids": [
+            "reviews.csv:9"
+          ],
+          "index": 1
+        },
+        {
+          "diary_id": "diary.csv:26",
+          "date": "2026-02-23",
+          "logged_date": "2026-02-24",
+          "rating": 5.0,
+          "rewatch": true,
+          "tags": [
+            "→ watched with agathinha (gaah) 𖦹",
+            "→ watched via streaming 𖦹"
+          ],
+          "review_ids": [
+            "reviews.csv:22"
+          ],
+          "index": 2
+        },
+        {
+          "diary_id": "diary.csv:70",
+          "date": "2026-07-05",
+          "logged_date": "2026-07-06",
+          "rating": 5.0,
+          "rewatch": true,
+          "tags": [
+            "→ watched via streaming 𖦹"
+          ],
+          "review_ids": [
+            "reviews.csv:65"
+          ],
+          "index": 3
+        }
+      ],
+      "stats": [
+        {
+          "key": "sessions",
+          "value": 3,
+          "label": "sessions"
+        },
+        {
+          "key": "explicit_rewatches",
+          "value": 2,
+          "label": "explicit_rewatches"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Três sessões de Young Hearts em seis meses.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "A nota máxima nunca cai.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Sua sanidade depende de garotos felizes andando de bicicleta.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Nenhum filme no seu perfil merece o seu coração.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Nem mesmo os seus quatro favoritos.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "O botão de curtir é exclusivo para a opinião dos outros.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film",
+      "film": {
+        "film_key": "f0327",
+        "title": "Up",
+        "year": "2009",
+        "rating": 4.0
+      }
+    },
+    {
+      "type": "review_quote",
+      "review_id": "reviews.csv:35",
+      "film_key": "f0327",
+      "title": "Up",
+      "year": "2009",
+      "rating": 4.0,
+      "text": "Adicionei esse filme na redação do meu primeiro Enem. Agora sei que não disse coisa com coisa e lembrava do filme de outra forma",
+      "segments": [
+        {
+          "type": "text",
+          "text": "Adicionei esse filme na redação do meu primeiro Enem. Agora sei que não disse coisa com coisa e lembrava do filme de outra forma"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Usar Up na redação do ENEM é um clássico nacional.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Inventar os fatos do filme e torcer para o corretor ser leigo é genial.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film",
+      "film": {
+        "film_key": "f0118",
+        "title": "Interstellar",
+        "year": "2014",
+        "rating": 2.5
+      }
+    },
+    {
+      "type": "review_quote",
+      "review_id": "reviews.csv:68",
+      "film_key": "f0118",
+      "title": "Interstellar",
+      "year": "2014",
+      "rating": 2.5,
+      "text": "Mitificado",
+      "segments": [
+        {
+          "type": "text",
+          "text": "Mitificado"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Interestelar ganhou duas estrelas e meia por parecer genérico.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Aparentemente o espaço sideral do Nolan usa imagens de estoque.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film",
+      "film": {
+        "film_key": "f0087",
+        "title": "Flow",
+        "year": "2024",
+        "rating": 5.0
+      }
+    },
+    {
+      "type": "review_quote",
+      "review_id": "reviews.csv:4",
+      "film_key": "f0087",
+      "title": "Flow",
+      "year": "2024",
+      "rating": 5.0,
+      "text": "Os cara só queriam mostrar oque eles sabia fazer no blender, ótimo filme. Miau.",
+      "segments": [
+        {
+          "type": "text",
+          "text": "Os cara só queriam mostrar oque eles sabia fazer no blender, ótimo filme. Miau."
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Uma obra-prima em 3D resumida com precisão técnica.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Miau.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film",
+      "film": {
+        "film_key": "f0023",
+        "title": "Apocalypse in the Tropics",
+        "year": "2024",
+        "rating": 4.0
+      }
+    },
+    {
+      "type": "review_quote",
+      "review_id": "reviews.csv:5",
+      "film_key": "f0023",
+      "title": "Apocalypse in the Tropics",
+      "year": "2024",
+      "rating": 4.0,
+      "text": "☭",
+      "segments": [
+        {
+          "type": "text",
+          "text": "☭"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Petra Costa recebeu a análise política mais profunda possível.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Um único caractere bastou.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "film",
+      "film": {
+        "film_key": "f0210",
+        "title": "Red, White & Royal Blue",
+        "year": "2023",
+        "rating": 2.0
+      }
+    },
+    {
+      "type": "review_quote",
+      "review_id": "reviews.csv:101",
+      "film_key": "f0210",
+      "title": "Red, White & Royal Blue",
+      "year": "2023",
+      "rating": 2.0,
+      "text": "meu tipo de filme homossexual é o contrário, eu gosto da dor de ser gay, da tristeza de ter que encarar essa realidade",
+      "segments": [
+        {
+          "type": "text",
+          "text": "meu tipo de filme homossexual é o contrário, eu gosto da dor de ser gay, da tristeza de ter que encarar essa realidade"
+        }
+      ]
+    },
+    {
+      "type": "typing",
+      "duration": "short"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Você jura que prefere a dor, a tristeza e a melancolia queer.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Diz que o amor de verdade precisa de sofrimento e agressão física.",
+          "effect": "none"
+        }
+      ]
+    },
+    {
+      "type": "strike",
+      "text": "Dito isso:"
+    },
+    {
+      "type": "message",
+      "segments": [
+        {
+          "text": "Mas no fundo só quer ver garotos felizes andando de bicicleta no pasto.",
+          "effect": "none"
+        }
+      ]
+    }
+  ],
+  "demo": true
+}

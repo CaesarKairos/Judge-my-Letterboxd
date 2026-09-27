@@ -191,7 +191,7 @@ def build_presentation(plan: dict, entries: list[dict], closer: dict | None, ren
                       'status': entry['status'], 'lines': entry.get('lines') or [], 'event_count': len(block)})
     return {'version': 'presentation-v1', 'template': plan['template'], 'locale': locale.locale,
             'profile': {'name': plan['name'], 'handle': plan['handle'], 'display_name': plan['name']},
-            'stats': plan['stats'], 'opening': {'salutation': plan['salutation'],
+            'stats': plan['stats'], 'opening': {'top_four': plan.get('top_four', []), 'salutation': plan['salutation'],
                                                'adjective_pair': plan['adjective_pair'],
                                                'archetype': plan.get('archetype') or [],
                                                'archetype_text': plan.get('archetype_text', ''),

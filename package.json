@@ -1,0 +1,7 @@
+{
+  "name":"judge-my-letterboxd-web",
+  "private":true,
+  "type":"module",
+  "scripts":{"test:web":"node --test web-tests/*.test.js","test:browser":"node web-tests/smoke.mjs"},
+  "devDependencies":{"@playwright/test":"^1.58.0"}
+}
