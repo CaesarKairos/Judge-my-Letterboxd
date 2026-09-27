@@ -1,4 +1,4 @@
-"""Budget the actual user message and system instruction, keeping reviews whole."""
+"""Compact Analyst dataset. Original review text occurs exactly once."""
 from dataclasses import asdict
 import json
 import re
@@ -8,7 +8,6 @@ from .models import Finding, UserProfile
 
 
 def redact(value: Any) -> Any:
-    """Defense in depth for email addresses in user-authored free text."""
     if isinstance(value, str):
         return re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}', '[email removido]', value)
     if isinstance(value, list):
@@ -18,82 +17,107 @@ def redact(value: Any) -> Any:
     return value
 
 
-def build_context(profile: UserProfile, analysis: dict[str, Any], findings: list[Finding],
-                  system: str, max_chars: int, language: str) -> tuple[dict, str]:
-    context: dict[str, Any] = {
-        'task': 'Julgue somente usando as evidências deste export.', 'language': language,
+def film_ids(profile: UserProfile) -> dict[str, str]:
+    return {key: f'f{i:04}' for i, key in enumerate(sorted(profile.films), 1)}
+
+
+def replace_keys(value: Any, ids: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        return ids.get(value, value)
+    if isinstance(value, list):
+        return [replace_keys(v, ids) for v in value]
+    if isinstance(value, dict):
+        return {ids.get(k, k): replace_keys(v, ids) for k, v in value.items()}
+    return value
+
+
+def build_dataset(profile: UserProfile, analysis: dict, findings: list[Finding], language: str) -> dict:
+    ids = film_ids(profile)
+    films = [{'key': f.key, 'name': f.name, 'year': f.year, 'current_rating': f.rating,
+              'watched': f.watched, 'watchlist': f.watchlist, 'liked': f.liked, 'favorite': f.favorite}
+             for f in profile.films.values()]
+    diary = [{'id': e.id, 'film_key': e.film_key, 'date': e.date, 'session_rating': e.rating,
+              'rewatch': e.rewatch, 'tags': e.tags} for e in profile.diary]
+    reviews = [{'id': r.id, 'film_key': r.film_key, 'date': r.date, 'review_rating': r.rating,
+                'tags': r.tags, 'text': r.text} for r in profile.reviews]
+    tags = [{k: v for k, v in t.items() if k in {'tag', 'film_count', 'sessions', 'reviews',
+             'current_film_ratings', 'session_ratings', 'explicit_rewatches', 'unique_session_films'}} for t in analysis['tags']]
+    lists = [{k: v for k, v in item.items() if k in {'id', 'name', 'description', 'tags', 'members', 'film_count', 'ratings'}}
+             for item in analysis['lists']]
+    return redact(replace_keys({
+        'task': 'Identify evidence-backed semantic candidates; do not write the judgment.', 'language': language,
         'available_sources': [i['file'] for i in profile.inventory if i['status'] == 'read'],
-        'semantics': {'current_ratings': 'ratings.csv only; null means unknown',
-                      'sessions': 'diary.csv only; reviews are not additional sessions',
-                      'rewatches': 'explicit flags and observed repetitions are distinct, never add them',
-                      'tag_frequency': 'record frequency may count diary and review for one session',
-                      'favorites': 'unresolved references do not imply ratings',
-                      'privacy': 'profile fields excluded; email addresses redacted in free text',
-                      'omissions': 'omitted evidence is unknown, not absent'},
-        'stats': analysis['overview'], 'rating_scale': analysis['rating_scale'],
-        'watchlist_summary': {k: v for k, v in analysis['watchlist'].items() if k != 'dates'},
-        'likes_summary': analysis['likes'],
-        'review_stats': {k: v for k, v in analysis['reviews'].items() if k in
-                         {'count', 'total_characters', 'total_words', 'percentiles_characters', 'length_by_rating', 'rating_length_pearson'}},
-        'findings': [], 'films': [], 'rewatches': [], 'tags': [], 'lists': [], 'favorites': [],
-        'reviews': [], 'comments': [],
-        'coverage': {'total': {}, 'included': {}, 'omitted': {}, 'reviews_truncated': False}}
-    priority = {f.key: 0.0 for f in profile.films.values()}
-    for finding in findings:
-        for key in finding.film_keys:
-            priority[key] = max(priority.get(key, 0), finding.score)
-    for film in profile.films.values():
-        priority[film.key] += 20 * film.favorite + 10 * bool(film.list_ids) + 5 * bool(film.tags)
-        priority[film.key] += 15 * (film.rating is not None and (film.rating <= 1.5 or film.rating >= 4.5))
-    ranked_films = sorted(profile.films.values(), key=lambda f: (-priority[f.key], f.key))
-    candidates = {
-        'findings': [asdict(f) for f in findings],
-        'films': [{'key': f.key, 'name': f.name, 'year': f.year, 'rating': f.rating,
-                   'watched': f.watched, 'watchlist': f.watchlist, 'liked': f.liked, 'favorite': f.favorite,
-                   'tags': f.tags, 'list_ids': f.list_ids, 'diary_ids': f.diary_ids, 'review_ids': f.review_ids}
-                  for f in ranked_films],
-        'rewatches': analysis['rewatches'], 'tags': analysis['tags'], 'lists': analysis['lists'],
-        'favorites': profile.favorites,
-        'reviews': [asdict(r) for r in sorted(profile.reviews, key=lambda r: (-priority[r.film_key], r.id))],
-        'comments': profile.comments}
-    candidates = redact(candidates)
-    context['coverage']['total'] = {k: len(v) for k, v in candidates.items()}
+        'semantics': {'film': 'current_rating from ratings.csv only',
+                      'diary': 'session_rating and tags apply only to this diary row',
+                      'review': 'review_rating applies to this review, not necessarily the current rating',
+                      'tags': 'contextual mean uses rated diary rows; current film mean is separate; never infer causality',
+                      'rewatch': 'explicit flags and observed repeats overlap; never add them',
+                      'unknown': 'null, missing and omitted data are unknown; no external chronology or popularity is supplied',
+                      'evidence_ids': 'film:key; review:id; diary:id; tag:tag; list:id; finding:id; stats:overview; rewatch:film_key'},
+        'stats': analysis['overview'], 'films': films, 'diary': diary, 'reviews': reviews,
+        'tags': tags, 'lists': lists, 'rewatches': analysis['rewatches'],
+        'deterministic_findings': [asdict(f) for f in findings],
+        'comments': [{'id': f'comment:{i}', **c} for i, c in enumerate(profile.comments, 1)]}, ids))
+
+
+def build_context(profile: UserProfile, analysis: dict, findings: list[Finding],
+                  system: str, max_chars: int, language: str) -> tuple[dict, str]:
+    context = build_dataset(profile, analysis, findings, language)
+    collections = {k: v for k, v in context.items() if isinstance(v, list) and k != 'available_sources'}
+    totals = {k: len(v) for k, v in collections.items()}
 
     def serialize() -> str:
-        context['coverage']['included'] = {k: len(context[k]) for k in candidates}
-        context['coverage']['omitted'] = {k: len(v) - len(context[k]) for k, v in candidates.items()}
-        return json.dumps(context, ensure_ascii=False, allow_nan=False)
+        context['coverage'] = {'total': totals, 'included': {k: len(context[k]) for k in totals},
+                               'omitted': {k: totals[k] - len(context[k]) for k in totals}, 'reviews_truncated': False}
+        return json.dumps(context, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 
-    for key, values in candidates.items():
-        context[key] = values.copy()
     message = serialize()
     if len(system) + len(message) <= max_chars:
         return context, message
-    for key in candidates:
+    ids = film_ids(profile)
+    priorities = {ids[f.key]: 20 * f.favorite + 10 * bool(f.list_ids) for f in profile.films.values()}
+    for f in findings:
+        for key in f.film_keys:
+            fid = ids.get(key)
+            priorities[fid] = max(priorities.get(fid, 0), f.score)
+    for key in totals:
         context[key] = []
     if len(system) + len(serialize()) > max_chars:
-        raise ValueError('MAX_CONTEXT_CHARS é pequeno demais para as estatísticas básicas; aumente o limite.')
+        raise ValueError('MAX_CONTEXT_CHARS é pequeno demais para as estatísticas básicas.')
+    catalog = {f['key']: f for f in collections['films']}
 
-    # Reserve half the remaining budget for original reviews before ancillary collections.
-    base_size = len(system) + len(serialize())
-    first_limit = base_size + (max_chars - base_size) // 2
-    used: dict[str, set[int]] = {k: set() for k in candidates}
+    def refs(value: Any) -> set[str]:
+        if isinstance(value, str):
+            return {value} if value in catalog else set()
+        if isinstance(value, list):
+            return set().union(*(refs(v) for v in value)) if value else set()
+        if isinstance(value, dict):
+            return refs(list(value.values()))
+        return set()
 
-    def include(key: str, index: int, limit: int) -> None:
-        if index in used[key]:
+    def include(kind: str, item: dict, limit: int) -> None:
+        if item in context[kind]:
             return
-        context[key].append(candidates[key][index])
-        if len(system) + len(serialize()) <= limit:
-            used[key].add(index)
-        else:
-            context[key].pop()
+        old_films = context['films'].copy()
+        existing = {f['key'] for f in old_films}
+        context['films'].extend(catalog[k] for k in sorted(refs(item) - existing))
+        if kind != 'films':
+            context[kind].append(item)
+        if len(system) + len(serialize()) > limit:
+            context['films'] = old_films
+            if kind != 'films':
+                context[kind].pop()
 
-    for i in range(len(candidates['reviews'])):
-        include('reviews', i, first_limit)
-    for key in ('findings', 'rewatches', 'favorites', 'lists', 'tags', 'films'):
-        for i in range(len(candidates[key])):
-            include(key, i, max_chars)
-    for key in ('reviews', 'comments'):
-        for i in range(len(candidates[key])):
-            include(key, i, max_chars)
+    reviews = sorted(collections['reviews'], key=lambda r: (-priorities.get(r['film_key'], 0), r['id']))
+    base = len(system) + len(serialize())
+    for review in reviews:
+        include('reviews', review, base + (max_chars - base) // 2)
+    for kind in ('deterministic_findings', 'tags', 'lists', 'rewatches', 'diary'):
+        for item in collections[kind]:
+            include(kind, item, max_chars)
+    for review in reviews:
+        include('reviews', review, max_chars)
+    for kind in ('films', 'comments'):
+        for item in collections[kind]:
+            include(kind, item, max_chars)
     return context, serialize()

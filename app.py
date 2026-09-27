@@ -1,4 +1,4 @@
-"""Terminal entry point: parse -> analyze -> evidence -> context -> optional Gemini."""
+"""Terminal orchestration; local measurements and AI stages remain separate."""
 import argparse
 from dataclasses import asdict
 import os
@@ -6,25 +6,35 @@ from pathlib import Path
 import sys
 from zipfile import BadZipFile
 
+from dotenv import load_dotenv
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
 from src.analyzer import analyze
-from src.context_builder import build_context
 from src.findings import build_findings
-from src.gemini_client import generate_judgment
+from src.generation import GenerationConfig, generate, save
 from src.parser import read_export
-from src.utils import dumps
+from src.run_storage import archive_run, no_judgment
 
 ROOT = Path(__file__).resolve().parent
+console = Console(markup=False, highlight=False)
+GENERATED = ('profile_summary.json', 'extracted_profile.json', 'findings.json', 'deterministic_findings.json',
+             'semantic_findings.json', 'semantic_validation.json', 'finding_pool.json', 'script.json',
+             'writer_inputs.json', 'judgment.json', 'ai_context.json', 'ai_request.json', 'ai_response.json',
+             'analyst_response.json', 'ai_id_map.json', 'judgment.txt', 'debug_report.txt', 'run_status.json')
 
 
 def choose_zip(directory: Path) -> Path | None:
     files = sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.casefold() == '.zip')
     if not files:
-        print('Nenhum ZIP encontrado na pasta atual. Coloque aqui seu export do Letterboxd.')
+        console.print('Nenhum ZIP encontrado na pasta atual. Coloque aqui seu export do Letterboxd.', style='yellow')
         return None
     if len(files) == 1:
         return files[0]
     for index, path in enumerate(files, 1):
-        print(f'{index}. {path.name}')
+        console.print(f'{index}. {path.name}')
     while True:
         try:
             selected = int(input('Escolha o número do ZIP (Ctrl+C para sair): '))
@@ -32,92 +42,80 @@ def choose_zip(directory: Path) -> Path | None:
                 return files[selected - 1]
         except ValueError:
             pass
-        print('Seleção inválida.')
+        console.print('Seleção inválida.', style='yellow')
 
 
-def save_json(path: Path, value: object) -> None:
-    path.write_text(dumps(value), encoding='utf-8', newline='')
+def show_profile(analysis: dict, findings: list, show_all: bool) -> None:
+    table = Table(title='Perfil · medições locais', header_style='bold cyan')
+    table.add_column('Métrica')
+    table.add_column('Total', justify='right')
+    for key, label in [('watched_films', 'Filmes vistos'), ('rated_films', 'Ratings atuais'),
+                       ('diary_entries', 'Sessões'), ('reviews', 'Reviews'), ('watchlist', 'Watchlist'),
+                       ('explicit_rewatches', 'Rewatches explícitos'), ('own_lists', 'Listas próprias'),
+                       ('liked_films', 'Filmes curtidos'), ('liked_reviews', 'Reviews curtidas'), ('liked_lists', 'Listas curtidas')]:
+        table.add_row(label, str(analysis['overview'][key]))
+    table.add_row('Tags distintas', str(len(analysis['tags'])))
+    console.print(table)
+    console.print(f'{len(findings)} findings determinísticos', style='bold')
+    for finding in findings if show_all else findings[:5]:
+        console.print(Text(f'  {finding.score:3} · {finding.summary}'))
+
+
+def show_script(script: dict) -> None:
+    table = Table(title='Roteiro selecionado pelo Python', header_style='bold cyan')
+    for label in ('#', 'Tipo', 'Origem', 'Finding'):
+        table.add_column(label)
+    for beat in script['beats']:
+        table.add_row(str(beat['position']), beat['beat_type'], beat['origin'], Text(', '.join(beat['finding_ids']) or 'overview'))
+    console.print(table)
 
 
 def run() -> int:
     parser = argparse.ArgumentParser(description='Judge My Letterboxd — Backend Prototype')
-    parser.add_argument('--dry-run', action='store_true', help='Analisa e gera debug sem chamar Gemini')
-    parser.add_argument('--show-findings', action='store_true', help='Mostra todos os findings')
+    parser.add_argument('--dry-run', action='store_true', help='Análise e roteiro locais; nenhuma chamada à IA')
+    parser.add_argument('--analyze-only', action='store_true', help='Executa Analyst e Script Engine; pula Writer')
+    parser.add_argument('--no-analyst', action='store_true',
+                        help='Pula o Analyst e escreve o julgamento apenas com findings determinísticos')
+    parser.add_argument('--show-findings', action='store_true', help='Mostra todos os findings determinísticos')
     args = parser.parse_args()
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(ROOT / '.env')
-    except ImportError:
-        print('python-dotenv não instalado: usando somente variáveis de ambiente do sistema.')
-    print('Judge My Letterboxd — Backend Prototype\n')
+    load_dotenv(ROOT / '.env')
+    config = GenerationConfig.from_env()
+    console.print(Panel(Text('Judge My Letterboxd\nBackend Prototype · Analyst → Script Engine → Writer'), border_style='cyan'))
     path = choose_zip(Path.cwd())
     if path is None:
         return 0
     output = ROOT / 'output'
     output.mkdir(exist_ok=True)
-    # Clear only known generated files, so a failed run cannot expose stale results as new.
-    for name in ('profile_summary.json', 'extracted_profile.json', 'findings.json', 'ai_context.json',
-                 'ai_request.json', 'ai_response.json', 'judgment.txt', 'debug_report.txt', 'run_status.json'):
+    previous = archive_run(output, GENERATED)
+    for name in GENERATED:
         (output / name).unlink(missing_ok=True)
-    (output / 'judgment.txt').write_text('', encoding='utf-8')
-    save_json(output / 'run_status.json', {'status': 'started'})
-    print(f'ZIP encontrado: {path.name}\nLendo export...')
-    profile = read_export(path)
-    for item in profile.inventory:
-        if item['status'] == 'read':
-            print(f"  OK {item['file']}")
-    analysis = analyze(profile)
-    findings = build_findings(profile, analysis)
-    save_json(output / 'extracted_profile.json', asdict(profile))
-    save_json(output / 'profile_summary.json', analysis)
-    save_json(output / 'findings.json', [asdict(f) for f in findings])
-    overview = analysis['overview']
-    print('\nPerfil:')
-    for key, label in [('watched_films', 'filmes vistos'), ('rated_films', 'ratings'),
-                       ('diary_entries', 'sessões'), ('reviews', 'reviews'), ('watchlist', 'filmes na watchlist'),
-                       ('explicit_rewatches', 'rewatches explícitos'), ('own_lists', 'listas próprias'),
-                       ('liked_films', 'filmes curtidos'), ('liked_reviews', 'reviews curtidas'), ('liked_lists', 'listas curtidas')]:
-        print(f'  {overview[key]} {label}')
-    print(f"  {len(analysis['tags'])} tags distintas\n\nFindings detectados: {len(findings)}")
-    for i, finding in enumerate(findings if args.show_findings else findings[:5], 1):
-        print(f'{i}. [{finding.score}] {finding.summary}')
-    system = (ROOT / 'prompts' / 'judge.txt').read_text(encoding='utf-8')
-    context, message = build_context(profile, analysis, findings, system,
-                                     int(os.getenv('MAX_CONTEXT_CHARS', '300000')), os.getenv('JUDGE_LANGUAGE', 'pt-BR'))
-    (output / 'ai_context.json').write_text(message, encoding='utf-8', newline='')
-    request = {'model': os.getenv('GEMINI_MODEL', 'gemini-flash-latest'), 'contents': message,
-               'config': {'system_instruction': system, 'temperature': .8}}
-    save_json(output / 'ai_request.json', request)
-    print(f'\nContexto preparado: {len(message) + len(system)} caracteres (dados + prompt).')
-    print(f"Reviews incluídas: {context['coverage']['included']['reviews']}/{len(profile.reviews)}")
-    report = {'inventory': profile.inventory, 'warnings': profile.warnings, 'coverage': context['coverage'],
-              'privacy': 'profile.csv: only Favorite Films retained; local original texts may contain personal data',
-              'sources_present': [i['file'] for i in profile.inventory if i['status'] == 'read']}
-    (output / 'debug_report.txt').write_text(dumps(report), encoding='utf-8')
-    key = os.getenv('GEMINI_API_KEY', '').strip()
-    if args.dry_run or not key:
-        reason = '--dry-run' if args.dry_run else 'GEMINI_API_KEY não configurada'
-        print(f'Gemini pulado: {reason}. Análise local concluída.')
-        save_json(output / 'run_status.json', {'status': 'local_complete', 'gemini': 'skipped', 'reason': reason})
-    else:
-        print('Enviando para Gemini...')
-        try:
-            judgment, response = generate_judgment(key, request)
-            save_json(output / 'ai_response.json', response)
-            (output / 'judgment.txt').write_text(judgment, encoding='utf-8', newline='')
-            save_json(output / 'run_status.json', {'status': 'complete' if judgment else 'empty_response'})
-            print('\n────────────────────────────\nJUDGMENT\n────────────────────────────')
-            print(judgment, end='')
-            print('\n────────────────────────────')
-            if not judgment:
-                print('Gemini não retornou texto. Consulte ai_response.json.')
-        except Exception as exc:
-            # SDK messages may include request text or credentials: never persist str(exc).
-            save_json(output / 'run_status.json', {'status': 'gemini_failed', 'error_type': type(exc).__name__})
-            print(f'Falha no Gemini ({type(exc).__name__}). Verifique chave, modelo e conexão. Análise local preservada.')
-            return 1
-    print('\nArquivos de debug salvos em output/')
-    return 0
+    no_judgment(output, 'A geração ainda não foi concluída.')
+    save(output / 'run_status.json', {'status': 'started', 'previous_run': previous})
+    if previous:
+        console.print(f'Execução anterior preservada em output/{previous}/', style='dim')
+    console.print(Text(f'ZIP: {path.name}'))
+    with console.status('Lendo export e calculando evidências...', spinner='dots'):
+        profile = read_export(path)
+        analysis = analyze(profile)
+        findings = build_findings(profile, analysis)
+    save(output / 'extracted_profile.json', asdict(profile))
+    save(output / 'profile_summary.json', analysis)
+    for name in ('findings.json', 'deterministic_findings.json'):
+        save(output / name, [asdict(f) for f in findings])
+    show_profile(analysis, findings, args.show_findings)
+    script, judgment, failed = generate(profile, analysis, findings, ROOT, config,
+                                        os.getenv('GEMINI_API_KEY', '').strip(), args.dry_run,
+                                        args.analyze_only, args.no_analyst,
+                                        lambda text: console.print(Text(text)))
+    show_script(script)
+    if judgment:
+        console.rule('JUDGMENT', style='cyan')
+        console.print(Text(judgment))
+        console.rule(style='cyan')
+    console.print('Arquivos de auditoria salvos em output/', style='green')
+    if failed:
+        console.print('Execução parcial: consulte run_status.json e as validações por etapa.', style='yellow')
+    return 1 if failed else 0
 
 
 def main() -> int:
@@ -126,10 +124,10 @@ def main() -> int:
     try:
         return run()
     except (KeyboardInterrupt, EOFError):
-        print('\nExecução cancelada.')
+        console.print('Execução cancelada. Outputs já gravados foram preservados.', style='yellow')
         return 130
     except (OSError, BadZipFile, ValueError, RuntimeError) as exc:
-        print(f'Não foi possível concluir a análise local ({type(exc).__name__}): {exc}')
+        console.print(f'Não foi possível concluir ({type(exc).__name__}): {exc}', style='red')
         return 1
 
 

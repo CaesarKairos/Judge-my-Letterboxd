@@ -73,3 +73,7 @@ class Finding:
     evidence: dict[str, Any]
     film_keys: list[str]
     sources: list[str]
+    sample_size: int = 0
+    metric: str = ''
+    baseline: dict[str, Any] | None = None
+    difference: float | None = None

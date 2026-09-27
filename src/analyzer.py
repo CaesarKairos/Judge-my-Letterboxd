@@ -91,7 +91,11 @@ def tag_analysis(profile: UserProfile, rewatches: list[dict]) -> tuple[list[dict
                      'reviews': len(reviews), 'review_ids': [r.id for r in reviews],
                      'frequency': len(sessions) + len(reviews),
                      'frequency_unit': 'CSV records; diary and review may describe the same session',
-                     'ratings': stats(ratings), 'session_ratings': stats([e.rating for e in sessions if e.rating is not None]),
+                     'ratings': stats(ratings), 'current_film_ratings': stats(ratings),
+                     'session_ratings': stats([e.rating for e in sessions if e.rating is not None]),
+                     'rated_session_ids': [e.id for e in sessions if e.rating is not None],
+                     'unique_session_films': len({e.film_key for e in sessions if e.rating is not None}),
+                     'rating_semantics': 'current_film_ratings: unique films; session_ratings: diary rows only; never infer a session rating from current rating',
                      'explicit_rewatches': sum(e.rewatch for e in sessions)})
     # Inverted index counts only pairs actually co-occurring, avoiding all tag pairs.
     overlap_counts: Counter = Counter()
@@ -103,7 +107,7 @@ def tag_analysis(profile: UserProfile, rewatches: list[dict]) -> tuple[list[dict
         size_a, size_b = len(groups[a]), len(groups[b])
         jaccard = count / (size_a + size_b - count)
         if count >= 3 and (jaccard >= .3 or max(count / size_a, count / size_b) >= .8):
-            pairs.append({'a': a, 'b': b, 'size_a': size_a, 'size_b': size_b,
+            pairs.append({'a': a, 'b': b, 'unit': 'unique films, not necessarily the same session', 'size_a': size_a, 'size_b': size_b,
                           'intersection': count, 'percent_a_in_b': 100 * count / size_a,
                           'percent_b_in_a': 100 * count / size_b, 'jaccard': jaccard,
                           'film_keys': sorted(groups[a] & groups[b])})
@@ -172,7 +176,8 @@ def analyze(profile: UserProfile) -> dict[str, Any]:
                 'own_lists': len(lists), 'ratings': stats(ratings), 'distribution': distribution,
                 'explicit_rewatches': sum(e.rewatch for e in profile.diary),
                 'observed_repeat_sessions': sum(r['observed_repeat_sessions'] for r in rewatches)}
-    return {'overview': overview, 'rating_groups': {str(i / 2): [f.key for f in rated if f.rating == i / 2] for i in range(1, 11)},
+    return {'overview': overview, 'session_rating_baseline': stats([e.rating for e in profile.diary if e.rating is not None]),
+            'rating_groups': {str(i / 2): [f.key for f in rated if f.rating == i / 2] for i in range(1, 11)},
             'rating_scale': {'modes': [k for k, v in distribution.items() if v['count'] == mode_count and mode_count],
                              'top_two_share': sum(sorted((v['count'] for v in distribution.values()), reverse=True)[:2]) / len(ratings) if ratings else None,
                              'five_star_count': ratings.count(5), 'very_low_count': sum(r <= 1.5 for r in ratings),
