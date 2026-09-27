@@ -43,13 +43,13 @@ def rank(name: str) -> int:
     """Heuristic preference: stable text Flash first, then latest Flash, then Flash-Lite, then others."""
     lowered = name.casefold()
     if 'flash-lite' in lowered or 'flashlite' in lowered:
-        score = 90
+        score = 5
     elif 'flash' in lowered:
         score = 100
     elif 'pro' in lowered:
-        score = 60
+        score = 80
     else:
-        score = 40
+        score = 50
     if 'latest' in lowered:
         score += 10
     if 'preview' in lowered or 'experimental' in lowered or '-exp' in lowered:
@@ -69,13 +69,15 @@ def partition(models: list[dict]) -> tuple[list[str], list[dict]]:
 
 def build_chain(primary: str, configured: list[str], discovered: list[str],
                 limit: int = DISCOVERED_CHAIN_LIMIT) -> tuple[list[str], list[dict]]:
-    """Explicit model first, explicit fallbacks second, discovered models last; deduplicated."""
+    """Primary first; all remaining candidates are quality-ranked, with Lite last."""
     rejected: list[dict] = []
     chain: list[str] = []
-    ranked = sorted(discovered, key=lambda n: (-rank(n), n))[:max(0, limit)]
-    rejected += [{'model': name, 'reason': f'fora do limite de {limit} modelos descobertos'}
-                 for name in sorted(discovered, key=lambda n: (-rank(n), n))[len(ranked):]]
-    for name in [primary, *configured, *ranked]:
+    combined = list(dict.fromkeys([*configured, *discovered]))
+    ranked_all = sorted(combined, key=lambda n: (-rank(n), n))
+    ranked = ranked_all[:max(0, limit)]
+    rejected += [{'model': name, 'reason': f'fora do limite de {limit} modelos de reserva'}
+                 for name in ranked_all[len(ranked):]]
+    for name in [primary, *ranked]:
         if not name:
             continue
         if name in chain:
