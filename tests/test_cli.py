@@ -196,7 +196,7 @@ class CLITests(unittest.TestCase):
             script = self.read(root, 'presentation_script.json')
             self.assertEqual(script['render']['ai_generation'], 'skipped')
             self.assertIn('SEM REAÇÃO DE IA', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8'))
-            self.assertIn('--no-analyst', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8'))
+            self.assertIn('fallback', (root / 'output' / 'judgment.txt').read_text(encoding='utf-8').casefold())
 
     def test_analyze_only_never_calls_the_writer(self):
         with tempfile.TemporaryDirectory() as directory, \
