@@ -34,11 +34,11 @@ def profile_with_reviews() -> UserProfile:
 class EditorialDepthTests(unittest.TestCase):
     def test_bigram_markup_and_intersection(self):
         style = analyze_review_style(profile_with_reviews().reviews)
-        phrase = next(row for row in style['phrases'] if row['phrase'] == 'dito isso')
+        phrase = next(row for row in style['phrases'] if row['phrase'] == 'corte seco')
         self.assertEqual(phrase['count'], 10)
         self.assertEqual(style['markup']['blockquote']['count'], 10)
         cross = next(row for row in style['intersections']
-                     if row['phrase'] == 'dito isso' and row['markup'] == 'blockquote')
+                     if row['phrase'] == 'corte seco' and row['markup'] == 'blockquote')
         self.assertEqual(cross['count'], 10)
 
     def test_review_coverage_matches_sessions_without_inventing_them(self):
