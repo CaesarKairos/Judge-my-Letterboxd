@@ -22,7 +22,7 @@ from src.context_builder import build_context  # noqa: E402
 from src.findings import build_findings  # noqa: E402
 from src.parser import read_export  # noqa: E402
 from src.raw_export import read_raw_export  # noqa: E402
-from src.validator import validate_semantic_findings  # noqa: E402
+from src.semantic_validator import validate_semantic_findings  # noqa: E402
 
 
 def main() -> int:
