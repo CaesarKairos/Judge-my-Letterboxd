@@ -62,3 +62,14 @@ export function validateScript(data) {
 export function safeImage(value) {
   try { const u = new URL(value); return u.protocol === 'https:' ? u.href : null; } catch { return null; }
 }
+// The site icon is one file, the same one the tab uses: a marked surface loads it as an image
+// instead of inlining a second copy, so the gradient id never collides and a missing poster or a
+// chosen ZIP keeps the same mark. Decorative by default: the text beside it carries the meaning.
+export const ICON = '/images/camera-reels-fill.svg';
+export const icon = (className = 'icon', size = 24) => {
+  const img = el('img', className);
+  img.src = ICON; img.width = size; img.height = size; img.alt = '';
+  img.setAttribute('aria-hidden', 'true');
+  return img;
+};
+

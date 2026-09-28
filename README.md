@@ -46,6 +46,10 @@ pois `/api/judge` é executado como Pages Function.
   sessão; falha transitória (rede, 429, 5xx) não fica, então o próximo cartão daquele
   filme tenta de novo. Resolução lazy por proximidade do viewport; só favoritos são
   antecipados. Falhas não interrompem o player.
+- `images/camera-reels-fill.svg` é o ícone do site: o mesmo arquivo é o favicon
+  (`rel="icon"`), a marca do header, o chip do export escolhido e o símbolo do cartaz
+  abstrato, sempre carregado como `<img>` por `icon()` em `utils.js`. Um asset só, sem
+  gradiente duplicado no DOM.
 - `functions/api/poster.js`: consulta TMDB no servidor com o idioma do visitante, aceita
   título (ou título original) normalizado e escolhe o ano de lançamento mais próximo —
   exato, com um ano de tolerância entre festival e lançamento — desempatando pelo mais
