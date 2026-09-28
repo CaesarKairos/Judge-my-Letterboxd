@@ -3,10 +3,11 @@ import {t} from './i18n.js';
 import {Playback,timing,readWait} from './animations.js';
 import {renderAttachment,filmStrip} from './event-renderer.js';
 import {disconnectPosters} from './poster-service.js';
+import {createInteractiveGame,renderGameResult} from './game-renderer.js';
 export function typingDots(){const node=el('div','typing');node.setAttribute('aria-label',t('typing'));for(let i=0;i<3;i++){const dot=el('span');dot.setAttribute('aria-hidden','true');node.append(dot);}return node;}
 export class ChatPlayer {
   constructor(container,bottom,announce) {
-    this.container=container;this.bottom=bottom;this.announce=announce;this.clock=new Playback();this.follow=true;
+    this.container=container;this.bottom=bottom;this.announce=announce;this.clock=new Playback();this.follow=true;this.gameResults=new Map();
     this.scroll=()=>{const distance=document.documentElement.scrollHeight-innerHeight-scrollY;this.follow=distance<150;bottom.hidden=this.follow;};
     this.onWheel=e=>{if(e.deltaY<0){this.follow=false;bottom.hidden=false;}};
     this.onKey=e=>{if(['ArrowUp','PageUp','Home'].includes(e.key)){this.follow=false;bottom.hidden=false;}};
@@ -57,6 +58,12 @@ export class ChatPlayer {
       if(event.type==='typing'){const dots=typingDots();this.append(dots);await this.clock.wait(timing[event.duration]??timing.short);dots.remove();}
       else if(event.type==='pause')await this.clock.wait(timing[event.duration]??timing.short);
       else if(['message','strike','correction'].includes(event.type))await this.speak(event);
+      else if(['game_forced_triage','game_blind_rank','game_defend_take'].includes(event.type)){
+        const interactive=createInteractiveGame(event);this.append(interactive.node);const result=await interactive.done;this.gameResults.set(event.game_id,result);this.reveal();await this.clock.wait(timing.short);
+      }
+      else if(event.type==='game_result'){
+        const node=renderGameResult(event,this.gameResults.get(event.game_id));this.append(node);await this.clock.wait(readWait(node.textContent,timing.evidence));
+      }
       else {const node=renderAttachment(event);if(node){this.append(node);await this.clock.wait(readWait(node.textContent,event.type==='review_quote'?timing.review:timing.evidence));}}
       if(event.cue==='top_four_reveal'&&favorites.length){
         const group=el('section','favorites');group.append(el('p','eyebrow',t('favorites')),filmStrip(favorites,true));this.append(group);await this.clock.wait(timing.medium);
