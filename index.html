@@ -4,13 +4,13 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101619"><meta name="description" content="Seu diário de filmes tem coisas a explicar. Uma experiência cinematográfica julgando seu Letterboxd.">
   <meta property="og:title" content="Judge My Letterboxd"><meta property="og:description" content="Todo mundo é crítico. Até ser criticado."><meta property="og:image" content="/images/og-image.svg">
-  <title>Judge My Letterboxd</title><link rel="icon" href="/images/icon.svg" type="image/svg+xml"><link rel="stylesheet" href="/css/style.css">
+  <title>Judge My Letterboxd</title><link rel="icon" href="/images/camera-reels-fill.svg" type="image/svg+xml"><link rel="stylesheet" href="/css/style.css">
   <script type="module" src="/js/app.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content / Ir ao conteúdo</a>
   <header class="site-header">
-    <a class="brand" href="/" aria-label="Judge My Letterboxd"><img src="/images/icon.svg" width="30" height="30" alt=""><span>JUDGE MY<br><b>LETTERBOXD</b></span></a>
+    <a class="brand" href="/" aria-label="Judge My Letterboxd"><img src="/images/camera-reels-fill.svg" width="30" height="30" alt=""><span>JUDGE MY<br><b>LETTERBOXD</b></span></a>
     <nav id="landing-nav" aria-label="Navigation"><a href="#about" data-i18n="about">Sobre</a><a href="#how" data-i18n="how">Como funciona</a><a href="https://github.com/CaesarKairos/Judge-my-Letterboxd" target="_blank" rel="noopener">GitHub ↗</a></nav>
     <details id="language-menu" class="language"><summary aria-label="Language / Idioma" aria-haspopup="listbox"><span id="language-label">PT</span><span aria-hidden="true">⌄</span></summary><div role="listbox" aria-label="Language / Idioma"><button type="button" role="option" data-locale="pt-BR">Português <span>PT</span></button><button type="button" role="option" data-locale="en-US">English <span>EN</span></button></div></details>
   </header>
@@ -20,7 +20,7 @@
       <div class="hero-copy"><p class="eyebrow"><span class="status-dot"></span> <span data-i18n="eyebrow">SEU GOSTO ESTÁ EM JULGAMENTO</span></p><h1><span data-i18n="hero">Todo mundo é crítico.</span><br><em data-i18n="punch">Até ser criticado.</em></h1><p class="intro" data-i18n="sub">Anos de escolhas cinematográficas. Uma IA sem muita delicadeza. Seu diário tem coisas a explicar.</p></div>
       <form id="upload-form" class="upload-panel">
         <div id="dropzone" class="dropzone"><span class="upload-symbol" aria-hidden="true">↥</span><strong data-i18n="drop">Arraste seu export para cá</strong><label class="file-button"><span data-i18n="choose">Escolher arquivo .zip</span><input id="export" type="file" accept=".zip,application/zip" aria-label="Letterboxd export ZIP"></label><small data-i18n="limit">ZIP do Letterboxd · até 50 MB</small></div>
-        <div id="selected" class="selected" hidden><span aria-hidden="true">▤</span><div><strong id="file-name"></strong><small id="file-size"></small></div><button type="button" id="remove" data-i18n="remove">Remover</button></div>
+        <div id="selected" class="selected" hidden><img class="file-icon" src="/images/camera-reels-fill.svg" width="18" height="18" alt="" aria-hidden="true"><div><strong id="file-name"></strong><small id="file-size"></small></div><button type="button" id="remove" data-i18n="remove">Remover</button></div>
         <p id="upload-error" class="error-copy" role="alert"></p><button id="judge" class="primary" disabled><span data-i18n="judge">Julgar meu Letterboxd</span><span aria-hidden="true">↗</span></button><p class="privacy" data-i18n="privacy">Seu export é usado para gerar o julgamento.</p>
       </form>
       <button id="demo" class="text-button demo-link" data-i18n="demo">Só quero ver uma demonstração ↗</button>

@@ -31,20 +31,31 @@ const tagRatings=await page.locator('.attachment-tag .film-card .rating').allTex
 assert.ok(listRatings.some(text=>text.includes('★ 5 / 5')),`list ratings: ${listRatings.join(' | ')}`);
 assert.ok(tagRatings.some(text=>text.includes('★ 5 / 5')),`tag ratings: ${tagRatings.join(' | ')}`);
 assert.ok(listRatings.some(text=>!text.includes('★')),`an unrated member stays unrated: ${listRatings.join(' | ')}`);
+// The site icon is the camera-reels mark, from one file: the tab, the brand and the chip of the
+// chosen export. The brand icon must actually load, so a missing asset cannot pass silently.
+await page.goto(base);
+assert.equal(await page.locator('link[rel="icon"]').getAttribute('href'),'/images/camera-reels-fill.svg');
+assert.equal(await page.locator('.brand img').getAttribute('src'),'/images/camera-reels-fill.svg');
+assert.equal(await page.locator('#selected .file-icon').getAttribute('src'),'/images/camera-reels-fill.svg');
+await page.waitForFunction(()=>document.querySelector('.brand img')?.complete===true);
+assert.ok(await page.locator('.brand img').evaluate(node=>node.naturalWidth>0),'o ícone da marca precisa carregar');
 // A resolved poster replaces the abstract card, and a refused lookup keeps it.
 await page.unroute('**/api/poster?*');
 await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:true,poster_url:'https://image.tmdb.org/t/p/w342/fixture.png'}}));
 await page.route('**/image.tmdb.org/**',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==','base64')}));
 await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();
-const posterCard=page.locator('.film-card .poster').first();await posterCard.locator('img').waitFor();
+const posterCard=page.locator('.film-card .poster').first();await posterCard.locator('.poster-image').waitFor();
 assert.equal(await posterCard.locator('.poster-fallback').first().isHidden(),true);
-assert.equal(await page.locator('.film-card .poster img').count()>0,true);
+assert.equal(await page.locator('.film-card .poster-image').count()>0,true);
 await page.evaluate(()=>localStorage.clear());
 await page.unroute('**/api/poster?*');
 await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false,reason:'no_match'}}));
 await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();await page.waitForTimeout(400);
-assert.equal(await page.locator('.film-card .poster img').count(),0);
+assert.equal(await page.locator('.film-card .poster-image').count(),0);
 assert.equal(await page.locator('.film-card .poster .poster-fallback').first().isVisible(),true);
+// The abstract card carries the site icon, loaded from the same file as the tab.
+await page.waitForFunction(()=>document.querySelector('.poster-fallback .film-symbol')?.complete===true);
+assert.ok(await page.locator('.poster-fallback .film-symbol').first().evaluate(node=>node.naturalWidth>0),'o ícone do cartaz abstrato precisa carregar');
 await page.evaluate(()=>localStorage.clear());
 await page.unroute('**/api/poster?*');
 await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false}}));

@@ -1,4 +1,4 @@
-import {el,safeImage} from './utils.js';
+import {el,icon,safeImage} from './utils.js';
 import {locale,t} from './i18n.js';
 const memory=new Map(), TTL=7*86400000;
 export async function resolvePoster(film) {
@@ -24,10 +24,10 @@ const observer = new IntersectionObserver(entries=>entries.forEach(entry=>{
 }),{rootMargin:'240px'});
 export function poster(film,{eager=false}={}) {
   const box=el('div','poster');
-  const fallback=el('div','poster-fallback');fallback.append(el('span','film-symbol','▤'),el('strong','',film.title),el('span','poster-year',film.year));box.append(fallback);
+  const fallback=el('div','poster-fallback');fallback.append(icon('film-symbol',26),el('strong','',film.title),el('span','poster-year',film.year));box.append(fallback);
   const load=async()=>{
     const url=await resolvePoster(film);if(!url)return;
-    const img=el('img');img.alt=`${film.title}${film.year?` (${film.year})`:''}`;img.loading=eager?'eager':'lazy';img.decoding='async';
+    const img=el('img','poster-image');img.alt=`${film.title}${film.year?` (${film.year})`:''}`;img.loading=eager?'eager':'lazy';img.decoding='async';
     img.addEventListener('load',()=>fallback.hidden=true);img.addEventListener('error',()=>{img.remove();fallback.hidden=false;});img.src=url;box.append(img);
   };
   if(eager)load();else{box.addEventListener('resolveposter',load,{once:true});observer.observe(box);}
