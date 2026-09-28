@@ -20,7 +20,7 @@ const schema = {type: 'OBJECT', required: ['greeting', 'archetype_phrase', 'prof
   opening: {type:'OBJECT',properties:{greeting:{type:'ARRAY',items:{type:'STRING'}},archetype_lead:{type:'STRING'},archetype_phrase:{type:'STRING'},archetype_after:{type:'ARRAY',items:{type:'STRING'}},username_line:{type:'STRING'},taste_bit:{type:'OBJECT',properties:{enabled:{type:'BOOLEAN'},lead:{type:'STRING'},strike:{type:'STRING'},correction:{type:'STRING'},tail:{type:'STRING'}}},transition:{type:'ARRAY',items:{type:'STRING'}}}},
   closer:{type:'ARRAY',items:{type:'STRING'}},
   profile_review: {type: 'OBJECT', properties: {lead:{type:'STRING'},full:{type:'STRING'},share:{type:'STRING'},text:{type:'STRING'},style_features_used:{type:'ARRAY',items:{type:'STRING'}}}},
-  game_copy:{type:'ARRAY',items:{type:'OBJECT',properties:{id:{type:'STRING'},type:{type:'STRING'},intro:{type:'STRING'},instructions:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},question:{type:'STRING'},roles:{type:'ARRAY',items:{type:'OBJECT',properties:{id:{type:'STRING'},rank:{type:'NUMBER'},label:{type:'STRING'}}}},choices:{type:'ARRAY',items:{type:'OBJECT',properties:{id:{type:'STRING'},label:{type:'STRING'},reaction:{type:'STRING'}}}},result_reactions:{type:'OBJECT',additionalProperties:{type:'STRING'}}}}},
+  game_copy:{type:'ARRAY',items:{type:'OBJECT',properties:{id:{type:'STRING'},type:{type:'STRING'},intro:{type:'STRING'},instructions:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},question:{type:'STRING'},roles:{type:'ARRAY',items:{type:'OBJECT',properties:{id:{type:'STRING'},rank:{type:'NUMBER'},label:{type:'STRING'}}}},choices:{type:'ARRAY',items:{type:'OBJECT',properties:{id:{type:'STRING'},label:{type:'STRING'},reaction:{type:'STRING'}}}},result_reactions:{type:'OBJECT',properties:{complete:{type:'STRING'},match:{type:'STRING'},near_match:{type:'STRING'},chaotic_mismatch:{type:'STRING'}}}}}},
   reactions: {type: 'ARRAY', items: {type: 'OBJECT', required: ['id', 'lines'], properties: {
     id: {type: 'STRING'}, lines: {type: 'ARRAY', items: {type: 'STRING'}}, after_beat:{type:'ARRAY',items:{type:'STRING'}},
     evidence_pause: rhythmField(), after_evidence: rhythmField(), typing: rhythmField(), between_lines: rhythmField(), after_reaction: rhythmField()
@@ -147,7 +147,12 @@ Do not expose formulas, chain-of-thought or hidden scoring.`;
   const editoriallyCoherent=()=>Boolean(greeting&&(profile.topFour.length!==4||!archetypeIssues(archetype,profile.topFour).length)&&closer.length&&profileReview?.full);
   const absorb=(outcome,cut)=>{
     usable++;stopped=stopped||cut;salvaged=salvaged||Boolean(outcome.salvaged);
-    greeting=greeting||outcome.greeting;archetype=archetype||outcome.archetype_phrase;profileReaction=profileReaction||outcome.profile_reaction;profileReview=profileReview||outcome.profile_review;gameCopy=gameCopy.length?gameCopy:outcome.game_copy;opening=opening||outcome.opening;closer=closer.length?closer:outcome.closer;
+    greeting=greeting||outcome.greeting;
+    const candidateArchetype=outcome.archetype_phrase,archetypeValid=profile.topFour.length!==4||!archetypeIssues(candidateArchetype,profile.topFour).length;
+    if(candidateArchetype&&archetypeValid){archetype=candidateArchetype;opening=outcome.opening||opening;}
+    profileReaction=profileReaction||outcome.profile_reaction;profileReview=profileReview||outcome.profile_review;gameCopy=gameCopy.length?gameCopy:outcome.game_copy;
+    if(!opening&&profile.topFour.length!==4)opening=outcome.opening;
+    closer=closer.length?closer:outcome.closer;
     for(const row of outcome.reactions)if(!merged.has(row.id))merged.set(row.id,row);
     problems=[...new Set([...problems,...outcome.problems])];
   };
