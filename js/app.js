@@ -5,7 +5,8 @@ import {judgeExport} from './api.js';
 import {loadDemo} from './demo.js';
 import {ChatPlayer,typingDots} from './chat-renderer.js';
 import {resolvePoster} from './poster-service.js';
-let player,script,request,sequence=0,loadingTimer,lastDemo=false;
+import {makeShareCards,downloadCard} from './share-cards.js';
+let player,script,request,sequence=0,loadingTimer,lastDemo=false,lastFailure=null,cardAvatarUrl='';
 const upload=setupUpload();
 setLocale(locale);
 const languageMenu=$('#language-menu'),languageSummary=languageMenu.querySelector('summary'),languageOptions=[...languageMenu.querySelectorAll('[data-locale]')];
@@ -35,14 +36,23 @@ function show(id){
   document.querySelector(`#${id} h2`)?.focus({preventScroll:true});
 }
 function stop(){sequence++;request?.abort();clearInterval(loadingTimer);player?.stop();player=null;}
+async function renderEnding(){
+  const review=$('#profile-review'),profile=script.profile_review;
+  review.replaceChildren();review.hidden=!profile?.text;
+  if(profile?.text){const lead=document.createElement('p');lead.className='eyebrow';lead.textContent=profile.lead||t('profileReview');const card=document.createElement('article');card.className='profile-review-card';const title=document.createElement('h3');title.textContent=t('profileReview');const body=document.createElement('p');body.textContent=profile.text;card.append(title,body);review.append(lead,card);}
+  const explain=$('#explainability'),details=script.explainability;
+  explain.hidden=!details;if(details){const lines=[details.summary,...(details.findings||[])].filter(Boolean);$('#explainability-copy').textContent=lines.join('\n\n');}
+  const cards=$('#share-cards'),previews=$('#share-card-previews');previews.replaceChildren();cards.hidden=!profile?.text;
+  if(profile?.text){const posterUrls=await Promise.all((script.opening?.top_four||[]).map(resolvePoster)),rendered=await makeShareCards(script,{avatarUrl:cardAvatarUrl,posterUrls});for(const [name,canvas] of Object.entries(rendered)){const item=document.createElement('div');item.className='share-preview';item.append(canvas);const download=document.createElement('button');download.textContent=t('downloadCard');download.addEventListener('click',()=>downloadCard(canvas,'judge-'+name));const share=document.createElement('button');share.textContent=t('shareCard');share.addEventListener('click',async()=>{canvas.toBlob(async blob=>{const file=new File([blob],'judge-'+name+'.png',{type:'image/png'});if(navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:t('shareTitle')});else downloadCard(canvas,'judge-'+name);},'image/png');});item.append(download,share);previews.append(item);}}
+}
 function home(){stop();show('landing');(upload.file?$('#judge'):$('#export')).focus();}
 async function play(all=false){
   document.body.classList.toggle('skip-motion',all);
   player?.stop();$('#chat').replaceChildren();$('#ending').hidden=true;
-  $('#demo-label').hidden=!script.demo;show('judgment');player=new ChatPlayer($('#chat'),$('#bottom'),$('#announce'));
+  $('#demo-label').hidden=!script.demo;show('judgment');let notice=$('#partial-notice');if(!notice){notice=document.createElement('p');notice.id='partial-notice';notice.className='muted';$('#chat').before(notice);}notice.hidden=script.render?.ai_generation!=='partial';notice.textContent=t('partialNotice');player=new ChatPlayer($('#chat'),$('#bottom'),$('#announce'));
   $('.chat-heading').setAttribute('tabindex','-1');$('.chat-heading').focus({preventScroll:true});
   if(all)player.clock.skip();const current=player;
-  try{await current.play(script);if(current!==player)return;$('#ending').hidden=false;current.reveal();}
+  try{await current.play(script);if(current!==player)return;await renderEnding();$('#ending').hidden=false;current.reveal();}
   catch(error){if(error.name!=='AbortError'){console.error('Presentation playback failed');$('#error-message').textContent=t('invalid');show('error');}}
 }
 async function start(demo=false){
@@ -50,18 +60,26 @@ async function start(demo=false){
   stop();lastDemo=demo;const current=sequence;request=new AbortController();show('analyzing');
   $('#loading-dots').replaceChildren(typingDots());const copy=t('loading').split('|');let i=0;$('#loading-copy').textContent=copy[0];
   loadingTimer=setInterval(()=>{$('#loading-copy').textContent=copy[Math.min(++i,copy.length-1)];},2400);
-  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;clearInterval(loadingTimer);await play();}
-  catch(error){if(current!==sequence)return;clearInterval(loadingTimer);$('#error-message').textContent=t(error.message);if($('#error-message').textContent===error.message)$('#error-message').textContent=t('invalid');show('error');}
+  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);await play();}
+  catch(error){if(current!==sequence)return;clearInterval(loadingTimer);lastFailure=error.payload||null;$('#local-analysis').hidden=!(error.message==='aiUnavailable'&&lastFailure?.deterministic_analysis_available);$('#error-message').textContent=t(error.message);if($('#error-message').textContent===error.message)$('#error-message').textContent=t('invalid');show('error');}
 }
 $('#upload-form').addEventListener('submit',e=>{e.preventDefault();start();});
 for(const id of ['demo','error-demo'])$('#'+id).addEventListener('click',()=>start(true));
 for(const id of ['cancel','error-back','another'])$('#'+id).addEventListener('click',home);
 $('#retry').addEventListener('click',()=>start(lastDemo));
+$('#local-analysis').addEventListener('click',async()=>{
+  if(!lastFailure?.analysis)return;
+  const stats=lastFailure.analysis.stats||[];
+  script={version:'presentation-v1',demo:false,events:[{type:'message',segments:[{text:locale==='pt-BR'?'Aqui está o que o export mostrou sem texto do Judge.':'Here is what the export showed without the Judge.'}]},{type:'profile_stats',stats}],opening:{top_four:[]}};
+  await play();
+});
 $('#replay').addEventListener('click',()=>play());
 $('#show-all').addEventListener('click',()=>play(true));
 $('#share').addEventListener('click',async()=>{
-  const text=[t('shareTitle'),...script.events.filter(e=>['message','correction'].includes(e.type)).map(e=>e.replacement||plainText(e.segments.map(s=>s.text).join(' ')))].join('\n\n');
-  try{if(navigator.share)await navigator.share({title:t('shareTitle'),text});else{await navigator.clipboard.writeText(text);$('#share-status').textContent=t('shared');}}
-  catch(error){if(error.name==='AbortError')return;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));a.download='judge-my-letterboxd.txt';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);$('#share-status').textContent=t('download');}
+  const canvases=[...document.querySelectorAll('#share-card-previews canvas')];if(!canvases.length)return;
+  const files=await Promise.all(canvases.map((canvas,index)=>new Promise(resolve=>canvas.toBlob(blob=>resolve(new File([blob],`judge-${index+1}.png`,{type:'image/png'})),'image/png'))));
+  try{if(navigator.canShare?.({files}))await navigator.share({title:t('shareTitle'),files});else{canvases.forEach((canvas,index)=>downloadCard(canvas,`judge-${index+1}`));$('#share-status').textContent=t('download');}}
+  catch(error){if(error.name!=='AbortError'){$('#share-status').textContent=t('download');canvases.forEach((canvas,index)=>downloadCard(canvas,`judge-${index+1}`));}}
 });
+$('#card-avatar').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file)return;if(cardAvatarUrl)URL.revokeObjectURL(cardAvatarUrl);cardAvatarUrl=URL.createObjectURL(file);await renderEnding();});
 if(new URLSearchParams(location.search).get('demo')==='1')start(true);

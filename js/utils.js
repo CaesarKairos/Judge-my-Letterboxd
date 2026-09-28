@@ -50,7 +50,7 @@ export const plainText = value => parseMarkup(value).map(part => part.text).join
 export const $ = selector => document.querySelector(selector);
 export const types = new Set('typing pause message correction strike profile_stats film film_pair film_group review_quote tag list rating rewatch phrase stat'.split(' '));
 export function validateScript(data) {
-  if (!data || data.version !== 'presentation-v1') throw new Error('incompatible');
+  if (!data || !['presentation-v1','presentation-v2'].includes(data.version)) throw new Error('incompatible');
   if (!Array.isArray(data.events) || !data.events.length || data.events.some(e => !e || typeof e.type !== 'string')) throw new Error('invalid');
   for (const e of data.events) {
     if (!types.has(e.type)) { console.warn('Skipped unknown presentation event:', e.type); continue; }

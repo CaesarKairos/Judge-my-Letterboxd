@@ -103,7 +103,7 @@ npx wrangler pages deploy dist --project-name judge-my-letterboxd
 O `_routes.json` envia somente `/api/*` às Functions. Configure `TMDB_API_KEY`
 e `GEMINI_API_KEY` como secrets nas configurações do Pages. `GEMINI_MODEL` e
 `GEMINI_FALLBACK_MODELS` são variáveis opcionais; os padrões formam uma cadeia entre
-`gemini-flash-latest`, `gemini-2.5-flash` e `gemini-2.5-flash-lite`. Configure os secrets nos
+`gemini-flash-latest`, `gemini-3.8-flash` e `gemini-3.5-flash-lite`. Configure os secrets nos
 ambientes Production e Preview que você usa e faça um novo deploy. Eles ficam em
 `context.env` da Function e nunca são enviados ao navegador.
 
@@ -602,3 +602,87 @@ A execução arquivada em `output/runs/20260927T001615678505Z/` terminou em
 Foi essa falha que motivou a cadeia de fallback, a descoberta de modelos, a
 apresentação estruturada e a troca por uma única chamada de Writer. A execução real
 mais recente está descrita em "Validação desta versão".
+
+## Pipeline web (Cloudflare Pages)
+
+O backend web é independente do `app.py` e executa esta sequência dentro de Pages
+Functions:
+
+`ZIP → raw export sanitizado → perfil normalizado → análise determinística → relações
+→ Analyst → materialização → Script Engine → Final Writer → presentation-v2`.
+
+O Analyst recebe o inventário estruturado da conta, reviews completas, diário,
+ratings, likes, listas, tags, estilo de escrita, cobertura de reviews, rewatches e
+relações. O Final Writer recebe apenas os momentos já materializados e ordenados,
+o fingerprint de estilo e callbacks possíveis. As duas etapas usam uma chamada por
+etapa, com deadline e fallback de modelo.
+
+Variáveis específicas podem separar os modelos:
+
+- `GEMINI_ANALYST_MODEL` e `GEMINI_ANALYST_FALLBACK_MODELS`;
+- `GEMINI_WRITER_MODEL` e `GEMINI_WRITER_FALLBACK_MODELS`;
+- `GEMINI_MODEL` e `GEMINI_FALLBACK_MODELS` continuam compatíveis;
+- `GEMINI_MODEL_DISCOVERY=0` desativa a descoberta server-side.
+
+A geração possui três resultados:
+
+- `complete`: abertura, roteiro, closer e Profile Review utilizáveis;
+- `partial`: abertura coerente e pelo menos 70% dos momentos com reação;
+- `failed`: a API devolve `ai_unavailable`; o chat não começa e a análise local só
+  aparece quando o visitante escolhe essa ação.
+
+`presentation-v2` acrescenta `generation_meta`, `profile_review` e
+`explainability`. O frontend ainda aceita `presentation-v1`. Ao final da sessão,
+dois cards 1080×1350 são compostos em Canvas: arquétipo com Top 4 e Profile Review.
+A foto opcional fica somente no navegador. Pôsteres passam por `/api/image-proxy`,
+restrito a `image.tmdb.org`, para manter o Canvas exportável. Quando arquivos são
+aceitos pela Web Share API eles são compartilhados diretamente; nos demais
+navegadores o fallback baixa PNG.
+
+### Medições determinísticas do pipeline web
+
+A etapa determinística nunca escreve piada: ela produz um POOL de candidatos (até
+48) que o Analyst lê. O Script Engine decide quantos sobrevivem — 10 para contas
+pequenas, 14 com 35+ reviews e 16 com 100+ reviews, teto de 18 — equilibrando
+famílias de beat para que review, tag, lista, rewatch e medida temporal não sejam
+engolidos por uma só.
+
+- `letterboxd.js`: perfil normalizado, inventário do ZIP (`files_in_zip`,
+  `files_processed`, arquivos conhecidos e desconhecidos), filmes, ratings, diary,
+  reviews, listas, likes e comments.
+- `review-style.js`: n-gramas úteis, aberturas, finais, markup, pontuação e
+  comprimentos medidos. Nenhuma expressão é procurada por nome: "dito isso"
+  aparece quando a conta realmente repete algo assim.
+- `relationships.js`: tag×tag, tag×lista, lista×lista, tag×rating, lista×rating,
+  tag×rewatch, lista×rewatch, estilo×rating, estilo×tag, favoritos e
+  watchlist×visto.
+- `temporal.js`: período mais movimentado, diferença observada entre as duas
+  metades do diário (notas de sessão e comprimento das reviews) e movimentos de
+  nota em reassistidas. Sequência não é causa: nada aqui afirma que algo mudou
+  por algum motivo.
+- `editorial.js`: materialização por ID, Script Engine com diversidade de famílias
+  e callbacks (filme reaparecendo em outro momento).
+- Pares de contraste só existem dentro de um contexto compartilhado (mesma tag ou
+  mesma lista), nunca como menor nota versus maior nota.
+- O spotlight de review é um leque (duas mais curtas, mais longa, menor nota,
+  maior nota, com tag) sem repetir a mesma review em dois candidatos.
+
+`deleted/` e `orphaned/` nunca entram no estado ativo. `profile.csv` é sanitizado
+(username, display name e favoritos) antes de chegar ao Analyst.
+
+### Observabilidade
+
+Em `wrangler pages dev` o console da Function mostra o caminho inteiro: arquivos
+lidos, reviews/tags/listas/relações, candidatos e aceitos do Analyst, tamanho do
+request de cada etapa, modelo servido, reações por beat, archetype/closer/Profile
+Review e o estado final da apresentação. Nem a chave da API nem o prompt aparecem
+em log ou resposta.
+
+### Testes
+
+`npm run test:web` cobre parser, análise determinística, relações, Script Engine,
+contrato da apresentação, `ai_unavailable`, estado parcial, Profile Review,
+explainability e o fingerprint enviado ao Writer. `npm run test:browser` cobre
+layouts, demo, harness, os dois cartões compartilháveis (PNG 1080×1350, download
+como fallback), o card da Profile Review, "Entenda como este output foi gerado" e
+o fluxo `AI_FAILED` com a análise local como escolha.
