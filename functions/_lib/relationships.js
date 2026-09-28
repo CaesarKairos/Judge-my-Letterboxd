@@ -6,7 +6,7 @@ export const normalizeRelationshipName=value=>String(value||'').normalize('NFKC'
 const redundancyScore=(left,right)=>{
   const a=normalizeRelationshipName(left),b=normalizeRelationshipName(right);if(!a||!b)return 0;if(a===b)return 1;
   const A=new Set(a.split(' ')),B=new Set(b.split(' ')),shared=[...A].filter(token=>B.has(token)).length,union=new Set([...A,...B]).size;
-  const j=union?shared/union:0;return j>=.8?.9:j>=.6?.65:0;
+  const subset=shared===Math.min(A.size,B.size)&&Math.min(A.size,B.size)>0,j=union?shared/union:0;return subset?.9:j>=.8?.9:j>=.6?.65:0;
 };
 const surpriseFromLift=lift=>!Number.isFinite(lift)?0:clamp((lift-1)/2);
 const quality=(sample,ubiquity,surprise,redundancy,lift)=>({
