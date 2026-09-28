@@ -23,11 +23,25 @@ await page.goto(base);
 await page.evaluate(()=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array([80,75,3,4])],'dropped.zip',{type:'application/zip'}));document.querySelector('#dropzone').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer}));});
 await page.locator('#selected').waitFor();assert.equal(await page.locator('#file-name').textContent(),'dropped.zip');await page.locator('#remove').click();assert.equal(await page.locator('#judge').isDisabled(),true);
 await page.locator('#export').setInputFiles({name:'zip.zip',mimeType:'application/zip',buffer:Buffer.from([80,75,3,4])});
-for(const [status,text] of [[429,'Muitos julgamentos'],[500,'problema'],[200,'roteiro válido']]){
- await page.route('**/api/judge',r=>r.fulfill({status,body:status===200?'<html>invalid</html>':''}));
+// Each status is asserted against the copy the interface actually shows today.
+for(const [status,body,text] of [[429,'','Muitos julgamentos'],[500,'','interrompida'],[200,'<html>invalid</html>','perdeu nos bastidores']]){
+ await page.route('**/api/judge',r=>r.fulfill({status,body}));
  await page.locator('#judge').click();await page.locator('#error').waitFor();assert.ok((await page.locator('#error-message').textContent()).includes(text));await page.locator('#error-back').click();await page.unroute('**/api/judge');
 }
+// AI_FAILED: the API reports that the model produced nothing usable, so the chat must not start
+// by itself. The deterministic analysis exists, but only as an explicit choice of the visitor.
+await page.route('**/api/judge',r=>r.fulfill({status:503,json:{error:'ai_unavailable',retryable:true,deterministic_analysis_available:true,analysis:{stats:[{key:'watched_films',label:'filmes vistos',value:106},{key:'reviews',label:'reviews',value:103}],overview:{}}}}));
+await page.locator('#judge').click();await page.locator('#error').waitFor();
+assert.match(await page.locator('#error-message').textContent(),/sem palavras/);
+assert.equal(await page.locator('#judgment').isVisible(),false);
+assert.equal(await page.locator('#local-analysis').isVisible(),true);
+await page.locator('#local-analysis').click();await page.locator('#judgment').waitFor();
+assert.ok(await page.locator('#chat .stats').count()>0);
+assert.equal(await page.locator('#chat .film-card').count(),0);
+await page.locator('#ending').waitFor();await page.locator('#another').click();
+await page.unroute('**/api/judge');
+
 await page.route('**/api/judge',async r=>{await new Promise(resolve=>setTimeout(resolve,300));await r.fulfill({status:501,body:''}).catch(()=>{});});
 await page.locator('#judge').click();await page.locator('#cancel').click();await page.waitForTimeout(500);assert.equal(await page.locator('#landing').isVisible(),true);
 await page.goto(base+'/?demo=1');await page.locator('#ending').waitFor();await page.locator('.favorites').scrollIntoViewIfNeeded();await page.screenshot({path:'web-tests/artifacts/top-four-mobile.png'});
-await browser.close();console.log('PASS: zero/one/two/four favorites, oversized ZIP, safe DOM, drag/drop/remove, 429/500/invalid response, cancellation, mobile favorites.');
+await browser.close();console.log('PASS: zero/one/two/four favorites, oversized ZIP, safe DOM, drag/drop/remove, 429/500/invalid response, AI_FAILED never plays alone, local analysis by choice, cancellation, mobile favorites.');

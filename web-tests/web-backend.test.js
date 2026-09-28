@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {unzipText} from '../functions/_lib/zip.js';
 import {parseExport,analyzeExport} from '../functions/_lib/letterboxd.js';
 import {buildPresentation} from '../functions/_lib/judge.js';
-import {salvageJson,normalizeJudgment} from '../functions/_lib/gemini.js';
+import {salvageJson,normalizeJudgment,writeJudgment} from '../functions/_lib/gemini.js';
+import {buildRelationships} from '../functions/_lib/relationships.js';
+import {materializeCandidates,buildScriptEngine,callbackCandidates} from '../functions/_lib/editorial.js';
 
 import {onRequestPost} from '../functions/api/judge.js';
 
@@ -63,14 +65,19 @@ test('list members and tag cards show the current rating of the film',async()=>{
  assert.deepEqual(list.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Gamma',null],['Never rated',null]]);
  assert.deepEqual(tag.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Beta',2]]);
 });
+test('tag × list relationships preserve intersection and coverage for editorial selection',()=>{
+ const profile={films:[1,2,3,4,5].map(id=>({film_key:String(id),rating:id})),sessions:[2,3,4].map(id=>({film_key:String(id),tags:['Tag B']})),lists:[{name:'Lista A',films:[1,2,3,4,5].map(id=>({film_key:String(id)}))}]};
+ const relation=buildRelationships(profile).relations.find(row=>row.type==='tag_list');
+ assert.equal(relation.intersection,3);assert.equal(relation.list_count,5);assert.equal(relation.tag_count,3);assert.equal(relation.coverage,.6);
+});
 test('Pages Function falls back across models and returns Presentation without Python',async t=>{
  const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:[
   {id:'phrase',lines:['Você até criou uma cláusula de encerramento.']},{id:'rating-contrast',lines:['Um ponto para Alpha. Cinco para Beta.']},{id:'rewatch',lines:['Beta outra vez. Naturalmente.']},{id:'tag',lines:['Comfort, porque terapia tem fila.']},{id:'list',lines:['Uma lista com convicção.']},{id:'quote-review-1',lines:['Breve e cruel.']},{id:'quote-review-2',lines:['Cinco estrelas e ponto final.']}
  ]};
  let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/generativelanguage\.googleapis\.com/);assert.equal(options.headers['x-goog-api-key'],'secret');if(calls<3)return Response.json({error:{message:'busy'}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(writing)}]}}]});});
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model'}});
- assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v1');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'gemini-2.5-flash');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',__TEST_SKIP_ANALYST:true}});
+ assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'gemini-3.8-flash');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
 });
 
 test('Pages Function reports missing secret and malformed exports clearly',async()=>{
@@ -98,7 +105,7 @@ test('judge lines become quote segments and AI durations reach the queue',async(
  assert.deepEqual(script.beats[0].lines.map(line=>line.effect),['none','quote','none','none']);
 });
 
-const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',...extra}});};
+const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',__TEST_SKIP_ANALYST:true,...extra}});};
 const readExport=async()=>{const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files);return {profile,analysis:analyzeExport(profile,'pt-BR')};};
 
 test('a cut model answer is salvaged and then repaired instead of failing',async t=>{
@@ -119,28 +126,22 @@ test('a cut model answer is salvaged and then repaired instead of failing',async
  assert.equal(script.beats[0].event_count>0,true);
 });
 
-test('an unusable model answer degrades to a partial script instead of an error screen',async t=>{
+test('a greeting without editorial coverage becomes AI_FAILED, never a silent judgment',async t=>{
  const {analysis}=await readExport();
  let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'{"greeting":"Oi'}]}}]});});
- const result=await judge();assert.equal(result.status,200);
- const script=await result.json();
- assert.ok(calls>=4);assert.equal(script.render.quality_degraded,true);assert.equal(script.render.ai_generation,'partial');
- assert.ok(script.ai.warnings.some(warning=>warning.includes('missing reactions')));
- assert.equal(script.opening.salutation,'Oi');
- assert.equal(script.beats.length,analysis.moments.length);
- assert.equal(script.beats.every(beat=>beat.status==='silent'&&beat.render_strategy==='silence'),true);
- // Evidence, stats and the opening are deterministic, so the judgment still happens.
- assert.equal(script.events.some(event=>event.type==='profile_stats'),true);
- assert.equal(script.events.filter(event=>event.type==='typing').length>0,true);
+ const result=await judge();assert.equal(result.status,503);
+ const body=await result.json();
+ assert.ok(calls>=4);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
+ assert.equal(body.deterministic_analysis_available,true);
+ assert.equal(body.analysis.stats.length>0,true);
+ assert.equal(JSON.stringify(body).includes('top_four'),false);
 });
 
-test('an unreadable model answer retries and falls back to evidence instead of an error screen',async t=>{
+test('an unreadable model answer retries and becomes AI_FAILED',async t=>{
  let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]});});
- const result=await judge();assert.equal(result.status,200);const script=await result.json();
- assert.ok(calls>=4);assert.equal(script.render.quality_degraded,true);assert.equal(script.render.ai_generation,'partial');
- assert.ok(script.ai.warnings.some(warning=>warning.includes('no readable model response')));
- assert.equal(script.beats.every(beat=>beat.status==='silent'),true);
+ const result=await judge();assert.equal(result.status,503);const body=await result.json();
+ assert.ok(calls>=4);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
 });
 
 
@@ -175,7 +176,7 @@ test('normalizeJudgment fills missing rhythm and flags unusable reactions',()=>{
  const ids=['a','b'];
  const ok=normalizeJudgment({greeting:'Certo.',archetype_phrase:'x',profile_reaction:'y',reactions:[{id:'a',lines:'uma linha'},{id:'b',lines:['b1'],evidence_pause:'long',typing:'nonsense'}]},ids);
  assert.equal(ok.ok,true);assert.deepEqual(ok.missing,[]);assert.deepEqual(ok.problems,[]);
- assert.deepEqual(ok.reactions.find(row=>row.id==='a'),{id:'a',lines:['uma linha'],evidence_pause:'medium',after_evidence:'long',typing:'short',between_lines:'medium',after_reaction:'medium'});
+ assert.deepEqual(ok.reactions.find(row=>row.id==='a'),{id:'a',lines:['uma linha'],after_beat:[],evidence_pause:'medium',after_evidence:'long',typing:'short',between_lines:'medium',after_reaction:'medium'});
  assert.equal(ok.reactions.find(row=>row.id==='b').evidence_pause,'long');assert.equal(ok.reactions.find(row=>row.id==='b').typing,'short');
  const bad=normalizeJudgment({greeting:'',archetype_phrase:'x',profile_reaction:'y',reactions:[{id:'a',lines:['x']},{id:'extra',lines:['x']},{id:'a'}]},ids);
  assert.equal(bad.ok,false);assert.deepEqual(bad.missing,['b']);
@@ -184,3 +185,109 @@ test('normalizeJudgment fills missing rhythm and flags unusable reactions',()=>{
  assert.equal(normalizeJudgment(null,ids).ok,false);assert.equal(normalizeJudgment('nope',ids).ok,false);
 });
 
+// A richer account: twenty-four films, twelve members spread over six months, a tag that covers
+// three films of a five-film list, rated drift, a repeat with a real rating move and ten reviews
+// of different lengths. It exists to prove the pool, the relationships and the Script Engine, not
+// to look like a specific account.
+const richExport=()=>{
+ const films=Array.from({length:24},(_,index)=>[`Film ${index+1}`,String(2000+index)]),uri=index=>`https://boxd.it/rich${index+1}`;
+ const rows=header=>[header,...films.map(([name,year],index)=>`2026-01-01,${name},${year},${uri(index)}`)].join('\n')+'\n';
+ const rated=header=>[header,...films.map(([name,year],index)=>`2026-01-01,${name},${year},${uri(index)},${[5,4,3,2,1,2.5][index%6]}`)].join('\n')+'\n';
+ const diary=['Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date'];
+ for(let index=0;index<13;index++){
+  const film=index%12,name=films[film][0],year=films[film][1],month=String(1+index%6).padStart(2,'0');
+  const tags=(film>=1&&film<=3?'cinema':'')+(film===3?',solo':'');
+  diary.push(`2026-${month}-0${1+index%2},${name},${year},${uri(film)},${2+Math.round((index/12)*3)},${index===0||index===12?'Yes':''},${tags},2026-${month}-0${1+index%2}`);
+ }
+ const reviews=['Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date'];
+ for(let index=0;index<10;index++){
+  const name=films[index][0],year=films[index][1],month=String(1+index%6).padStart(2,'0');
+  reviews.push(`2026-${month}-01,${name},${year},${uri(index)},${[5,4,3,2,1,2.5][index%6]},,"${'palavra '.repeat(4+index*5).trim()}",${index===3?'cinema':''},2026-${month}-01`);
+ }
+ return {
+  'profile.csv':'Username,Favorite Films\nrich,"https://boxd.it/rich1, https://boxd.it/rich2, https://boxd.it/rich3, https://boxd.it/rich4"\n',
+  'watched.csv':rows('Date,Name,Year,Letterboxd URI'),'ratings.csv':rated('Date,Name,Year,Letterboxd URI,Rating'),
+  'diary.csv':diary.join('\n')+'\n','reviews.csv':reviews.join('\n')+'\n',
+  'watchlist.csv':'Date,Name,Year,Letterboxd URI\n2026-01-01,Backlog,1990,https://boxd.it/back\n',
+  'likes/films.csv':'Date,Name,Year,Letterboxd URI\n2026-01-01,Film 2,2001,https://boxd.it/rich2\n',
+  'comments.csv':'Date,Name,Year,Letterboxd URI,Comment\n2026-01-01,Film 1,2000,https://boxd.it/rich1,Comentario\n',
+  'lists/cinema-night.csv':'Letterboxd list export v7\nDate,Name,Tags,URL,Description\n2026-01-01,Cinema night,,https://boxd.it/list,Serious description\n\nPosition,Name,Year,URL,Description\n1,Film 1,2000,https://boxd.it/rich1,\n2,Film 2,2001,https://boxd.it/rich2,\n3,Film 3,2002,https://boxd.it/rich3,\n4,Film 4,2003,https://boxd.it/rich4,\n5,Film 5,2004,https://boxd.it/rich5,\n'
+ };
+};
+
+test('a rich account becomes a wide pool, real relationships and a long balanced script',async()=>{
+ const files=await unzipText(storedZip(richExport()).buffer),profile=parseExport(files),analysis=analyzeExport(profile,'pt-BR');
+ assert.equal(profile.inventory.files_processed,9);assert.equal(profile.inventory.unknown_files.length,0);
+ assert.ok(analysis.moments.length>=14,`candidate pool ${analysis.moments.length}`);
+ const types=new Set(analysis.moments.map(moment=>moment.type));
+ for(const wanted of ['tag','list','film_pair','review_quote','rewatch','phrase','stat'])assert.ok(types.has(wanted),wanted);
+ // Tag × list keeps the intersection and the coverage the Analyst will read.
+ const relation=analysis.relationships.relations.find(row=>row.type==='tag_list'&&row.tag==='cinema');
+ assert.equal(relation.intersection,3);assert.equal(relation.list_count,5);assert.equal(Math.round(relation.coverage*100),60);
+ const tagList=analysis.moments.find(moment=>moment.id.startsWith('tag-list-'));
+ assert.equal(tagList.stats.find(row=>row.key==='films').value,3);
+ // A contrast pair only exists inside a shared context, never as bare min versus max.
+ assert.ok(analysis.moments.some(moment=>moment.id.startsWith('contrast-tag-')));
+ assert.ok(analysis.moments.some(moment=>moment.id.startsWith('contrast-list-')));
+ // Temporal measurements only appear once the dated rows can support halves.
+ assert.ok(analysis.temporal.busiest_period.sessions>=2);assert.ok(analysis.temporal.rating_drift);
+ assert.ok(analysis.temporal.verbosity_drift);assert.equal(analysis.temporal.rewatch_moves.length,1);
+ // The spotlight is a spread of reviews, never two candidates pointing at the same text.
+ const spotlight=analysis.moments.filter(moment=>moment.type==='review_quote');
+ for(const id of ['quote-review-1','quote-review-2','quote-longest','quote-lowest'])assert.ok(analysis.moments.some(moment=>moment.id===id),id);
+ assert.ok(spotlight.length>=4,`spotlight ${spotlight.length}`);
+ assert.equal(new Set(spotlight.map(moment=>moment.review.review_id)).size,spotlight.length);
+ const materialized=materializeCandidates(analysis.moments,analysis.moments);
+ const beats=buildScriptEngine(materialized,profile.reviews.length),rich=buildScriptEngine(materialized,120);
+ assert.ok(beats.length>=8&&beats.length<=18,`beats ${beats.length}`);
+ assert.ok(rich.length>=12&&rich.length<=18,`rich beats ${rich.length}`);
+ const ids=new Set(analysis.moments.map(moment=>moment.id));
+ assert.equal(new Set(rich.map(moment=>moment.id)).size,rich.length);
+ assert.ok(rich.every(moment=>ids.has(moment.id)));
+ assert.ok(new Set(rich.map(moment=>moment.type)).size>=4);
+ assert.ok(callbackCandidates(rich).length>0);
+});
+
+
+
+test('Profile Review and explainability are contracted, measured and secret-free',async()=>{
+ const files=await unzipText(storedZip(richExport()).buffer),profile=parseExport(files),analysis=analyzeExport(profile,'pt-BR');
+ const moment=analysis.moments[0],outcome=normalizeJudgment({greeting:'Certo.',archetype_phrase:'um titulo',profile_reaction:'uma reacao',closer:['fim'],
+  profile_review:{lead:'Se eu falasse de você como você fala dos filmes...',text:'palavra '.repeat(200),style_features_used:['blockquotes','frase recorrente']},
+  opening:{greeting:['certo.'],archetype_lead:'Você deve ser o...',archetype_phrase:'um titulo',archetype_after:['...'],username_line:'Pode ser só rich.',transition:['Deixa eu ver.']},
+  reactions:[{id:moment.id,lines:['uma linha']}]},[moment.id]);
+ assert.equal(outcome.profile_review.lead,'Se eu falasse de você como você fala dos filmes...');
+ assert.ok(outcome.profile_review.text.length<=900);
+ assert.deepEqual(outcome.profile_review.style_features_used,['blockquotes','frase recorrente']);
+ const selected=analysis.moments.slice(0,3).map(row=>({...row,observation:`observacao ${row.id}`,why_interesting:'motivo'}));
+ const script=buildPresentation({profile,analysis,writing:{...outcome,opening:outcome.opening},locale:'pt-BR',
+  analyst:{status:'complete',model:'analyst-model',candidate_count:analysis.moments.length,selected,attempts:[{model:'analyst-model',status:200}]}});
+ assert.equal(script.version,'presentation-v2');
+ assert.equal(script.profile_review.lead,outcome.profile_review.lead);
+ // Explainability reports what was measured, not what the model said.
+ assert.equal(script.explainability.files_processed,profile.inventory.files_processed);
+ assert.ok(script.explainability.files_in_zip>=script.explainability.files_processed);
+ assert.equal(script.explainability.profile_summary.watched,profile.films.length);
+ assert.equal(script.explainability.measurements.length,analysis.stats.length);
+ // candidates_found is what the deterministic pass found; selected is what reached the script.
+ assert.deepEqual(script.explainability.analyst,{candidates_found:analysis.moments.length,selected:analysis.moments.length});
+ assert.equal(script.explainability.interesting_findings.length,3);
+ assert.ok(script.explainability.summary.includes(String(profile.films.length)));
+ assert.equal(script.generation_meta.analyst.model,'analyst-model');
+ assert.equal(script.generation_meta.writer.status,'complete');
+ // Nothing private travels to the browser: no key, no prompt, no raw export.
+ const serialized=JSON.stringify(script);
+ for(const secret of ['api_key','API_KEY','AIza','prompt','raw_export'])assert.equal(serialized.includes(secret),false,secret);
+});
+
+test('the Writer receives a style fingerprint and never the key',async t=>{
+ const {profile,analysis}=await readExport(),ids=analysis.moments.map(moment=>moment.id);
+ let body='';
+ t.mock.method(globalThis,'fetch',async(url,options)=>{body=String(options?.body||'');return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'um titulo',profile_reaction:'uma reacao',closer:['fim'],profile_review:{lead:'Se eu falasse de você...',text:'uma review curta sobre comportamento'},reactions:ids.map(id=>({id,lines:['uma linha']}))})}]}}]});});
+ const writing=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'test-key-must-not-leak',GEMINI_MODEL:'test-model',__TEST_SKIP_ANALYST:'1'}});
+ assert.equal(writing._degraded,false);
+ assert.equal(body.includes('profile_review_style'),true);
+ assert.equal(body.includes('median_length'),true);
+ assert.equal(body.includes('test-key-must-not-leak'),false);
+ assert.equal(body.includes('GEMINI'),false);
+});

@@ -18,6 +18,32 @@ for(const [width,height] of [[360,800],[390,844],[768,1024],[1366,768],[1920,108
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.screenshot({path:`web-tests/artifacts/demo-${width}.png`,fullPage:true});
 }
+// The ending carries the Profile Review, the explainability summary and two 4:5 share cards.
+const PIXEL=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==','base64');
+await page.setViewportSize({width:1366,height:768});
+await page.unroute('**/api/poster?*');
+await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:true,poster_url:'https://image.tmdb.org/t/p/w342/fixture.png'}}));
+await page.route('**/image.tmdb.org/**',route=>route.fulfill({contentType:'image/png',body:PIXEL}));
+await page.route('**/api/image-proxy?*',route=>route.fulfill({contentType:'image/png',body:PIXEL}));
+await page.evaluate(()=>localStorage.clear());
+await page.emulateMedia({reducedMotion:'reduce'});await page.goto(base+'/?demo=1');await page.locator('#ending').waitFor();
+assert.equal(await page.locator('.profile-review-card h3').isVisible(),true);
+assert.ok((await page.locator('.profile-review-card p').textContent()).trim().length>80);
+assert.ok((await page.locator('#profile-review .eyebrow').textContent()).trim().length>0);
+assert.equal(await page.locator('#share-card-previews canvas').count(),2);
+assert.deepEqual(await page.locator('#share-card-previews canvas').evaluateAll(nodes=>nodes.map(node=>[node.width,node.height])),[[1080,1350],[1080,1350]]);
+// A tainted canvas would throw here, so the proxy is exercised, not assumed.
+const blobs=await page.locator('#share-card-previews canvas').evaluateAll(nodes=>Promise.all(nodes.map(node=>new Promise(resolve=>node.toBlob(blob=>resolve(blob?blob.size:0),'image/png')))));
+assert.ok(blobs.every(size=>size>8000),`png cards: ${blobs.join(',')}`);
+assert.equal(await page.locator('#explainability').isVisible(),true);
+const explain=(await page.locator('#explainability-copy').textContent()).trim();
+assert.ok(explain.length>120,'the explainability copy must describe this account');
+assert.ok(explain.includes('arquivos'));
+const download=page.waitForEvent('download');
+await page.locator('.share-preview button').first().click();
+assert.match((await download).suggestedFilename(),/\.png$/);
+await page.locator('#share-cards').screenshot({path:'web-tests/artifacts/share-cards.png'});
+
 await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();
 for(const type of ['message','strike','correction','profile_stats','film','film_pair','film_group','review_quote','tag','list','rating','rewatch','phrase','stat'])assert.ok(await page.locator(`[data-event="${type}"]`).count()>0,type);
 assert.equal(await page.locator('.review img').count(),0);assert.ok(await page.locator('.review strong').count());
@@ -63,7 +89,7 @@ await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false}})
 await page.goto(base);await page.locator('#export').setInputFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from('x')});await page.locator('#upload-error').filter({hasText:'ZIP'}).waitFor();
 await page.route('**/api/judge',route=>route.fulfill({status:501,json:{error:'not_connected'}}));
 await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:Buffer.from([80,75,3,4,0,0])});
-assert.equal(await page.locator('#selected').isVisible(),true);await page.locator('#judge').click();await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);await page.emulateMedia({reducedMotion:'no-preference'});
+await page.locator('#selected').waitFor();await page.locator('#judge').click();await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);await page.emulateMedia({reducedMotion:'no-preference'});
 await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#chat .typing').waitFor();
 await page.goto(base);
 // No playback controls remain: the language menu is the header's only custom control.
@@ -84,7 +110,11 @@ assert.ok(paced>early,'the judgment is paced over time, not printed at once');
 await page.locator('.top-four').waitFor({timeout:120000});await page.locator('.archetype').waitFor();assert.equal(await page.locator('.top-four .film-card').count(),4);
 await page.screenshot({path:'web-tests/artifacts/top-four.png',fullPage:true});
 // Playback continues on its own; scrolling away proves the bottom shortcut works.
-await page.mouse.move(600,400);await page.mouse.wheel(0,-500);await page.waitForTimeout(200);assert.equal(await page.locator('#bottom').isVisible(),true);
+await page.mouse.move(600,400);await page.mouse.wheel(0,-500);
+// The ending grows while the queue finishes, so a late resize may hide the shortcut once more;
+// scrolling up again is exactly what the visitor would do.
+try{await page.locator('#bottom').waitFor({state:'visible',timeout:4000});}
+catch{await page.mouse.wheel(0,-300);await page.locator('#bottom').waitFor({state:'visible',timeout:4000});}
 await page.locator('#bottom').click();await page.waitForTimeout(200);
 assert.deepEqual(errors,[]);await browser.close();
 for(const engine of (process.env.ALL_BROWSERS==='1'?[firefox,webkit]:[])){

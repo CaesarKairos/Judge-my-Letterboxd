@@ -1,5 +1,5 @@
 {
-  "version": "presentation-v1",
+  "version": "presentation-v2",
   "template": "opening_v1",
   "locale": "pt-BR",
   "profile": {
@@ -429,7 +429,7 @@
         "film_key": "f0340",
         "title": "Young Hearts",
         "year": "2024",
-        "rating": 5.0
+        "rating": 5
       }
     },
     {
@@ -438,14 +438,14 @@
         "film_key": "f0340",
         "title": "Young Hearts",
         "year": "2024",
-        "rating": 5.0
+        "rating": 5
       },
       "sessions": [
         {
           "diary_id": "diary.csv:13",
           "date": "2026-01-01",
           "logged_date": "2026-01-01",
-          "rating": 5.0,
+          "rating": 5,
           "rewatch": false,
           "tags": [
             "→ watched via streaming 𖦹",
@@ -460,7 +460,7 @@
           "diary_id": "diary.csv:26",
           "date": "2026-02-23",
           "logged_date": "2026-02-24",
-          "rating": 5.0,
+          "rating": 5,
           "rewatch": true,
           "tags": [
             "→ watched with agathinha (gaah) 𖦹",
@@ -475,7 +475,7 @@
           "diary_id": "diary.csv:70",
           "date": "2026-07-05",
           "logged_date": "2026-07-06",
-          "rating": 5.0,
+          "rating": 5,
           "rewatch": true,
           "tags": [
             "→ watched via streaming 𖦹"
@@ -567,7 +567,7 @@
         "film_key": "f0327",
         "title": "Up",
         "year": "2009",
-        "rating": 4.0
+        "rating": 4
       }
     },
     {
@@ -576,7 +576,7 @@
       "film_key": "f0327",
       "title": "Up",
       "year": "2009",
-      "rating": 4.0,
+      "rating": 4,
       "text": "Adicionei esse filme na redação do meu primeiro Enem. Agora sei que não disse coisa com coisa e lembrava do filme de outra forma",
       "segments": [
         {
@@ -659,7 +659,7 @@
         "film_key": "f0087",
         "title": "Flow",
         "year": "2024",
-        "rating": 5.0
+        "rating": 5
       }
     },
     {
@@ -668,7 +668,7 @@
       "film_key": "f0087",
       "title": "Flow",
       "year": "2024",
-      "rating": 5.0,
+      "rating": 5,
       "text": "Os cara só queriam mostrar oque eles sabia fazer no blender, ótimo filme. Miau.",
       "segments": [
         {
@@ -705,7 +705,7 @@
         "film_key": "f0023",
         "title": "Apocalypse in the Tropics",
         "year": "2024",
-        "rating": 4.0
+        "rating": 4
       }
     },
     {
@@ -714,7 +714,7 @@
       "film_key": "f0023",
       "title": "Apocalypse in the Tropics",
       "year": "2024",
-      "rating": 4.0,
+      "rating": 4,
       "text": "☭",
       "segments": [
         {
@@ -751,7 +751,7 @@
         "film_key": "f0210",
         "title": "Red, White & Royal Blue",
         "year": "2023",
-        "rating": 2.0
+        "rating": 2
       }
     },
     {
@@ -760,7 +760,7 @@
       "film_key": "f0210",
       "title": "Red, White & Royal Blue",
       "year": "2023",
-      "rating": 2.0,
+      "rating": 2,
       "text": "meu tipo de filme homossexual é o contrário, eu gosto da dor de ser gay, da tristeza de ter que encarar essa realidade",
       "segments": [
         {
@@ -805,5 +805,128 @@
       ]
     }
   ],
-  "demo": true
+  "demo": true,
+  "profile_review": {
+    "lead": "Se eu falasse de você como você fala dos filmes...",
+    "text": "esse filme é um mergulho profundo nas angústias cotidianas sem qualquer filtro romântico. gosto de como a narrativa constrói o peso das escolhas ao longo do tempo. dito isso, a direção acerta em cheio ao mostrar a realidade crua dos personagens. é um bom filme que deixa o espectador pensando muito depois dos créditos subirem. dito isso eu saí completamente devastado com essa experiência visual.",
+    "style_features_used": [
+      "blockquotes",
+      "recurrent phrase"
+    ]
+  },
+  "explainability": {
+    "summary": "O export continha 12 arquivos. Foram medidos 106 filmes, 103 reviews, 9 reassistidas e 7 tags.",
+    "findings": [
+      "A expressiva repetição da locução 'dito isso' em 86 das 103 avaliações confere uma assinatura estilística marcante e coesa ao perfil de escrita do usuário. — Funciona como um bordão literário estrutural que pontua a transição entre a análise reflexiva e a citação icônica em quase todas as resenhas.",
+      "Extremo contraste de avaliação entre duas obras assistidas via streaming: nota máxima (5/5) para 'After the End' e nota mínima de descarte (0.5/5) para 'The Smurfs: The Legend of Smurfy Hollow'. — evidencia a disparidade de critérios aplicados a curtas e produções de animação na rotina de registro do diário.",
+      "O filme 'Young Hearts' (2024) foi reassistido múltiplas vezes, mantendo a nota máxima irredutível de 5/5 em todas as sessões registradas. — Destaca um objeto de afeição central na cinefilia do usuário, servindo como porto seguro emocional dentro do diário.",
+      "A tag de consumo predominante é '→ watched via streaming 𖦹', presente em 104 registros, indicando o formato digital como principal via de acesso às obras. — Mapeia o comportamento de consumo solitário e doméstico em contraste com as raras idas ao cinema.",
+      "A tag '→ watched with agathinha (gaah) 𖦹' aparece em 19 sessões, revelando uma forte rede de fruição compartilhada. — Insere uma camada de afeto interpessoal e intimidade na catalogação fria de dados do diário.",
+      "A tag '→ eudaimonia 𖦹' agrupa 17 filmes com uma média de avaliação excepcionalmente alta (4.72/5). — Conecta o conceito filosófico grego de florescimento humano diretamente às obras que proporcionaram arrebatamento estético e ético.",
+      "Uso recorrente da tag '→ no rating needed 𖦹' em 11 curtas-metragens e obras experimentais. — Aponta para um consumo descompromissado de registros visuais onde a nota numérica perde o sentido diante da experiência contemplativa.",
+      "A tag '→ hated it -' cataloga 6 filmes rejeitados com média de 1.67/5, servindo como válvula de escape para frustrações narrativas. — Cria um contraponto polêmico a clássicos aclamados, revelando um espectador sem medo de desagradar o cânone crítico tradicional."
+    ],
+    "files_processed": 12,
+    "profile_summary": {
+      "watched": 106,
+      "reviews": 103,
+      "sessions": 110,
+      "ratings": 92,
+      "rewatches": 9,
+      "watchlist": 236,
+      "likes": 0,
+      "lists": 2,
+      "tags": 7
+    },
+    "measurements": [
+      {
+        "key": "watched_films",
+        "value": 106,
+        "label": "filmes vistos"
+      },
+      {
+        "key": "reviews",
+        "value": 103,
+        "label": "reviews"
+      },
+      {
+        "key": "diary_entries",
+        "value": 110,
+        "label": "sessões"
+      },
+      {
+        "key": "rated_films",
+        "value": 92,
+        "label": "ratings"
+      },
+      {
+        "key": "explicit_rewatches",
+        "value": 9,
+        "label": "rewatches"
+      }
+    ],
+    "analyst": {
+      "candidates_found": 30,
+      "selected": 13
+    },
+    "interesting_findings": [
+      {
+        "observation": "A expressiva repetição da locução 'dito isso' em 86 das 103 avaliações confere uma assinatura estilística marcante e coesa ao perfil de escrita do usuário.",
+        "why_interesting": "Funciona como um bordão literário estrutural que pontua a transição entre a análise reflexiva e a citação icônica em quase todas as resenhas."
+      },
+      {
+        "observation": "Extremo contraste de avaliação entre duas obras assistidas via streaming: nota máxima (5/5) para 'After the End' e nota mínima de descarte (0.5/5) para 'The Smurfs: The Legend of Smurfy Hollow'.",
+        "why_interesting": "evidencia a disparidade de critérios aplicados a curtas e produções de animação na rotina de registro do diário."
+      },
+      {
+        "observation": "O filme 'Young Hearts' (2024) foi reassistido múltiplas vezes, mantendo a nota máxima irredutível de 5/5 em todas as sessões registradas.",
+        "why_interesting": "Destaca um objeto de afeição central na cinefilia do usuário, servindo como porto seguro emocional dentro do diário."
+      },
+      {
+        "observation": "A tag de consumo predominante é '→ watched via streaming 𖦹', presente em 104 registros, indicando o formato digital como principal via de acesso às obras.",
+        "why_interesting": "Mapeia o comportamento de consumo solitário e doméstico em contraste com as raras idas ao cinema."
+      },
+      {
+        "observation": "A tag '→ watched with agathinha (gaah) 𖦹' aparece em 19 sessões, revelando uma forte rede de fruição compartilhada.",
+        "why_interesting": "Insere uma camada de afeto interpessoal e intimidade na catalogação fria de dados do diário."
+      },
+      {
+        "observation": "A tag '→ eudaimonia 𖦹' agrupa 17 filmes com uma média de avaliação excepcionalmente alta (4.72/5).",
+        "why_interesting": "Conecta o conceito filosófico grego de florescimento humano diretamente às obras que proporcionaram arrebatamento estético e ético."
+      },
+      {
+        "observation": "Uso recorrente da tag '→ no rating needed 𖦹' em 11 curtas-metragens e obras experimentais.",
+        "why_interesting": "Aponta para um consumo descompromissado de registros visuais onde a nota numérica perde o sentido diante da experiência contemplativa."
+      },
+      {
+        "observation": "A tag '→ hated it -' cataloga 6 filmes rejeitados com média de 1.67/5, servindo como válvula de escape para frustrações narrativas.",
+        "why_interesting": "Cria um contraponto polêmico a clássicos aclamados, revelando um espectador sem medo de desagradar o cânone crítico tradicional."
+      }
+    ],
+    "writer": {
+      "model": "gemini-flash-lite-latest",
+      "status": "complete"
+    }
+  },
+  "generation_meta": {
+    "analyst": {
+      "status": "complete",
+      "model": "gemini-flash-lite-latest",
+      "candidate_count": 30
+    },
+    "writer": {
+      "status": "complete",
+      "model": "gemini-flash-lite-latest",
+      "reactions": 13
+    }
+  },
+  "render": {
+    "ai_generation": "complete",
+    "model": "gemini",
+    "served_model": "gemini-flash-lite-latest",
+    "quality_degraded": false,
+    "salvaged": false,
+    "human_templates": false,
+    "runtime": "cloudflare-pages"
+  }
 }
