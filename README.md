@@ -137,7 +137,9 @@ $env:ALL_BROWSERS='1'; npm run test:browser
 
 Playwright é apenas ferramenta de desenvolvimento; o site não tem dependências JS.
 `/web-tests/harness.html` exercita todos os tipos, títulos/reviews longos, nota e
-pôster ausentes, markup hostil e favoritos. O smoke automatizado usa 360×800,
+pôster ausentes, markup hostil e favoritos. O smoke confere ainda que um membro de
+lista ou de tag com nota a mostra, enquanto um filme sem nota continua sem nota.
+O smoke automatizado usa 360×800,
 390×844, 768×1024, 1366×768 e 1920×1080; screenshots ficam em
 `web-tests/artifacts/` (ignorado). O harness não é copiado para produção.
 
@@ -444,8 +446,13 @@ Arquivos opcionais ausentes são aceitos; desconhecidos são inventariados.
 header de filmes após o bloco de metadados. Limites de ZIP: 50 MB por CSV conhecido,
 200 MB de tamanho descompactado declarado. Espera-se o layout oficial na raiz.
 
-Rating atual vem de `ratings.csv`. Rating de sessão vem só daquela linha de diary;
-rating de review vem daquela review. Null nunca é preenchido com outro rating.
+Rating atual vem de `ratings.csv`, mesclado por último: uma linha de diary ou de review
+guarda a nota daquela sessão ou daquele texto, não sobrescreve a nota atual e só
+preenche um filme que não tem linha em `ratings.csv`. Rating de sessão vem só daquela
+linha de diary; rating de review vem daquela review. Null nunca é preenchido com outro
+rating. Cartões de lista e de tag mostram a nota atual do filme, resolvida pelo registry:
+o CSV de lista não tem coluna de nota e uma linha de diary carrega só a nota daquela
+sessão, então sem essa consulta todo membro avaliado aparecia como "Sem nota" ali.
 Reviews não criam sessões. Rewatches explícitos e repetições observadas são separados;
 não se somam. Sessões no mesmo dia ou sem data não sustentam direção cronológica.
 

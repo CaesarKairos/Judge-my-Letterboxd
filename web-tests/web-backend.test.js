@@ -41,7 +41,28 @@ test('ZIP parser and independent web analyzer read an official export shape',asy
  assert.equal(quoted.segments.at(-1).text,'"Nunca mais." — Alpha');
  assert.equal(JSON.stringify(analysis.moments).includes('<blockquote>'),false);
 });
-
+test('list members and tag cards show the current rating of the film',async()=>{
+ // A list CSV has no rating column and a diary line only holds that session's score, so both are
+ // resolved through the film registry: without that lookup every member rendered as "not rated".
+ const local={
+  'profile.csv':'Username,Favorite Films\ncritic,\n',
+  'watched.csv':'Date,Name,Year,Letterboxd URI\n2026-01-01,Alpha,2000,https://boxd.it/a\n2026-01-01,Beta,2001,https://boxd.it/b\n2026-01-01,Gamma,2002,https://boxd.it/c\n',
+  'ratings.csv':'Date,Name,Year,Letterboxd URI,Rating\n2026-01-01,Alpha,2000,https://boxd.it/a,5\n2026-01-01,Beta,2001,https://boxd.it/b,2\n',
+  'diary.csv':'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n2026-01-01,Alpha,2000,https://boxd.it/a,4.5,,comfort,2026-01-01\n2026-01-02,Beta,2001,https://boxd.it/b,,,comfort,2026-01-02\n',
+  'reviews.csv':'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Date\n2026-01-01,Alpha,2000,https://boxd.it/a,4.5,,"Uma linha.",,2026-01-01\n',
+  'lists/duo.csv':'Letterboxd list export v7\nDate,Name,Tags,URL,Description\n2026-01-01,Duo,,https://boxd.it/list,Assistido\n\nPosition,Name,Year,URL,Description\n1,Alpha,2000,https://boxd.it/a,\n2,Gamma,2002,https://boxd.it/c,\n3,Never rated,2010,https://boxd.it/z,\n'
+ };
+ const profile=parseExport(await unzipText(storedZip(local).buffer));
+ assert.deepEqual(profile.lists[0].films.map(film=>[film.title,film.rating]),[['Alpha',5],['Gamma',null],['Never rated',null]]);
+ // The current rating is the one from ratings.csv: the 4.5 of that review and of that diary line
+ // never replaces it, and a member outside watched/ratings/diary/reviews stays unrated.
+ assert.deepEqual(profile.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Beta',2],['Gamma',null]]);
+ assert.equal(profile.films.length,3);
+ const analysis=analyzeExport(profile,'pt-BR');
+ const list=analysis.moments.find(moment=>moment.type==='list'),tag=analysis.moments.find(moment=>moment.type==='tag');
+ assert.deepEqual(list.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Gamma',null],['Never rated',null]]);
+ assert.deepEqual(tag.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Beta',2]]);
+});
 test('Pages Function falls back across models and returns Presentation without Python',async t=>{
  const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:[
   {id:'phrase',lines:['Você até criou uma cláusula de encerramento.']},{id:'rating-contrast',lines:['Um ponto para Alpha. Cinco para Beta.']},{id:'rewatch',lines:['Beta outra vez. Naturalmente.']},{id:'tag',lines:['Comfort, porque terapia tem fila.']},{id:'list',lines:['Uma lista com convicção.']},{id:'quote-review-1',lines:['Breve e cruel.']},{id:'quote-review-2',lines:['Cinco estrelas e ponto final.']}

@@ -24,6 +24,13 @@ assert.equal(await page.locator('.review img').count(),0);assert.ok(await page.l
 // Quoted reviews are rendered as real blockquotes, never as literal markup.
 assert.ok(await page.locator('.judge-quote').count()>0);assert.ok(await page.locator('.review blockquote').count()>0);
 assert.equal((await page.locator('#chat').textContent()).includes('<blockquote'),false);
+// A list member and a tag card show the film's current rating: those rows carry no rating column,
+// so a rated film must never be printed as "Sem nota" there.
+const listRatings=await page.locator('.attachment-list .film-card .rating').allTextContents();
+const tagRatings=await page.locator('.attachment-tag .film-card .rating').allTextContents();
+assert.ok(listRatings.some(text=>text.includes('★ 5 / 5')),`list ratings: ${listRatings.join(' | ')}`);
+assert.ok(tagRatings.some(text=>text.includes('★ 5 / 5')),`tag ratings: ${tagRatings.join(' | ')}`);
+assert.ok(listRatings.some(text=>!text.includes('★')),`an unrated member stays unrated: ${listRatings.join(' | ')}`);
 // A resolved poster replaces the abstract card, and a refused lookup keeps it.
 await page.unroute('**/api/poster?*');
 await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:true,poster_url:'https://image.tmdb.org/t/p/w342/fixture.png'}}));

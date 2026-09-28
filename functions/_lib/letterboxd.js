@@ -5,6 +5,11 @@ const number=value=>value===''||value==null?null:Number.isFinite(Number(value))?
 const boxdId=value=>{try{return new URL(value).pathname.split('/').filter(Boolean).at(-1)||'';}catch{return '';}};
 const filmFrom=row=>({film_key:keyOf(row.Name,row.Year),title:(row.Name||'').trim(),year:(row.Year||'').trim(),rating:number(row.Rating)});
 const tags=value=>String(value||'').split(',').map(item=>item.trim()).filter(Boolean);
+// Lists and tags render film cards, and a card shows the film's current rating: a list row has no
+// rating column at all, and a diary line carries the rating of that one session. Both are resolved
+// through the film registry, so a rated film is never printed as "not rated" there; a film that is
+// not in the registry keeps what the row itself said (usually null, never an invented score).
+const ratedRow=(filmByKey,row)=>({...row,rating:filmByKey.get(row.film_key)?.rating??row.rating??null});
 const entities={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:' '};
 const decodeEntities=value=>value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi,(_,entity)=>{
   if(entity[0]==='#'){const radix=entity[1].toLowerCase()==='x'?16:10,raw=entity.slice(radix===16?2:1),code=Number.parseInt(raw,radix);return Number.isFinite(code)?String.fromCodePoint(code):'';}
@@ -44,7 +49,11 @@ export function parseExport(entries) {
   const read=name=>entries.has(name)?csvObjects(entries.get(name)):[];
   const profileRow=read('profile.csv')[0]||{},watched=read('watched.csv'),ratings=read('ratings.csv'),diary=read('diary.csv'),reviews=read('reviews.csv'),watchlist=read('watchlist.csv');
   const films=new Map();
-  for(const row of [...watched,...ratings,...diary,...reviews]){
+  // ratings.csv carries the current rating, so it is merged last: a diary line or a review keeps
+  // the rating of that session or of that text, and a film rated 5 today can still hold an older
+  // 4.5. Those rows only fill a film without a ratings.csv row, so an export missing the file or
+  // a rating does not lose every score.
+  for(const row of [...watched,...diary,...reviews,...ratings]){
     const film=filmFrom(row);if(!film.title)continue;
     const current=films.get(film.film_key)||film;
     if(film.rating!=null)current.rating=film.rating;
@@ -54,7 +63,8 @@ export function parseExport(entries) {
   const topFour=favoriteIds.map(id=>[...films.values()].find(f=>boxdId(f.uri)===id)).filter(Boolean).slice(0,4);
   const sessions=diary.map((row,index)=>({...filmFrom(row),date:row['Watched Date']||row.Date,rewatch:/^(yes|true|1)$/i.test(row.Rewatch),tags:tags(row.Tags),index:index+1}));
   const reviewRows=reviews.map((row,index)=>({...filmFrom(row),...structuredReview(row.Review),date:row['Watched Date']||row.Date,tags:tags(row.Tags),review_id:`review-${index+1}`})).filter(r=>r.text);
-  const lists=[...entries].filter(([path])=>/^lists\/[^/]+\.csv$/i.test(path)).map(([path,text])=>parseList(text,path));
+  const filmByKey=new Map([...films.values()].map(film=>[film.film_key,film]));
+  const lists=[...entries].filter(([path])=>/^lists\/[^/]+\.csv$/i.test(path)).map(([path,text])=>parseList(text,path)).map(list=>({...list,films:list.films.map(row=>ratedRow(filmByKey,row))}));
   return {handle:(profileRow.Username||'').trim(),name:(profileRow.Username||profileRow['Given Name']||'').trim(),films:[...films.values()],sessions,reviews:reviewRows,lists,watchlist:watchlist.length,topFour};
 }
 
@@ -69,8 +79,9 @@ export function analyzeExport(profile,locale='pt-BR') {
   const sessionsByFilm=new Map();for(const row of profile.sessions){const group=sessionsByFilm.get(row.film_key)||[];group.push(row);sessionsByFilm.set(row.film_key,group);}
   const repeated=[...sessionsByFilm.entries()].filter(([,rows])=>rows.length>1).sort((a,b)=>b[1].length-a[1].length)[0];
   if(repeated){const film=profile.films.find(f=>f.film_key===repeated[0])||repeated[1][0];moments.push({id:'rewatch',type:'rewatch',film,sessions:repeated[1],stats:[stat('sessions',repeated[1].length,pt?'sessões':'sessions')],facts:`${film.title}: ${repeated[1].length} sessions; ratings ${repeated[1].map(s=>s.rating??'?').join(' → ')}`});}
+  const filmByKey=new Map(profile.films.map(film=>[film.film_key,film]));
   const tagCounts=new Map();for(const row of profile.sessions)for(const tag of row.tags)tagCounts.set(tag,(tagCounts.get(tag)||0)+1);
-  const commonTag=byCount(tagCounts)[0];if(commonTag)moments.push({id:'tag',type:'tag',tag:commonTag[0],stats:[stat('sessions',commonTag[1],pt?'sessões':'sessions')],films:profile.sessions.filter(s=>s.tags.includes(commonTag[0])).slice(0,3),facts:`tag ${commonTag[0]} used ${commonTag[1]} times`});
+  const commonTag=byCount(tagCounts)[0];if(commonTag)moments.push({id:'tag',type:'tag',tag:commonTag[0],stats:[stat('sessions',commonTag[1],pt?'sessões':'sessions')],films:profile.sessions.filter(s=>s.tags.includes(commonTag[0])).slice(0,3).map(row=>ratedRow(filmByKey,row)),facts:`tag ${commonTag[0]} used ${commonTag[1]} times`});
   if(profile.lists[0])moments.push({id:'list',type:'list',...profile.lists[0],stats:[stat('films',profile.lists[0].count,pt?'filmes':'films')],facts:`list ${profile.lists[0].name}, ${profile.lists[0].count} films`});
   const phraseCandidates=['dito isso','honestly','but still','overall'];let phraseMoment=null;
   for(const phrase of phraseCandidates){const matching=profile.reviews.filter(r=>r.text.toLocaleLowerCase().includes(phrase));if(matching.length>=2&&(!phraseMoment||matching.length>phraseMoment.count))phraseMoment={phrase,count:matching.length,reviews:matching};}
