@@ -6,7 +6,7 @@ import {loadDemo} from './demo.js';
 import {ChatPlayer,typingDots} from './chat-renderer.js';
 import {resolvePoster} from './poster-service.js';
 import {makeShareCards,downloadCard} from './share-cards.js';
-let player,script,request,sequence=0,loadingTimer,lastDemo=false,lastFailure=null,cardAvatarUrl='';
+let player,script,request,sequence=0,loadingTimer,lastDemo=false,lastFailure=null,shareFormat='post';
 const upload=setupUpload();
 setLocale(locale);
 const languageMenu=$('#language-menu'),languageSummary=languageMenu.querySelector('summary'),languageOptions=[...languageMenu.querySelectorAll('[data-locale]')];
@@ -43,7 +43,7 @@ async function renderEnding(){
   const explain=$('#explainability'),details=script.explainability;
   explain.hidden=!details;if(details){const lines=[details.summary,...(details.findings||[])].filter(Boolean);$('#explainability-copy').textContent=lines.join('\n\n');}
   const cards=$('#share-cards'),previews=$('#share-card-previews');previews.replaceChildren();cards.hidden=!profile?.text;
-  if(profile?.text){const posterUrls=await Promise.all((script.opening?.top_four||[]).map(resolvePoster)),rendered=await makeShareCards(script,{avatarUrl:cardAvatarUrl,posterUrls});for(const [name,canvas] of Object.entries(rendered)){const item=document.createElement('div');item.className='share-preview';item.append(canvas);const download=document.createElement('button');download.textContent=t('downloadCard');download.addEventListener('click',()=>downloadCard(canvas,'judge-'+name));const share=document.createElement('button');share.textContent=t('shareCard');share.addEventListener('click',async()=>{canvas.toBlob(async blob=>{const file=new File([blob],'judge-'+name+'.png',{type:'image/png'});if(navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:t('shareTitle')});else downloadCard(canvas,'judge-'+name);},'image/png');});item.append(download,share);previews.append(item);}}
+  if(profile?.text){const posterUrls=await Promise.all((script.opening?.top_four||[]).map(resolvePoster)),rendered=await makeShareCards(script,{format:shareFormat,posterUrls});for(const [name,canvas] of Object.entries(rendered)){const item=document.createElement('div');item.className='share-preview';item.append(canvas);const download=document.createElement('button');download.textContent=t('downloadCard');download.addEventListener('click',()=>downloadCard(canvas,'judge-'+name));const share=document.createElement('button');share.textContent=t('shareCard');share.addEventListener('click',async()=>{canvas.toBlob(async blob=>{const file=new File([blob],'judge-'+name+'.png',{type:'image/png'});if(navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:t('shareTitle')});else downloadCard(canvas,'judge-'+name);},'image/png');});item.append(download,share);previews.append(item);}}
 }
 function home(){stop();show('landing');(upload.file?$('#judge'):$('#export')).focus();}
 async function play(all=false){
@@ -81,5 +81,9 @@ $('#share').addEventListener('click',async()=>{
   try{if(navigator.canShare?.({files}))await navigator.share({title:t('shareTitle'),files});else{canvases.forEach((canvas,index)=>downloadCard(canvas,`judge-${index+1}`));$('#share-status').textContent=t('download');}}
   catch(error){if(error.name!=='AbortError'){$('#share-status').textContent=t('download');canvases.forEach((canvas,index)=>downloadCard(canvas,`judge-${index+1}`));}}
 });
-$('#card-avatar').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file)return;if(cardAvatarUrl)URL.revokeObjectURL(cardAvatarUrl);cardAvatarUrl=URL.createObjectURL(file);await renderEnding();});
+document.querySelectorAll('[data-share-format]').forEach(button=>button.addEventListener('click',async()=>{
+  shareFormat=button.dataset.shareFormat==='story'?'story':'post';
+  document.querySelectorAll('[data-share-format]').forEach(node=>node.setAttribute('aria-pressed',String(node===button)));
+  if(script)await renderEnding();
+}));
 if(new URLSearchParams(location.search).get('demo')==='1')start(true);
