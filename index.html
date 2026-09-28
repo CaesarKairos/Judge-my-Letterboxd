@@ -17,7 +17,7 @@
   <main id="main">
     <section id="landing" class="screen landing">
       <div class="hero-art" aria-hidden="true"><figure class="art-poster art-one"><img alt=""><figcaption></figcaption></figure><figure class="art-poster art-two"><img alt=""><figcaption></figcaption></figure><figure class="art-poster art-three"><img alt=""><figcaption></figcaption></figure></div>
-      <div class="hero-copy"><p class="eyebrow"><span class="status-dot"></span> <span data-i18n="eyebrow">SEU GOSTO ESTÁ EM JULGAMENTO</span></p><h1><span data-i18n="hero">Todo mundo é crítico.</span><br><em data-i18n="punch">Até ser criticado.</em></h1><p class="intro" data-i18n="sub">Anos de escolhas cinematográficas. Uma IA sem muita delicadeza. Seu diário tem coisas a explicar.</p></div>
+      <div class="hero-copy"><h1><span data-i18n="hero">Todo mundo é crítico.</span><br><em data-i18n="punch">Até ser criticado.</em></h1><p class="intro" data-i18n="sub">Seu diário de filmes tem coisas a explicar.</p></div>
       <form id="upload-form" class="upload-panel">
         <div id="dropzone" class="dropzone"><span class="upload-symbol" aria-hidden="true">↥</span><strong data-i18n="drop">Arraste seu export para cá</strong><label class="file-button"><span data-i18n="choose">Escolher arquivo .zip</span><input id="export" type="file" accept=".zip,application/zip" aria-label="Letterboxd export ZIP"></label><small data-i18n="limit">ZIP do Letterboxd · até 50 MB</small></div>
         <div id="selected" class="selected" hidden><img class="file-icon" src="/images/camera-reels-fill.svg" width="18" height="18" alt="" aria-hidden="true"><div><strong id="file-name"></strong><small id="file-size"></small></div><button type="button" id="remove" data-i18n="remove">Remover</button></div>
@@ -26,12 +26,12 @@
       <button id="demo" class="text-button demo-link" data-i18n="demo">Só quero ver uma demonstração ↗</button>
       <div class="landing-info"><details id="how"><summary data-i18n="exportHelp">Como consigo meu export?</summary><p data-i18n="instructions"></p></details><details id="about"><summary data-i18n="about">Sobre</summary><p data-i18n="aboutText"></p></details></div>
     </section>
-    <section id="analyzing" class="screen narrow analyzing" hidden><p class="eyebrow" data-i18n="session"></p><h2 tabindex="-1" data-i18n="analyzing"></h2><div id="loading-dots"></div><p id="loading-copy" class="loading-copy" role="status"></p><div class="indeterminate" aria-hidden="true"></div><p class="muted" data-i18n="loadingNote"></p><button id="cancel" class="text-button" data-i18n="back"></button></section>
+    <section id="analyzing" class="screen narrow analyzing" hidden><p class="eyebrow" data-i18n="session"></p><h2 tabindex="-1" data-i18n="analyzing"></h2><div id="loading-dots"></div><p id="loading-copy" class="loading-copy" role="status"></p><div class="indeterminate" aria-hidden="true"></div><button id="cancel" class="text-button" data-i18n="back"></button></section>
     <section id="error" class="screen narrow error-screen" hidden><p class="eyebrow">OUTTAKE / 01</p><h2 tabindex="-1" data-i18n="errorTitle"></h2><p id="error-message" role="alert"></p><div class="actions"><button id="retry" class="primary" data-i18n="retry"></button><button id="error-demo" data-i18n="demoAction"></button><button id="error-back" data-i18n="back"></button></div></section>
     <section id="judgment" class="screen narrow judgment" hidden><div class="chat-heading"><span class="status-dot"></span><span data-i18n="session"></span><span id="demo-label" data-i18n="demoLabel" hidden></span></div><div id="chat" aria-label="Judge"></div><section id="ending" class="ending" hidden><span class="end-mark" aria-hidden="true">✳</span><h2 data-i18n="done"></h2><div class="actions"><button id="another" class="primary" data-i18n="another"></button><button id="replay" data-i18n="replay"></button><button id="show-all" data-i18n="all"></button><button id="share" data-i18n="share"></button></div><p id="share-status" role="status"></p></section></section>
   </main>
   <button id="bottom" class="back-bottom" data-i18n="bottom" hidden></button><p id="announce" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
-  <footer><span data-i18n="footer"></span><span>JML / EST. 2026</span><small data-i18n="posterCredit"></small></footer>
+  <footer><span>JUDGE MY LETTERBOXD</span><span>2026</span></footer>
   <noscript>Ative o JavaScript para reproduzir o julgamento. Enable JavaScript to play the judgment.</noscript>
 </body>
 </html>
