@@ -24,7 +24,7 @@ export function materializeCandidates(candidates,deterministic){
   const byId=new Map(deterministic.map(moment=>[moment.id,moment]));
   return candidates.map(candidate=>{
     const base=byId.get(candidate.id);if(!base)return null;
-    return {...base,editorial_type:candidate.editorial_type||candidate.type||base.type,observation:candidate.observation||'',why_interesting:candidate.why_interesting||'',cultural_angle:candidate.cultural_angle||'',interestingness:Number.isFinite(candidate.interestingness)?candidate.interestingness:.5,confidence:Number.isFinite(candidate.confidence)?candidate.confidence:.7};
+    return {...base,editorial_type:candidate.editorial_type||candidate.type||base.type,observation:candidate.observation||'',why_interesting:candidate.why_interesting||'',cultural_angle:candidate.cultural_angle||'',interestingness:Number.isFinite(candidate.interestingness)?candidate.interestingness:.72,confidence:Number.isFinite(candidate.confidence)?candidate.confidence:.8};
   }).filter(Boolean);
 }
 
