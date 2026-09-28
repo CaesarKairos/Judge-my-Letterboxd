@@ -9,7 +9,7 @@ function forcedTriage(event){
   const node=shell(event),title=el('h3','game-title','Escolha sem olhar para trás');title.id=`game-title-${event.game_id}`;node.append(title);
   const grid=el('div','game-films'),selects=[];
   for(const film of event.films||[]){
-    const card=el('div','game-film');card.append(filmCard(film));
+    const card=el('div','game-film');card.append(filmCard(film,{showRating:false}));
     const label=el('label','game-role-label','Papel');
     const select=document.createElement('select');select.setAttribute('aria-label',`Papel para ${film.title}`);
     select.append(new Option('—',''));
@@ -29,12 +29,12 @@ function blindRank(event){
   const stage=el('div','blind-stage'),actions=el('div','blind-actions'),status=el('p','game-status');status.setAttribute('role','status');node.append(stage,actions,status);
   const films=event.films||[],used=new Set(),ranking=[],orders=new Map();let index=0,resolve;
   const done=new Promise(r=>resolve=r),finish=value=>{node.classList.add('game-complete');node.querySelectorAll('button').forEach(control=>control.disabled=true);resolve(value);};
-  const draw=()=>{stage.replaceChildren();actions.replaceChildren();if(index>=films.length){finish({skipped:false,key:'ranked',ranking});return;}const film=films[index];stage.append(filmCard(film));for(const rank of [1,2,3].filter(value=>!used.has(value))){const b=button(`${rank}º`,'rank-button');b.setAttribute('aria-label',`Colocar ${film.title} em ${rank}º`);b.addEventListener('click',()=>{used.add(rank);orders.set(film.film_key,rank);ranking.push({film_key:film.film_key,rank});index++;draw();});actions.append(b);}actions.append(skipButton(event,finish));actions.querySelector('button')?.focus({preventScroll:true});};
+  const draw=()=>{stage.replaceChildren();actions.replaceChildren();if(index>=films.length){finish({skipped:false,key:'ranked',ranking});return;}const film=films[index];stage.append(filmCard(film,{showRating:false}));for(const rank of [1,2,3].filter(value=>!used.has(value))){const b=button(`${rank}º`,'rank-button');b.setAttribute('aria-label',`Colocar ${film.title} em ${rank}º`);b.addEventListener('click',()=>{used.add(rank);orders.set(film.film_key,rank);ranking.push({film_key:film.film_key,rank});index++;draw();});actions.append(b);}actions.append(skipButton(event,finish));actions.querySelector('button')?.focus({preventScroll:true});};
   draw();return {node,done};
 }
 function defendTake(event){
   const node=shell(event),title=el('h3','game-title',event.question||'Vai sustentar essa?');title.id=`game-title-${event.game_id}`;node.append(title);
-  if(event.film)node.append(filmCard(event.film));
+  if(event.film)node.append(filmCard(event.film,{showRating:false}));
   if(event.tmdb){const context=el('p','tmdb-context');context.textContent=`${event.tmdb.source_label||'TMDb'}: ${event.tmdb.vote_average?.toFixed?.(1)??event.tmdb.vote_average}/10 · ${event.tmdb.vote_count} votos`;node.append(context);}
   const actions=el('div','game-choice-list');let resolve;const done=new Promise(r=>resolve=r),finish=value=>{node.classList.add('game-complete');node.querySelectorAll('button').forEach(control=>control.disabled=true);resolve(value);};
   for(const choice of event.choices||[]){const b=button(choice.label,'game-choice');b.addEventListener('click',()=>finish({skipped:false,key:choice.id,choice,reaction:choice.reaction||''}));actions.append(b);}
