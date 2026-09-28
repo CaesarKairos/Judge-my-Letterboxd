@@ -134,9 +134,13 @@ test('an unusable model answer degrades to a partial script instead of an error 
  assert.equal(script.events.filter(event=>event.type==='typing').length>0,true);
 });
 
-test('an unreadable model answer still reports a clear model error',async t=>{
- t.mock.method(globalThis,'fetch',async()=>Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]}));
- const result=await judge();assert.equal(result.status,502);assert.equal((await result.json()).error,'gemini_invalid_response');
+test('an unreadable model answer retries and falls back to evidence instead of an error screen',async t=>{
+ let calls=0;
+ t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]});});
+ const result=await judge();assert.equal(result.status,200);const script=await result.json();
+ assert.ok(calls>=4);assert.equal(script.render.quality_degraded,true);assert.equal(script.render.ai_generation,'partial');
+ assert.ok(script.ai.warnings.some(warning=>warning.includes('no readable model response')));
+ assert.equal(script.beats.every(beat=>beat.status==='silent'),true);
 });
 
 
