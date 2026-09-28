@@ -127,6 +127,13 @@ export async function writeJudgment({profile,analysis,locale,env}) {
   // The judgment still exists without the model: evidence, stats and opening are all
   // deterministic, so a partial script beats an error screen whenever anything arrived.
   if(usable&&(merged.size||greeting)){console.error('Judge degraded to a partial script',[...new Set(problems)].join('; ').slice(0,300));return finish(lastModel,true);}
-  const error=new Error(lastStatus===429?'gemini_rate_limit':'gemini_invalid_response');error.status=lastStatus;throw error;
+  // Every configured model has already received multiple attempts at this point. If
+  // none returned even salvageable JSON, keep the deterministic show running instead
+  // of sending the visitor into an error/retry loop. A later upload starts a fresh AI
+  // attempt, while this run remains honest: reactions are silent and marked degraded.
+  problems=[...new Set([...problems,`no readable model response after ${attempts.length} attempts`])];
+  console.error('Judge exhausted format retries; using deterministic presentation',attempts.length);
+  greeting=locale==='pt-BR'?'Certo.':'Right.';
+  return finish(lastModel,true);
 }
 
