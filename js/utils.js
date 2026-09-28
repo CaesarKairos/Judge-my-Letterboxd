@@ -48,7 +48,7 @@ export function parseMarkup(value) {
 }
 export const plainText = value => parseMarkup(value).map(part => part.text).join(' ').replace(/\s+/g, ' ').trim();
 export const $ = selector => document.querySelector(selector);
-export const types = new Set('typing pause message correction strike profile_stats film film_pair film_group review_quote tag list rating rewatch phrase stat'.split(' '));
+export const types = new Set('typing pause message correction strike profile_stats film film_pair film_group review_quote tag list rating rewatch phrase stat tag_list_relationship tag_tag_relationship list_list_relationship game_intro game_forced_triage game_blind_rank game_defend_take game_result'.split(' '));
 export function validateScript(data) {
   if (!data || !['presentation-v1','presentation-v2'].includes(data.version)) throw new Error('incompatible');
   if (!Array.isArray(data.events) || !data.events.length || data.events.some(e => !e || typeof e.type !== 'string')) throw new Error('invalid');
