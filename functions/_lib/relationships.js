@@ -2,7 +2,7 @@ const mean=values=>values.length?values.reduce((sum,value)=>sum+value,0)/values.
 const intersection=(left,right)=>[...left].filter(key=>right.has(key));
 const difference=(left,right)=>[...left].filter(key=>!right.has(key));
 const clamp=value=>Math.max(0,Math.min(1,Number(value)||0));
-export const normalizeRelationshipName=value=>String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/[\p{P}\p{S}]+/gu,' ').replace(/\s+/g,' ').trim();
+export const normalizeRelationshipName=value=>String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();
 const redundancyScore=(left,right)=>{
   const a=normalizeRelationshipName(left),b=normalizeRelationshipName(right);if(!a||!b)return 0;if(a===b)return 1;
   const A=new Set(a.split(' ')),B=new Set(b.split(' ')),shared=[...A].filter(token=>B.has(token)).length,union=new Set([...A,...B]).size;
