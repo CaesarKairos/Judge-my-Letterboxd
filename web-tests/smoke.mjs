@@ -35,10 +35,10 @@ assert.equal(await page.locator('#card-avatar').count(),0);
 assert.equal(await page.locator('.avatar-picker').count(),0);
 assert.deepEqual(await page.locator('#share-card-previews canvas').evaluateAll(nodes=>nodes.map(node=>[node.width,node.height])),[[1080,1350],[1080,1350]]);
 await page.locator('[data-share-format="story"]').click();
-await page.waitForFunction(()=>[...document.querySelectorAll('#share-card-previews canvas')].every(node=>node.height===1920));
+await page.waitForFunction(()=>{const nodes=[...document.querySelectorAll('#share-card-previews canvas')];return nodes.length===2&&nodes.every(node=>node.height===1920);});
 assert.deepEqual(await page.locator('#share-card-previews canvas').evaluateAll(nodes=>nodes.map(node=>[node.width,node.height])),[[1080,1920],[1080,1920]]);
 await page.locator('[data-share-format="post"]').click();
-await page.waitForFunction(()=>[...document.querySelectorAll('#share-card-previews canvas')].every(node=>node.height===1350));
+await page.waitForFunction(()=>{const nodes=[...document.querySelectorAll('#share-card-previews canvas')];return nodes.length===2&&nodes.every(node=>node.height===1350);});
 // A tainted canvas would throw here, so the proxy is exercised, not assumed.
 const blobs=await page.locator('#share-card-previews canvas').evaluateAll(nodes=>Promise.all(nodes.map(node=>new Promise(resolve=>node.toBlob(blob=>resolve(blob?blob.size:0),'image/png')))));
 assert.ok(blobs.every(size=>size>8000),`png cards: ${blobs.join(',')}`);
