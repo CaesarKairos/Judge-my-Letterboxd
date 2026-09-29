@@ -2,7 +2,6 @@ import {csvObjects,parseCsv} from './csv.js';
 import {reviewStyle} from './review-style.js';
 import {buildRelationships} from './relationships.js';
 import {temporalProfile} from './temporal.js';
-import {buildInteractionCandidates} from './interactions.js';
 
 const keyOf=(name,year)=>`${String(name||'').normalize('NFC').trim().toLocaleLowerCase()}|${String(year||'').trim()}`;
 const number=value=>value===''||value==null?null:Number.isFinite(Number(value))?Number(value):null;
@@ -90,21 +89,20 @@ export function analyzeExport(profile,locale='pt-BR') {
   const stats=[stat('watched_films',profile.films.length,labels.films),stat('reviews',profile.reviews.length,labels.reviews),stat('diary_entries',profile.sessions.length,labels.sessions),stat('rated_films',rated.length,labels.ratings),stat('explicit_rewatches',rewatches,labels.rewatches)].filter(s=>s.value>0);
   const moments=[];
   const style=reviewStyle(profile.reviews),relationships=buildRelationships(profile);
-  const ratingExtremes=rated.length>=2?(()=>{const sorted=[...rated].sort((a,b)=>a.rating-b.rating);return {lowest:{film_key:sorted[0].film_key,title:sorted[0].title,year:sorted[0].year,rating:sorted[0].rating},highest:{film_key:sorted.at(-1).film_key,title:sorted.at(-1).title,year:sorted.at(-1).year,rating:sorted.at(-1).rating}};})():null;
+  if(rated.length>=2){const sorted=[...rated].sort((a,b)=>a.rating-b.rating);moments.push({id:'rating-contrast',type:'film_pair',films:[sorted[0],sorted.at(-1)],facts:`${sorted[0].title}: ${sorted[0].rating}/5; ${sorted.at(-1).title}: ${sorted.at(-1).rating}/5`});}
   const sessionsByFilm=new Map();for(const row of profile.sessions){const group=sessionsByFilm.get(row.film_key)||[];group.push(row);sessionsByFilm.set(row.film_key,group);}
   const repeated=[...sessionsByFilm.entries()].filter(([,rows])=>rows.length>1).sort((a,b)=>b[1].length-a[1].length)[0];
   if(repeated){const film=profile.films.find(f=>f.film_key===repeated[0])||repeated[1][0];moments.push({id:'rewatch',type:'rewatch',film,sessions:repeated[1],stats:[stat('sessions',repeated[1].length,pt?'sessões':'sessions')],facts:`${film.title}: ${repeated[1].length} sessions; ratings ${repeated[1].map(s=>s.rating??'?').join(' → ')}`});}
   const filmByKey=new Map(profile.films.map(film=>[film.film_key,film]));
   const tagCounts=new Map();for(const row of profile.sessions)for(const tag of row.tags)tagCounts.set(tag,(tagCounts.get(tag)||0)+1);
   for(const [index,[tag,count]] of byCount(tagCounts).entries()){
-    const relation=relationships.relations.find(row=>row.type==='tag_rating'&&row.tag===tag),prevalence=relation?.tag_prevalence??(count/Math.max(1,profile.films.length));
-    moments.push({id:index?'tag-'+tag:'tag',type:'tag',tag,stats:[stat('sessions',count,pt?'sessões':'sessions'),stat('prevalence',prevalence,pt?'prevalência':'prevalence')],films:profile.sessions.filter(s=>s.tags.includes(tag)).slice(0,3).map(row=>ratedRow(filmByKey,row)),facts:`tag ${tag} used ${count} times; prevalence ${prevalence.toFixed(3)}`,quality:{information_value:relation?.information_value??Math.max(0,1-prevalence),ubiquity:prevalence,sample_size:count},low_information:prevalence>=.9});
+    moments.push({id:index?'tag-'+tag:'tag',type:'tag',tag,stats:[stat('sessions',count,pt?'sessões':'sessions')],films:profile.sessions.filter(s=>s.tags.includes(tag)).slice(0,3).map(row=>ratedRow(filmByKey,row)),facts:`tag ${tag} used ${count} times`});
   }
   for(const [index,list] of (profile.lists||[]).entries())moments.push({id:index?'list-'+list.name:'list',type:'list',...list,stats:[stat('films',list.count,pt?'filmes':'films')],facts:`list ${list.name}, ${list.count} films`});
   // A pair is only offered when the two films share something real (a tag or a list), so the
   // Analyst never has to defend a comparison that exists only because two scores are far apart.
   const extremes=keys=>{const rows=[...new Set(keys)].map(key=>filmByKey.get(key)).filter(film=>Number.isFinite(film?.rating));if(rows.length<3)return null;const sorted=rows.sort((a,b)=>a.rating-b.rating);return sorted.at(-1).rating-sorted[0].rating>=2?{low:sorted[0],high:sorted.at(-1)}:null;};
-  for(const group of relationships.tag_films){const pair=extremes(group.films);if(pair&&group.prevalence<.8)moments.push({id:`contrast-tag-${group.tag}`,type:'film_pair',films:[pair.low,pair.high],stats:[stat('tagged',group.count,pt?'filmes com a tag':'tagged films')],facts:`same tag ${group.tag}: ${pair.low.title} ${pair.low.rating}/5 vs ${pair.high.title} ${pair.high.rating}/5 across ${group.count} tagged films`,quality:{information_value:Math.max(.5,1-group.prevalence),ubiquity:group.prevalence,sample_size:group.count}});}
+  for(const group of relationships.tag_films){const pair=extremes(group.films);if(pair)moments.push({id:`contrast-tag-${group.tag}`,type:'film_pair',films:[pair.low,pair.high],stats:[stat('tagged',group.count,pt?'filmes com a tag':'tagged films')],facts:`same tag ${group.tag}: ${pair.low.title} ${pair.low.rating}/5 vs ${pair.high.title} ${pair.high.rating}/5 across ${group.count} tagged films`});}
   for(const list of profile.lists||[]){const pair=extremes(list.films.map(film=>film.film_key));if(pair)moments.push({id:`contrast-list-${list.name}`,type:'film_pair',films:[pair.low,pair.high],stats:[stat('members',list.count,pt?'filmes na lista':'list members')],facts:`same list ${list.name}: ${pair.low.title} ${pair.low.rating}/5 vs ${pair.high.title} ${pair.high.rating}/5 among ${list.count} members`});}
   const phraseCandidates=[...style.recurring.trigrams,...style.recurring.bigrams,...style.recurring.starts].map(row=>row.text);let phraseMoment=null;
   for(const phrase of phraseCandidates){const matching=profile.reviews.filter(r=>r.text.toLocaleLowerCase().includes(phrase));if(matching.length>=2&&(!phraseMoment||matching.length>phraseMoment.count))phraseMoment={phrase,count:matching.length,reviews:matching};}
@@ -122,19 +120,8 @@ export function analyzeExport(profile,locale='pt-BR') {
   offer('quote-tagged',profile.reviews.find(review=>review.tags?.length),pt?'review com tag':'tagged review');
   for(const row of spotlight)moments.push({id:row.id,type:'review_quote',review:row.review,facts:`${row.reason} ${row.review.review_id} on ${row.review.title} (${row.review.year}), review rating ${row.review.rating??'unrated'}, ${row.review.text.length} chars, tags ${(row.review.tags||[]).join('|')||'none'}, rewatch ${row.review.rewatch?'yes':'no'}: ${row.review.text.slice(0,500)}`});
   for(const relation of relationships.relations.filter(row=>row.type==='tag_list'&&row.intersection>=2).slice(0,8)){
-    const list=profile.lists.find(item=>item.name===relation.list),shared=(relation.shared_films||relation.films||[]).map(key=>filmByKey.get(key)).filter(Boolean);
-    const listWithout=(relation.list_without_tag||[]).map(key=>filmByKey.get(key)||list?.films?.find(f=>f.film_key===key)).filter(Boolean);
-    const tagWithout=(relation.tag_without_list||[]).map(key=>filmByKey.get(key)).filter(Boolean);
-    moments.push({id:`tag-list-${relation.tag}-${relation.list}`,type:'tag_list_relationship',tag:relation.tag,list,shared_films:shared,exceptions:{list_without_tag:listWithout,tag_without_list:tagWithout},relationship:relation,
-      stats:[stat('coverage_list',relation.coverage_list,pt?'da lista':'of list'),stat('coverage_tag',relation.coverage_tag,pt?'da tag':'of tag'),stat('lift',relation.lift,'lift')],
-      facts:`tag ${relation.tag} intersects list ${relation.list} in ${relation.intersection}; expected ${Number(relation.expected_overlap||0).toFixed(2)}; lift ${Number(relation.lift||0).toFixed(2)}; exceptions ${relation.symmetric_difference?.length||0}`,
-      quality:{information_value:relation.information_value,ubiquity:relation.ubiquity,redundancy:relation.redundancy,surprise:relation.surprise,sample_size:relation.sample_size}});
-  }
-  for(const relation of relationships.relations.filter(row=>['tag_tag','list_list'].includes(row.type)&&row.intersection>=2&&row.information_value>=.5).slice(0,5)){
-    const keys=relation.films||[],films=keys.map(key=>filmByKey.get(key)).filter(Boolean);
-    moments.push({id:`${relation.type}-${relation.left}-${relation.right}`,type:relation.type==='tag_tag'?'tag_tag_relationship':'list_list_relationship',left:relation.left,right:relation.right,films,relationship:relation,
-      facts:`${relation.type} ${relation.left} x ${relation.right}: observed ${relation.intersection}; expected ${Number(relation.expected_overlap||0).toFixed(2)}; lift ${Number(relation.lift||0).toFixed(2)}`,
-      quality:{information_value:relation.information_value,ubiquity:relation.ubiquity,redundancy:relation.redundancy,surprise:relation.surprise,sample_size:relation.sample_size}});
+    const list=profile.lists.find(item=>item.name===relation.list),tagFilms=relation.films.map(key=>filmByKey.get(key)).filter(Boolean);
+    moments.push({id:`tag-list-${relation.tag}-${relation.list}`,type:'tag',tag:relation.tag,related_tag:relation.list,films:tagFilms,stats:[stat('coverage',relation.coverage,pt?'da lista':'of list'),stat('films',relation.intersection,pt?'filmes em comum':'shared films')],facts:`tag ${relation.tag} intersects list ${relation.list} in ${relation.intersection} films`,relationship:relation,list});
   }
   const temporal=temporalProfile(profile);
   if(temporal.busiest_period)moments.push({id:'temporal-peak',type:'stat',stats:[stat('sessions',temporal.busiest_period.sessions,pt?'sessões':'sessions'),stat('months',temporal.months_tracked,pt?'meses registrados':'logged months')],facts:`busiest logged period ${temporal.busiest_period.month}: ${temporal.busiest_period.sessions} sessions over ${temporal.months_tracked} months and ${temporal.span_days} days`});
@@ -143,7 +130,5 @@ export function analyzeExport(profile,locale='pt-BR') {
   if(temporal.rewatch_moves.length)moments.push({id:'temporal-rewatch-moves',type:'stat',stats:[stat('films',temporal.rewatch_moves.length,pt?'filmes reassistidos':'films revisited')],facts:`ratings across repeat sessions: ${temporal.rewatch_moves.map(row=>`${filmByKey.get(row.film_key)?.title||row.film_key} ${row.ratings.join(' → ')} (${row.delta>=0?'+':''}${row.delta})`).join('; ')}`});
   // The deterministic pass is a candidate pool, not the final script: the Analyst selects and
   // the Script Engine decides the 10-16 beats. This cap only bounds the AI payload.
-  const measurements={rating_extremes:ratingExtremes,tag_prevalence:Object.fromEntries(relationships.tag_films.map(row=>[row.tag,row.prevalence]))};
-  const interaction_candidates=buildInteractionCandidates(profile,relationships);
-  return {stats,moments:moments.slice(0,48),measurements,interaction_candidates,temporal,overview:{watched:profile.films.length,reviews:profile.reviews.length,sessions:profile.sessions.length,ratings:rated.length,rewatches,watchlist:profile.watchlist,likes:profile.likes?.films||0,lists:profile.lists.length,tags:tagCounts.size},review_style:style,relationships,review_coverage:{sessions_with_review:new Set(profile.reviews.map(review=>review.film_key)).size,sessions_without_review:Math.max(0,profile.sessions.length-new Set(profile.reviews.map(review=>review.film_key)).size),reviews_without_diary:profile.reviews.filter(review=>!profile.sessions.some(session=>session.film_key===review.film_key)).length}};
+  return {stats,moments:moments.slice(0,48),temporal,overview:{watched:profile.films.length,reviews:profile.reviews.length,sessions:profile.sessions.length,ratings:rated.length,rewatches,watchlist:profile.watchlist,likes:profile.likes?.films||0,lists:profile.lists.length,tags:tagCounts.size},review_style:style,relationships,review_coverage:{sessions_with_review:new Set(profile.reviews.map(review=>review.film_key)).size,sessions_without_review:Math.max(0,profile.sessions.length-new Set(profile.reviews.map(review=>review.film_key)).size),reviews_without_diary:profile.reviews.filter(review=>!profile.sessions.some(session=>session.film_key===review.film_key)).length}};
 }

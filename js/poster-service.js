@@ -36,8 +36,6 @@ export function poster(film,{eager=false}={}) {
 export function rating(value){return el('span','rating',value==null?t('noRating'):`★ ${value} / 5`);}
 export function filmCard(film,options={}) {
   const card=el('figure','film-card');card.append(poster(film,options));
-  const caption=el('figcaption');caption.append(el('strong','film-title',film.title),el('span','film-year',film.year));
-  if(options.showRating!==false)caption.append(rating(film.rating));
-  card.append(caption);return card;
+  const caption=el('figcaption');caption.append(el('strong','film-title',film.title),el('span','film-year',film.year),rating(film.rating));card.append(caption);return card;
 }
 export function disconnectPosters(){observer.disconnect();}
