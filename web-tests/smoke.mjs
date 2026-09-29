@@ -31,14 +31,7 @@ assert.equal(await page.locator('.profile-review-card h3').isVisible(),true);
 assert.ok((await page.locator('.profile-review-card p').textContent()).trim().length>80);
 assert.ok((await page.locator('#profile-review .eyebrow').textContent()).trim().length>0);
 assert.equal(await page.locator('#share-card-previews canvas').count(),2);
-assert.equal(await page.locator('#card-avatar').count(),0);
-assert.equal(await page.locator('.avatar-picker').count(),0);
 assert.deepEqual(await page.locator('#share-card-previews canvas').evaluateAll(nodes=>nodes.map(node=>[node.width,node.height])),[[1080,1350],[1080,1350]]);
-await page.locator('[data-share-format="story"]').click();
-await page.waitForFunction(()=>{const nodes=[...document.querySelectorAll('#share-card-previews canvas')];return nodes.length===2&&nodes.every(node=>node.height===1920);});
-assert.deepEqual(await page.locator('#share-card-previews canvas').evaluateAll(nodes=>nodes.map(node=>[node.width,node.height])),[[1080,1920],[1080,1920]]);
-await page.locator('[data-share-format="post"]').click();
-await page.waitForFunction(()=>{const nodes=[...document.querySelectorAll('#share-card-previews canvas')];return nodes.length===2&&nodes.every(node=>node.height===1350);});
 // A tainted canvas would throw here, so the proxy is exercised, not assumed.
 const blobs=await page.locator('#share-card-previews canvas').evaluateAll(nodes=>Promise.all(nodes.map(node=>new Promise(resolve=>node.toBlob(blob=>resolve(blob?blob.size:0),'image/png')))));
 assert.ok(blobs.every(size=>size>8000),`png cards: ${blobs.join(',')}`);
@@ -52,7 +45,7 @@ assert.match((await download).suggestedFilename(),/\.png$/);
 await page.locator('#share-cards').screenshot({path:'web-tests/artifacts/share-cards.png'});
 
 await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();
-for(const type of ['message','strike','correction','profile_stats','film','film_pair','film_group','review_quote','tag','tag_list_relationship','list','rating','rewatch','phrase','stat'])assert.ok(await page.locator(`[data-event="${type}"]`).count()>0,type);
+for(const type of ['message','strike','correction','profile_stats','film','film_pair','film_group','review_quote','tag','list','rating','rewatch','phrase','stat'])assert.ok(await page.locator(`[data-event="${type}"]`).count()>0,type);
 assert.equal(await page.locator('.review img').count(),0);assert.ok(await page.locator('.review strong').count());
 // Quoted reviews are rendered as real blockquotes, never as literal markup.
 assert.ok(await page.locator('.judge-quote').count()>0);assert.ok(await page.locator('.review blockquote').count()>0);
@@ -63,9 +56,6 @@ const listRatings=await page.locator('.attachment-list .film-card .rating').allT
 const tagRatings=await page.locator('.attachment-tag .film-card .rating').allTextContents();
 assert.ok(listRatings.some(text=>text.includes('★ 5 / 5')),`list ratings: ${listRatings.join(' | ')}`);
 assert.ok(tagRatings.some(text=>text.includes('★ 5 / 5')),`tag ratings: ${tagRatings.join(' | ')}`);
-const relation=page.locator('[data-event="tag_list_relationship"]').first();
-assert.equal(await relation.locator('.relationship-entity').count(),2);
-assert.match(await relation.textContent(),/Tag A/);assert.match(await relation.textContent(),/List A/);
 assert.ok(listRatings.some(text=>!text.includes('★')),`an unrated member stays unrated: ${listRatings.join(' | ')}`);
 // The site icon is the camera-reels mark, from one file: the tab, the brand and the chip of the
 // chosen export. The brand icon must actually load, so a missing asset cannot pass silently.

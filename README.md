@@ -1,6 +1,6 @@
 # Judge My Letterboxd
 
-Dois aplicativos independentes que compartilham o contrato `presentation-v2`:
+Dois aplicativos independentes que compartilham o contrato `presentation-v1`:
 
 | Aplicativo | Runtime | Entrada | Execução |
 | --- | --- | --- | --- |
@@ -126,38 +126,6 @@ Sem `TMDB_API_KEY` — ou servindo apenas o estático, sem as Pages Functions �
 `/api/poster` não resolve e **todo** cartaz usa o fallback abstrato desenhado pelo CSS.
 Para conferir um filme específico, abra `/api/poster?title=Título&year=2024`: a resposta
 diz `resolved` e, quando não resolve, o `reason`.
-
-
-
-### Lapidação editorial e Interactive Challenges
-
-A voz web usa os mesmos prompts canônicos da aplicação local: `prompts/analyst.txt` e
-`prompts/writer.txt`. `python scripts/sync-prompts.py` gera
-`functions/_lib/generated-prompts.js`; `python scripts/sync-prompts.py --check`
-falha quando o artefato web diverge dos `.txt`.
-
-A análise determinística mede, mas não escolhe automaticamente pauta. Extremos globais
-de rating ficam em `measurements.rating_extremes`; tags ubíquas carregam prevalência e
-information value; TAG × LISTA expõe overlap observado/esperado, lift, cobertura,
-redundância e diferenças simétricas. O Analyst pode selecionar relações excepcionais,
-mas coincidência matemática não recebe beat por padrão.
-
-O Script Engine usa limites máximos (8/10/12) e quality gate. Interactive Challenges são
-selecionados separadamente, com no máximo dois por sessão e nunca dois do mesmo tipo
-quando existe alternativa de qualidade comparável. A entrega inicial inclui
-`forced_triage`, `blind_rank` e `defend_your_take`. O Writer produz o copy desses
-jogos na mesma chamada do julgamento. `defend_your_take` pode receber contexto TMDb
-somente depois de selecionado; `vote_average` só é usado com pelo menos 100 votos e é
-rotulado como média do público no TMDb. Falha do TMDb remove esse desafio sem quebrar a
-sessão.
-
-O player pausa em eventos de jogo até confirmação ou **Pular**. Os controles funcionam
-por mouse, toque e teclado, usam foco visível e respeitam `prefers-reduced-motion`.
-`blind_rank` não recebe ratings históricos antes da decisão; as notas só entram no
-`game_result`.
-
-Share cards não aceitam avatar. Os quatro layouts efetivos são: Archetype Post 4:5,
-Archetype Story 9:16, Profile Review Post 4:5 e Profile Review Story 9:16.
 
 ### Testes web
 
@@ -665,7 +633,8 @@ A geração possui três resultados:
 
 `presentation-v2` acrescenta `generation_meta`, `profile_review` e
 `explainability`. O frontend ainda aceita `presentation-v1`. Ao final da sessão,
-dois cards são compostos em Canvas: arquétipo com Top 4 e Profile Review. O usuário escolhe Post 4:5 (1080×1350) ou Story 9:16 (1080×1920), cada um com layout próprio. Não existe avatar, foto ou círculo de iniciais. Pôsteres passam por `/api/image-proxy`,
+dois cards 1080×1350 são compostos em Canvas: arquétipo com Top 4 e Profile Review.
+A foto opcional fica somente no navegador. Pôsteres passam por `/api/image-proxy`,
 restrito a `image.tmdb.org`, para manter o Canvas exportável. Quando arquivos são
 aceitos pela Web Share API eles são compartilhados diretamente; nos demais
 navegadores o fallback baixa PNG.
@@ -673,7 +642,10 @@ navegadores o fallback baixa PNG.
 ### Medições determinísticas do pipeline web
 
 A etapa determinística nunca escreve piada: ela produz um POOL de candidatos (até
-48) que o Analyst lê. O Script Engine trata tamanho como MÁXIMO, nunca quota: até 8 beats em contas pequenas, 10 em médias e 12 em ricas. Cada candidato precisa superar o gate editorial; sete achados fortes podem produzir sete beats, sem preenchimento com pauta fraca. Diversidade desempata candidatos próximos, mas qualidade vem primeiro.
+48) que o Analyst lê. O Script Engine decide quantos sobrevivem — 10 para contas
+pequenas, 14 com 35+ reviews e 16 com 100+ reviews, teto de 18 — equilibrando
+famílias de beat para que review, tag, lista, rewatch e medida temporal não sejam
+engolidos por uma só.
 
 - `letterboxd.js`: perfil normalizado, inventário do ZIP (`files_in_zip`,
   `files_processed`, arquivos conhecidos e desconhecidos), filmes, ratings, diary,

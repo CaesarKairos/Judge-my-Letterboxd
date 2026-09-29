@@ -49,28 +49,6 @@ export function renderAttachment(event) {
       const timeline=el('ol','rewatch-timeline');for(const session of event.sessions||[]){const step=el('li');step.append(rating(session.rating),el('time','',session.date||session.logged_date||''));timeline.append(step);}box.append(timeline,stats(event.stats));break;
     }
     case 'tag':box.append(el('span','tag-pill',event.tag));if(event.related_tag)box.append(el('span','tag-cross',' × '),el('span','tag-pill',event.related_tag));box.append(stats(event.stats));if(event.films?.length)box.append(filmStrip(event.films));break;
-    case 'tag_list_relationship':{
-      box.append(el('div','relationship-entities'));
-      const entities=box.firstElementChild;
-      const tag=el('div','relationship-entity');tag.append(el('span','eyebrow','TAG'),el('strong','',event.tag?.name||''));
-      const cross=el('span','relationship-cross','×');
-      const list=el('div','relationship-entity');list.append(el('span','eyebrow','LISTA'),el('strong','',event.list?.name||''));
-      if(event.list?.description)list.append(el('p','description',event.list.description));
-      entities.append(tag,cross,list);
-      box.append(el('p','relationship-count',`${event.intersection||0} de ${event.list_count||0} filmes`));
-      if(event.shared_films?.length)box.append(filmStrip(event.shared_films));
-      const outside=[...(event.exceptions?.list_without_tag||[]),...(event.exceptions?.tag_without_list||[])];
-      if(outside.length){const detail=el('details','relationship-exceptions');detail.append(el('summary','',t('outsideOverlap')||'Fora do cruzamento'),filmStrip(outside.slice(0,4)));box.append(detail);}
-      break;
-    }
-    case 'tag_tag_relationship':case 'list_list_relationship':{
-      const label=event.type==='tag_tag_relationship'?'TAG':'LISTA',entities=el('div','relationship-entities');
-      const left=el('div','relationship-entity');left.append(el('span','eyebrow',label),el('strong','',event.left?.name||''));
-      const right=el('div','relationship-entity');right.append(el('span','eyebrow',label),el('strong','',event.right?.name||''));
-      entities.append(left,el('span','relationship-cross','×'),right);box.append(entities,el('p','relationship-count',`${event.intersection||0} em comum`));
-      if(event.shared_films?.length)box.append(filmStrip(event.shared_films));break;
-    }
-    case 'game_intro':box.append(el('p','game-intro-copy',event.text||''));break;
     case 'list':{
       box.append(el('h3','',event.name));if(event.description){const detail=el('details');detail.append(el('summary','',t('more')),el('p','description',event.description));box.append(detail);}box.append(filmStrip(event.films),stats(event.stats));if(event.count!=null)box.append(el('span','',event.count));break;
     }

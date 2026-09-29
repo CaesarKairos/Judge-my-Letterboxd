@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 import {unzipText} from '../functions/_lib/zip.js';
 import {parseExport,analyzeExport} from '../functions/_lib/letterboxd.js';
 import {buildPresentation} from '../functions/_lib/judge.js';
-import {salvageJson,normalizeJudgment,writeJudgment,archetypeIssues} from '../functions/_lib/gemini.js';
+import {salvageJson,normalizeJudgment,writeJudgment} from '../functions/_lib/gemini.js';
 import {buildRelationships} from '../functions/_lib/relationships.js';
-import {materializeCandidates,buildScriptEngine,buildEditorialSelection,selectInteractions,callbackCandidates} from '../functions/_lib/editorial.js';
-import {buildInteractionCandidates} from '../functions/_lib/interactions.js';
-import {TMDB_MIN_VOTE_COUNT} from '../functions/_lib/game-context.js';
+import {materializeCandidates,buildScriptEngine,callbackCandidates} from '../functions/_lib/editorial.js';
 
 import {onRequestPost} from '../functions/api/judge.js';
 
@@ -38,7 +36,7 @@ const fixture={
 test('ZIP parser and independent web analyzer read an official export shape',async()=>{
  const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files),analysis=analyzeExport(profile,'pt-BR');
  assert.equal(profile.handle,'critic');assert.equal(profile.topFour.length,4);assert.equal(profile.reviews.length,2);
- assert.equal(analysis.moments.some(row=>row.id==='rating-contrast'),false);assert.ok(analysis.measurements.rating_extremes);assert.ok(analysis.moments.some(row=>row.type==='rewatch'));assert.ok(analysis.moments.some(row=>row.type==='phrase'));
+ assert.ok(analysis.moments.some(row=>row.type==='film_pair'));assert.ok(analysis.moments.some(row=>row.type==='rewatch'));assert.ok(analysis.moments.some(row=>row.type==='phrase'));
  // Evidence sent to the model is parsed, so a quoted review never leaks its markup.
  const quoted=profile.reviews.find(review=>review.segments.some(segment=>segment.type==='blockquote'));
  assert.ok(quoted);assert.equal(quoted.text.includes('<'),false);
@@ -74,12 +72,12 @@ test('tag × list relationships preserve intersection and coverage for editorial
 });
 test('Pages Function falls back across models and returns Presentation without Python',async t=>{
  const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:[
-  {id:'phrase',lines:['Você até criou uma cláusula de encerramento.']},{id:'rewatch',lines:['Beta outra vez. Naturalmente.']},{id:'tag',lines:['Comfort reaparece.']},{id:'list',lines:['Uma lista com convicção.']},{id:'quote-review-1',lines:['Breve e cruel.']},{id:'quote-review-2',lines:['Cinco estrelas e ponto final.']}
+  {id:'phrase',lines:['Você até criou uma cláusula de encerramento.']},{id:'rating-contrast',lines:['Um ponto para Alpha. Cinco para Beta.']},{id:'rewatch',lines:['Beta outra vez. Naturalmente.']},{id:'tag',lines:['Comfort, porque terapia tem fila.']},{id:'list',lines:['Uma lista com convicção.']},{id:'quote-review-1',lines:['Breve e cruel.']},{id:'quote-review-2',lines:['Cinco estrelas e ponto final.']}
  ]};
  let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/generativelanguage\.googleapis\.com/);assert.equal(options.headers['x-goog-api-key'],'secret');if(calls<3)return Response.json({error:{message:'busy'}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(writing)}]}}]});});
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
  const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',__TEST_SKIP_ANALYST:true}});
- assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'gemini-3.8-flash');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.equal(script.events.some(event=>event.type==='film_pair'),false);
+ assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'gemini-3.8-flash');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
 });
 
 test('Pages Function reports missing secret and malformed exports clearly',async()=>{
@@ -124,7 +122,7 @@ test('a cut model answer is salvaged and then repaired instead of failing',async
  assert.equal(prompts.length,2);assert.match(prompts[1],/rejected/);assert.match(prompts[1],/still required/i);
  assert.equal(script.render.quality_degraded,false);assert.equal(script.render.salvaged,true);assert.equal(script.ai.warnings.length,0);
  assert.equal(script.beats.length,ids.length);
- assert.ok(script.beats.some(beat=>beat.lines.length>0));
+ assert.deepEqual(script.beats[0].lines.map(line=>line.text),['Primeira linha.','Segunda']);
  assert.equal(script.beats[0].event_count>0,true);
 });
 
@@ -227,7 +225,7 @@ test('a rich account becomes a wide pool, real relationships and a long balanced
  const relation=analysis.relationships.relations.find(row=>row.type==='tag_list'&&row.tag==='cinema');
  assert.equal(relation.intersection,3);assert.equal(relation.list_count,5);assert.equal(Math.round(relation.coverage*100),60);
  const tagList=analysis.moments.find(moment=>moment.id.startsWith('tag-list-'));
- assert.equal(tagList.relationship.intersection,3);assert.equal(tagList.type,'tag_list_relationship');
+ assert.equal(tagList.stats.find(row=>row.key==='films').value,3);
  // A contrast pair only exists inside a shared context, never as bare min versus max.
  assert.ok(analysis.moments.some(moment=>moment.id.startsWith('contrast-tag-')));
  assert.ok(analysis.moments.some(moment=>moment.id.startsWith('contrast-list-')));
@@ -241,8 +239,8 @@ test('a rich account becomes a wide pool, real relationships and a long balanced
  assert.equal(new Set(spotlight.map(moment=>moment.review.review_id)).size,spotlight.length);
  const materialized=materializeCandidates(analysis.moments,analysis.moments);
  const beats=buildScriptEngine(materialized,profile.reviews.length),rich=buildScriptEngine(materialized,120);
- assert.ok(beats.length<=8&&beats.length>=1,`beats ${beats.length}`);
- assert.ok(rich.length<=12&&rich.length>=beats.length,`rich beats ${rich.length}`);
+ assert.ok(beats.length>=8&&beats.length<=18,`beats ${beats.length}`);
+ assert.ok(rich.length>=12&&rich.length<=18,`rich beats ${rich.length}`);
  const ids=new Set(analysis.moments.map(moment=>moment.id));
  assert.equal(new Set(rich.map(moment=>moment.id)).size,rich.length);
  assert.ok(rich.every(moment=>ids.has(moment.id)));
@@ -259,7 +257,7 @@ test('Profile Review and explainability are contracted, measured and secret-free
   opening:{greeting:['certo.'],archetype_lead:'Você deve ser o...',archetype_phrase:'um titulo',archetype_after:['...'],username_line:'Pode ser só rich.',transition:['Deixa eu ver.']},
   reactions:[{id:moment.id,lines:['uma linha']}]},[moment.id]);
  assert.equal(outcome.profile_review.lead,'Se eu falasse de você como você fala dos filmes...');
- assert.ok(outcome.profile_review.text.length<=1100);assert.equal(outcome.profile_review.full,outcome.profile_review.text);
+ assert.ok(outcome.profile_review.text.length<=900);
  assert.deepEqual(outcome.profile_review.style_features_used,['blockquotes','frase recorrente']);
  const selected=analysis.moments.slice(0,3).map(row=>({...row,observation:`observacao ${row.id}`,why_interesting:'motivo'}));
  const script=buildPresentation({profile,analysis,writing:{...outcome,opening:outcome.opening},locale:'pt-BR',
@@ -292,66 +290,4 @@ test('the Writer receives a style fingerprint and never the key',async t=>{
  assert.equal(body.includes('median_length'),true);
  assert.equal(body.includes('test-key-must-not-leak'),false);
  assert.equal(body.includes('GEMINI'),false);
-});
-
-
-test('global rating extremes stay measurements and never become an automatic candidate',()=>{
- const profile={films:[{film_key:'a',title:'Film A',year:'2000',rating:.5},{film_key:'b',title:'Film B',year:'2001',rating:5}],sessions:[],reviews:[],lists:[],watchlist:0,topFour:[],likes:{films:0}};
- const analysis=analyzeExport(profile,'pt-BR');
- assert.equal(analysis.measurements.rating_extremes.lowest.rating,.5);assert.equal(analysis.measurements.rating_extremes.highest.rating,5);
- assert.equal(analysis.moments.some(row=>row.id==='rating-contrast'),false);
-});
-
-test('ubiquitous tags are preserved as context but cannot justify a beat alone',()=>{
- const films=Array.from({length:100},(_,i)=>({film_key:`f${i}`,title:`Film ${i}`,year:'2000',rating:i===0?.5:i===1?5:3}));
- const sessions=films.slice(0,95).map(f=>({film_key:f.film_key,tags:['Tag X'],rewatch:false}));
- const profile={films,sessions,reviews:[],lists:[],watchlist:0,topFour:[],likes:{films:0}};
- const analysis=analyzeExport(profile,'pt-BR'),tag=analysis.moments.find(row=>row.tag==='Tag X');
- assert.equal(tag.low_information,true);assert.equal(analysis.moments.some(row=>row.id==='contrast-tag-Tag X'),false);
- const selection=buildEditorialSelection(materializeCandidates(analysis.moments,analysis.moments),0);
- assert.equal(selection.selected.some(row=>row.tag==='Tag X'),false);
-});
-test('a specific tag remains eligible evidence',()=>{
- const films=Array.from({length:100},(_,i)=>({film_key:`f${i}`,title:`Film ${i}`,year:'2000',rating:i<8?(i%2?5:2):3}));
- const sessions=films.slice(0,8).map(f=>({film_key:f.film_key,tags:['Tag Y'],rewatch:false}));
- const analysis=analyzeExport({films,sessions,reviews:[],lists:[],watchlist:0,topFour:[],likes:{films:0}},'pt-BR');
- const tag=analysis.moments.find(row=>row.tag==='Tag Y');assert.ok(tag);assert.equal(tag.low_information,false);assert.ok(tag.quality.information_value>.3);
-});
-test('same-name tag and list penalize overlap while preserving exceptions',()=>{
- const films=Array.from({length:25},(_,i)=>({film_key:`f${i}`,title:`Film ${i}`,rating:4}));
- const sessions=films.slice(0,15).map(f=>({film_key:f.film_key,tags:['→ My Canon 𖦹'],rewatch:false}));
- const lists=[{name:'My Canon',description:'',films:films.slice(0,20).map(f=>({film_key:f.film_key}))}];
- const relation=buildRelationships({films,sessions,lists,reviews:[],topFour:[],watchlist:0}).relations.find(row=>row.type==='tag_list');
- assert.ok(relation.redundancy>=.85);assert.equal(relation.list_without_tag.length,5);assert.ok(Array.isArray(relation.symmetric_difference));
-});
-test('Script Engine treats size as a maximum and never fills with weak findings',()=>{
- const strong=Array.from({length:7},(_,i)=>({id:`strong-${i}`,type:'review_quote',interestingness:.86,confidence:.9,quality:{information_value:.8}}));
- const weak=Array.from({length:10},(_,i)=>({id:`weak-${i}`,type:'tag',interestingness:.3,confidence:.9,quality:{information_value:.2}}));
- const selection=buildEditorialSelection([...strong,...weak],120);
- assert.equal(selection.selected.length,7);assert.ok(selection.rejected.every(row=>!row.id.startsWith('strong-')));
-});
-test('archetype gate rejects title enumeration and generic labels',()=>{
- const top=[1,2,3,4].map(i=>({title:`Film ${i}`}));
- assert.ok(archetypeIssues('Film 1, Film 2, Film 3 e Film 4',top).includes('title_enumeration'));
- assert.ok(archetypeIssues('cinéfilo profissional',top).includes('generic_archetype'));
- assert.deepEqual(archetypeIssues('androide caubói fugindo da montanha',top),[]);
-});
-test('hard forced triage is accepted and obvious triage is low difficulty',()=>{
- const base={sessions:[],reviews:[],lists:[{name:'List A',films:['a','b','c'].map(film_key=>({film_key}))}],topFour:[],watchlist:0,likes:{films:0}};
- const hard={...base,films:[['a',5],['b',4.5],['c',5]].map(([film_key,rating])=>({film_key,title:film_key,year:'2000',rating}))};
- const easy={...base,films:[['a',5],['b',3],['c',.5]].map(([film_key,rating])=>({film_key,title:film_key,year:'2000',rating}))};
- const hardGames=buildInteractionCandidates(hard,buildRelationships(hard)).filter(row=>row.type==='forced_triage');
- const easyGames=buildInteractionCandidates(easy,buildRelationships(easy)).filter(row=>row.type==='forced_triage');
- assert.ok(hardGames[0].difficulty_score>easyGames[0].difficulty_score);assert.ok(hardGames[0].difficulty_score>=.66);
-});
-test('game selection never exceeds two and prefers type variety',()=>{
- const rows=[
-  {id:'a',type:'forced_triage',difficulty_score:.95},{id:'b',type:'forced_triage',difficulty_score:.94},{id:'c',type:'blind_rank',difficulty_score:.9},{id:'d',type:'defend_your_take',difficulty_score:.88}
- ];
- const result=selectInteractions(rows,2);assert.equal(result.selected.length,2);assert.equal(new Set(result.selected.map(row=>row.type)).size,2);
-});
-test('TMDb challenge sample threshold is documented in code',()=>{assert.equal(TMDB_MIN_VOTE_COUNT,100);});
-test('Profile Review exposes full and shorter share text',()=>{
- const out=normalizeJudgment({greeting:'Oi',archetype_phrase:'x',profile_reaction:'',profile_review:{full:'texto completo '.repeat(8),share:'texto curto '.repeat(3)},reactions:[]},[]);
- assert.ok(out.profile_review.full.length>out.profile_review.share.length);assert.equal(out.profile_review.text,out.profile_review.full);
 });

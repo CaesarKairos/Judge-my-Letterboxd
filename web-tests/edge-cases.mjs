@@ -19,32 +19,6 @@ const results=await page.evaluate(async()=>{
  return {counts,large,safe:!root.querySelector('script')};
 });
 assert.deepEqual(results,{counts:[0,1,2,4],large:true,safe:true});
-// Interactive challenges pause without leaking historical ratings. A skip resumes cleanly.
-await page.goto(base+'/web-tests/harness.html');await page.locator('#done').filter({hasText:'PASS'}).waitFor();
-await page.evaluate(async()=>{
- const {createInteractiveGame,renderGameResult}=await import('/js/game-renderer.js');
- const root=document.querySelector('#chat');root.replaceChildren();
- const event={type:'game_blind_rank',game_id:'blind-fixture',game_type:'blind_rank',skip_label:'Pular',instructions:'Ranqueie sem notas',films:[
-  {film_key:'a',title:'Film A',year:'2000'},{film_key:'b',title:'Film B',year:'2001'},{film_key:'c',title:'Film C',year:'2002'}]};
- const game=createInteractiveGame(event);root.append(game.node);
- window.__blindDone=game.done.then(result=>{root.append(renderGameResult({type:'game_result',game_id:'blind-fixture',game_type:'blind_rank',history:[
-  {film_key:'a',title:'Film A',year:'2000',rating:5,rewatches:1},{film_key:'b',title:'Film B',year:'2001',rating:4.5,rewatches:0},{film_key:'c',title:'Film C',year:'2002',rating:5,rewatches:2}],result_reactions:{match:'bateu'}},result));return result;});
-});
-assert.equal(await page.locator('#chat .rating').count(),0);
-await page.locator('.rank-button').filter({hasText:'1º'}).click();
-await page.locator('.rank-button').filter({hasText:'2º'}).click();
-await page.locator('.rank-button').filter({hasText:'3º'}).click();
-await page.evaluate(()=>window.__blindDone);
-assert.ok(await page.locator('.game-result .rating').count()>=3);
-
-await page.evaluate(async()=>{
- const {createInteractiveGame}=await import('/js/game-renderer.js');const root=document.querySelector('#chat');root.replaceChildren();
- const event={type:'game_forced_triage',game_id:'skip-fixture',game_type:'forced_triage',skip_label:'Pular',confirm_label:'Confirmar',roles:[{id:'r3',rank:3,label:'Guarda'},{id:'r2',rank:2,label:'Empresta'},{id:'r1',rank:1,label:'Solta'}],films:[
-  {film_key:'a',title:'Film A',year:'2000'},{film_key:'b',title:'Film B',year:'2001'},{film_key:'c',title:'Film C',year:'2002'}]};
- const game=createInteractiveGame(event);root.append(game.node);window.__skipDone=game.done;
-});
-await page.locator('.game-skip').click();const skipped=await page.evaluate(()=>window.__skipDone);assert.equal(skipped.skipped,true);
-
 await page.goto(base);
 await page.evaluate(()=>{const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array([80,75,3,4])],'dropped.zip',{type:'application/zip'}));document.querySelector('#dropzone').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer}));});
 await page.locator('#selected').waitFor();assert.equal(await page.locator('#file-name').textContent(),'dropped.zip');await page.locator('#remove').click();assert.equal(await page.locator('#judge').isDisabled(),true);
