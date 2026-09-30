@@ -2,9 +2,10 @@
 GEMINI_API_KEY="sua-chave-gemini"
 TMDB_API_KEY="sua-chave-tmdb-opcional"
 GEMINI_MODEL="gemini-flash-latest"
-# Deixe vazio: o pipeline descobre os modelos disponíveis em models.list e monta a cadeia
-# (Analyst até 6, Writer até 8, Lite por último). Fixar nomes aqui envelhece: um modelo
-# aposentado gera 404 e some da cadeia. Preencha apenas para forçar reservas específicas.
+# Deixe vazio (recomendado): o pipeline descobre os modelos disponíveis em models.list e monta a
+# cadeia por qualidade — primário, depois Flash completos do mais novo para o mais antigo, outros
+# textuais, previews e Lite por último. A cadeia é limitada pelo deadline, não por quantidade:
+# fixar nomes aqui envelhece e um modelo aposentado só gasta tentativa (404 avança na hora).
 GEMINI_FALLBACK_MODELS=""
 # GEMINI_MODEL_DISCOVERY=0 desativa a descoberta e usa só o que estiver configurado.
 # GEMINI_ANALYST_MODEL / GEMINI_ANALYST_FALLBACK_MODELS e GEMINI_WRITER_MODEL /

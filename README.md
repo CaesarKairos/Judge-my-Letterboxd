@@ -660,19 +660,27 @@ sessão inteira morria.
 
 #### Cadeia de modelos, deadline e quota
 
-- `mergeModels(configured,discovered,limit)`: o primário sempre primeiro, reservas
-  explícitas, catálogo descoberto e variantes Lite por último. O Analyst usa até 6
-  modelos (`ANALYST_CHAIN_LIMIT`), o Writer até 8; a descoberta lista até 12
-  (`DISCOVERY_LIMIT`) para não entregar a uma etapa uma lista já cortada para a outra.
-- O timeout de cada requisição respeita o teto (20s) e reserva uma fatia mínima (8s)
-  para cada modelo restante, dentro do deadline de 75s da etapa: um modelo lento não
-  consome a cadeia inteira.
-- 404/429/400 incompatível avançam IMEDIATAMENTE (o modelo sai da etapa). 5xx também
-  avança: com a cadeia disponível, repetir um modelo sobrecarregado custa mais do que
-  tentar o próximo. Status HTTP, `finishReason`, tamanho da resposta, `json`
-  (`valid`/`salvaged`/`unreadable`), `timeout_ms` e `duration_ms` ficam em `attempts`.
-- `thinkingConfig.thinkingBudget=0` é enviado por padrão (o erro envenenava o orçamento
-  de saída em modelos 2.5) e é removido automaticamente se a API rejeitar com 400.
+- `mergeModels(configured,discovered)`: o primário configurado sempre primeiro; em seguida a
+  escada de qualidade — Flash completos (geração mais nova primeiro), outros modelos textuais,
+  previews e Flash-Lite por último, mesmo quando configurado explicitamente. Deduplicado, e a
+  configuração explícita é apenas critério de desempate dentro do nível.
+- A cadeia NÃO tem corte por quantidade: `MODEL_SAFETY_CEILING=24` existe só para impedir loop
+  infinito e o **deadline de 75s** decide quantos modelos rodam. A descoberta lista até 20
+  (`DISCOVERY_LIMIT`), então um modelo descoberto na última posição ainda é tentado se houver
+  tempo — um 404 ou 429 que responde em menos de 1s nunca bloqueia os seguintes.
+- 404/429: uma tentativa por modelo, sem repetição, avanço imediato. 503 (e demais 5xx):
+  no máximo uma retry curta, se ainda houver orçamento; depois avanço. Timeout: avanço
+  respeitando o deadline.
+- Um 404/429 marca o modelo como indisponível **para aquela execução** (`env` compartilhado
+  entre Analyst e Writer), então o Writer não paga de novo por um modelo que o Analyst já viu
+  morto. Não persiste entre requisições.
+- O timeout de cada requisição respeita o teto (20s) e reserva uma fatia mínima (8s) para cada
+  modelo restante, dentro do deadline de 75s.
+- Resposta não-2xx **nunca** é interpretada como saída do modelo: o registro tem
+  `http`, `provider_error` (código/status/mensagem do provedor), `detail`, `timeout_ms` e
+  `duration_ms`. `parse_error`/`finishReason` só existem quando houve geração 2xx.
+- `thinkingConfig.thinkingBudget=0` é enviado por padrão (o thinking consumia o orçamento de
+  saída em modelos 2.5) e é removido automaticamente se a API rejeitar com 400.
 - Falha por cota ou rate limit é classificada como `quota_exceeded`/`rate_limited`, e o
   frontend mostra a mensagem de espera em vez de culpar a leitura do perfil.
 
@@ -776,10 +784,15 @@ contrato da apresentação, `ai_unavailable`, estado parcial, Profile Review,
 explainability e o fingerprint enviado ao Writer. `web-tests/analyst.test.js` cobre o
 contrato do Analyst: Top 4 ausente/parcial com repair direcionado, seleção preservada
 quando o repair de semantics falha, JSON truncado vira `truncated_output`, o request
-carrega `responseMimeType`/`responseSchema`/`maxOutputTokens`, 429 e 404 avançam a
-cadeia, descoberta estende a cadeia, `thin` não é falha, falha real devolve
-`analyst.status = failed` sem promover candidatos determinísticos, a deduplicação do
-contexto e as mensagens distintas de Analyst/Writer no frontend. `npm run test:browser`
-cobre layouts, demo, harness, os dois cartões compartilháveis (PNG 1080×1350, download
-como fallback), o card da Profile Review, "Entenda como este output foi gerado" e
-o fluxo `AI_FAILED` com a análise local como escolha.
+carrega `responseMimeType`/`responseSchema`/`maxOutputTokens`, `thin` não é falha, falha
+real devolve `analyst.status = failed` sem promover candidatos determinísticos, a
+deduplicação do contexto e as mensagens distintas de Analyst/Writer no frontend. A
+cadeia de modelos tem regressões próprias: modelo 7 e 8 descobertos são alcançados
+quando os anteriores falham rápido, 404 avança sem repetir, 429 não repete o mesmo
+modelo, 5xx tem uma única retry curta, Lite fica depois de todos os Flash completos,
+modelo configurado duplicado não aparece duas vezes, `gemini-2.5-flash` não entra sem
+configuração ou descoberta, resposta não-2xx nunca gera `parse_error`, o deadline
+interrompe o laço e todos falhando o Analyst vira FAILED sem chamar o Writer.
+`npm run test:browser` cobre layouts, demo, harness, os dois cartões compartilháveis
+(PNG 1080×1350, download como fallback), o card da Profile Review, "Entenda como este
+output foi gerado" e o fluxo `AI_FAILED` com a análise local como escolha.
