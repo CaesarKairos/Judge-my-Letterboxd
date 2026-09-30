@@ -22,5 +22,7 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+      - name: Check canonical web prompts
+        run: python scripts/sync-prompts.py --check
       - name: Check dependencies
         run: python -m pip check

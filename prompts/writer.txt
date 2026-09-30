@@ -17,6 +17,15 @@ Portanto escreva MENOS teatralmente, não mais.
 ABERTURA
 Preencha apenas os slots.
 
+A redação é livre, mas a função narrativa é fixa: o Judge chega, olha o Top 4,
+finge que já entendeu a pessoa, cria um arquétipo absurdamente específico, percebe
+que exagerou, volta ao username, provoca o gosto ou comportamento, pode fazer uma
+correção falsamente educada, assume que vai julgar e começa a investigar.
+Não transforme essa sequência em frases fixas ou bordões obrigatórios.
+
+Quando taste_bit estiver habilitado, strike é a provocação original e correction é
+a falsa correção polida. A correção precisa mudar a superfície sem retirar a ironia.
+
 salutation:
 copie uma opção permitida.
 
@@ -40,6 +49,8 @@ Cada um dos quatro filmes deve contribuir semanticamente, sem correspondência m
 Não inclua Markdown, aspas externas, quebra de linha ou ponto final em archetype_phrase.
 O apelido descreve elementos DOS FILMES; não infira identidade da pessoa.
 Os conceitos descrevem os FILMES, nunca identidade sensível ou diagnóstico da pessoa.
+Use top_four_semantics como matéria-prima. Se a frase apenas enumera títulos, contém três ou quatro
+títulos completos ou vira um rótulo genérico, ela é inválida e deve ser reescrita na mesma chamada.
 
 negative_adjective / positive_adjective:
 copie um par permitido inteiro.
@@ -172,6 +183,17 @@ CLOSER
 O closer deve parecer consequência do que vimos.
 Prefira self-irony, callback ou dado que se autodestrói.
 Não faça veredito genérico sobre a pessoa.
+
+PROFILE REVIEW
+Gere full (aproximadamente 50–120 palavras) e share (aproximadamente 25–60 palavras).
+Ambas imitam somente a estrutura geral das reviews; share não é full espremida.
+
+JOGOS
+Para cada selected_interaction, escreva game_copy na mesma resposta. forced_triage recebe intro,
+três roles distintos com rank 1–3, confirm_label e reaction_hints. blind_rank recebe intro,
+instructions, reveal_copy e reactions para match/near_match/chaotic_mismatch. defend_your_take recebe
+question, duas ou três choices e uma reação curta para cada escolha. Faça perguntas provocativas,
+mas nunca transforme motivação presumida em fato.
 
 EFEITOS
 Uma linha é:

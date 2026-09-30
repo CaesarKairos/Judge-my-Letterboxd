@@ -52,6 +52,16 @@ export function renderAttachment(event) {
     case 'list':{
       box.append(el('h3','',event.name));if(event.description){const detail=el('details');detail.append(el('summary','',t('more')),el('p','description',event.description));box.append(detail);}box.append(filmStrip(event.films),stats(event.stats));if(event.count!=null)box.append(el('span','',event.count));break;
     }
+    case 'tag_list_relationship':{
+      const pair=el('div','relationship-pair');pair.append(el('div','relationship-entity',`TAG\n${event.tag?.name||''}`),el('span','tag-cross','×'),el('div','relationship-entity',`LISTA\n${event.list?.name||''}`));box.append(pair);
+      if(event.list?.description)box.append(el('p','description',event.list.description));
+      box.append(stats([{key:'films',label:`${event.intersection||0} de ${event.list_count||0} filmes`,value:event.intersection},{key:'coverage',label:'coverage',value:event.coverage},{key:'lift',label:'lift',value:event.lift}]));
+      if(event.shared_films?.length)box.append(filmStrip(event.shared_films));break;
+    }
+    case 'tag_tag_relationship':case 'list_list_relationship':{
+      const isTag=event.type==='tag_tag_relationship',pair=el('div','relationship-pair'),label=isTag?'TAG':'LISTA';pair.append(el('div','relationship-entity',`${label}\n${event.left?.name||''}`),el('span','tag-cross','×'),el('div','relationship-entity',`${label}\n${event.right?.name||''}`));box.append(pair);
+      box.append(stats([{key:'films',label:'filmes em comum',value:event.intersection},{key:'lift',label:'lift',value:event.lift}]));if(event.shared_films?.length)box.append(filmStrip(event.shared_films));break;
+    }
     default:return null;
   }
   if(!box.textContent.trim()&&!box.querySelector('img'))return null;
