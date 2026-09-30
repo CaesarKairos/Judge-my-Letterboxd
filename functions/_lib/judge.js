@@ -55,7 +55,7 @@ export function buildPresentation({profile,analysis,writing,locale,analyst={}}) 
   events.push(typing('medium'),message('...!'),{type:'profile_stats',stats:analysis.stats});
   if(allowedLine(writing.profile_reaction))events.push(typing('short'),message(writing.profile_reaction));
   const duration=(value,fallback)=>['short','medium','long'].includes(value)?value:fallback;
-  const reactions=new Map((Array.isArray(writing.reactions)?writing.reactions:[]).filter(row=>row&&typeof row.id==='string'&&Array.isArray(row.lines)).map(row=>[row.id,{lines:row.lines.map(allowedLine).filter(Boolean).slice(0,4),afterBeat:(row.after_beat||[]).map(allowedLine).filter(Boolean).slice(0,2),evidencePause:duration(row.evidence_pause,'medium'),afterEvidence:duration(row.after_evidence,'long'),typing:duration(row.typing,'short'),between:duration(row.between_lines,'medium'),after:duration(row.after_reaction,'medium')} ]));
+  const reactions=new Map((Array.isArray(writing.reactions)?writing.reactions:[]).filter(row=>row&&typeof row.id==='string'&&Array.isArray(row.lines)).map(row=>[row.id,{lines:row.lines.map(allowedLine).filter(Boolean).slice(0,5),afterBeat:(row.after_beat||[]).map(allowedLine).filter(Boolean).slice(0,2),evidencePause:duration(row.evidence_pause,'medium'),afterEvidence:duration(row.after_evidence,'long'),typing:duration(row.typing,'short'),between:duration(row.between_lines,'medium'),after:duration(row.after_reaction,'medium')} ]));
   const beats=[];
   const gameCopy=new Map((writing.game_copy||[]).map(row=>[row.id,row])),games=[...(analysis.interactions||[])];let gameIndex=0;
   for(const [momentIndex,moment] of analysis.moments.entries()){

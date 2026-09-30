@@ -296,14 +296,19 @@ test('Profile Review and explainability are contracted, measured and secret-free
  for(const secret of ['api_key','API_KEY','AIza','prompt','raw_export'])assert.equal(serialized.includes(secret),false,secret);
 });
 
-test('the Writer receives a style fingerprint and never the key',async t=>{
+test('the Writer receives bounded style examples and never the key',async t=>{
  const {profile,analysis}=await readExport(),ids=analysis.moments.map(moment=>moment.id);
  let body='';
  t.mock.method(globalThis,'fetch',async(url,options)=>{body=String(options?.body||'');return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'um titulo',profile_reaction:'uma reacao',closer:['fim'],profile_review:{lead:'Se eu falasse de você...',text:'uma review curta sobre comportamento'},reactions:ids.map(id=>({id,lines:['uma linha']}))})}]}}]});});
  const writing=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'test-key-must-not-leak',GEMINI_MODEL:'test-model',__TEST_SKIP_ANALYST:'1'}});
  assert.equal(writing._degraded,false);
  assert.equal(body.includes('profile_review_style'),true);
+ assert.equal(body.includes('profile_review_style_examples'),true);
  assert.equal(body.includes('median_length'),true);
+ const request=JSON.parse(body),prompt=request.contents[0].parts[0].text,data=JSON.parse(prompt.slice(prompt.indexOf('DATA:\n')+6));
+ assert.ok(data.profile_review_style_examples.length>=1&&data.profile_review_style_examples.length<=5);
+ assert.ok(data.profile_review_style_examples.every(example=>example.text.length<=500));
+ assert.ok(data.profile_review_style_examples.length<profile.reviews.length||profile.reviews.length<=5);
  assert.equal(body.includes('test-key-must-not-leak'),false);
  assert.equal(body.includes('GEMINI'),false);
 });

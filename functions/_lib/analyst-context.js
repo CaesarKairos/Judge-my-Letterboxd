@@ -9,6 +9,8 @@
 //   review segments ...... 73,747 chars, the same words as `text` plus a type per part
 // Those copies are gone; the substantive information stays. Nothing is truncated silently:
 // reviews keep their whole text, and only the redundant projection is dropped.
+import {relationId} from './evidence-registry.js';
+
 const NORMALIZED_TABLES = new Set(['profile.csv', 'watched.csv', 'ratings.csv', 'diary.csv', 'reviews.csv']);
 const LIST_TABLE = /^lists\/[^/]+\.csv$/i;
 const key = (title, year) => `${String(title || '').trim()} ${String(year || '').trim()}`.toLocaleLowerCase();
@@ -62,7 +64,11 @@ function rewatchDigest(profile) {
   return [...rows.values()];
 }
 
-export function buildAnalystContext({ profile = {}, analysis = {}, raw_export = {} }) {
+// Relations travel with their stable id: a semantic finding cites `relationship` + that id, and
+// the backend resolves it against the same list.
+const relationshipProjection = relationships => (relationships?.relations || []).map(relation => ({id: relationId(relation), ...relation}));
+
+export function buildAnalystContext({ profile = {}, analysis = {}, raw_export = {}, interaction_pool = [] }) {
   const films = (profile.films || []).map(film => ({ film_key: film.film_key, title: film.title, year: film.year, rating: film.rating ?? null }));
   return {
     account: { username: profile.handle || '', display_name: profile.name || '', top_four: profile.topFour || [], top_four_expected: (profile.topFour || []).length },
@@ -80,8 +86,12 @@ export function buildAnalystContext({ profile = {}, analysis = {}, raw_export = 
     rewatches: rewatchDigest(profile),
     review_style: analysis.review_style || null,
     review_coverage: analysis.review_coverage || {},
-    relationships: analysis.relationships || {},
+    relationships: {...(analysis.relationships || {}), relations: relationshipProjection(analysis.relationships)},
     affinity: analysis.affinity || [],
+    // The pool already contains the hard choices the account can support: the Analyst selects from
+    // it instead of having to invent every game, and it may still propose another trio.
+    interaction_pool: (interaction_pool || []).map(game => ({id: game.id, type: game.type, film_keys: game.film_keys,
+      difficulty: game.difficulty, why_difficult: game.why_difficult, why_interesting: game.why_interesting})),
     deterministic_measurements: (analysis.moments || []).map(moment => ({ id: moment.id, type: moment.type, facts: moment.facts,
       information_value: moment.information_value || moment.relationship || null }))
   };
@@ -91,7 +101,7 @@ export function buildAnalystContext({ profile = {}, analysis = {}, raw_export = 
 export function summarizeAnalystContext(context) {
   return { chars: JSON.stringify(context).length, films: context.films.length, sessions: context.sessions.length,
     reviews: context.reviews.length, relationships: context.relationships?.relations?.length || 0,
-    candidate_measurements: context.deterministic_measurements.length,
+    candidate_measurements: context.deterministic_measurements.length, interaction_pool: context.interaction_pool.length,
     unnormalized_files: Object.keys(context.export_inventory.unnormalized_files) };
 }
 

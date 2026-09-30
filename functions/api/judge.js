@@ -4,7 +4,7 @@ import {writeJudgment} from '../_lib/gemini.js';
 import {buildPresentation} from '../_lib/judge.js';
 import {selectEditorialMoments} from '../_lib/analyst.js';
 import {buildRawExport} from '../_lib/raw-export.js';
-import {materializeCandidates,buildScriptEngine,callbackCandidates,selectInteractions} from '../_lib/editorial.js';
+import {buildEditorialSelection,callbackCandidates} from '../_lib/editorial.js';
 import {enrichGameInteractions} from '../_lib/tmdb-games.js';
 
 const MAX_UPLOAD=50*1024*1024;
@@ -33,9 +33,9 @@ export async function onRequestPost({request,env}) {
       deterministic_analysis_available:true,attempts:analyst.attempts||[],
       generation_meta:{analyst:{status:'failed',reason:analyst.reason||null,attempts:analyst.attempts||[],chain:analyst.chain||[]}},
       analysis:{stats:analysis.stats,overview:analysis.overview}},503);
-    const materialized=materializeCandidates(analyst.selected,analysis.moments);
-    analysis.moments=buildScriptEngine(materialized,profile.reviews.length);
-    analysis.interactions=await enrichGameInteractions(selectInteractions(analyst.interaction_candidates||[],profile),env,locale);
+    const editorial=buildEditorialSelection({profile,analysis,analyst,pool:analyst.interaction_pool||[],richness:profile.reviews.length});
+    analysis.moments=editorial.moments;
+    analysis.interactions=await enrichGameInteractions(editorial.interactions,env,locale);
     analysis.top_four_semantics=analyst.top_four_semantics||[];
     analysis.callbacks=callbackCandidates(analysis.moments);
     console.log('Script:',analysis.moments.length,'moments |','Writer called: true');

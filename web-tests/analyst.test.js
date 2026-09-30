@@ -11,7 +11,9 @@ import {judgeExport} from '../js/api.js';
 
 // --- fixtures ---------------------------------------------------------------------------
 const titles=['Alpha','Beta','Gamma','Delta','Epsilon','Zeta'];
-const films=titles.map(title=>({film_key:`${title.toLocaleLowerCase()}|2000`,title,year:'2000',rating:4}));
+// Five rated films keep these Analyst transport tests below the game-guarantee threshold;
+// interaction repair has its own focused fixtures.
+const films=titles.map((title,index)=>({film_key:`${title.toLocaleLowerCase()}|2000`,title,year:'2000',rating:index===5?null:4}));
 const ids=['m-1','m-2','m-3','m-4','m-5','m-6'];
 const profile={films,sessions:[{film_key:films[0].film_key,title:'Alpha',year:'2000',rating:4,date:'2026-01-01',rewatch:true,tags:['comfort'],index:1}],
   reviews:[],lists:[],topFour:films.slice(0,4),watchlist:2,likes:{films:1,reviews:2,lists:0},handle:'synthetic',name:'Synthetic'};
@@ -110,7 +112,7 @@ test('the request declares the schema, the output budget and no thinking budget'
   const config=bodyOf(calls[0].options).generationConfig;
   assert.equal(config.responseMimeType,'application/json');
   assert.deepEqual(config.responseSchema,ANALYST_SCHEMA);
-  assert.deepEqual(config.responseSchema.required,['selected','interaction_candidates','top_four_semantics']);
+  assert.deepEqual(config.responseSchema.required,['selected','semantic_findings','interaction_candidates','top_four_semantics']);
   assert.equal(config.maxOutputTokens,ANALYST_MAX_OUTPUT_TOKENS);
   assert.equal(config.maxOutputTokens,8192);
   // Thinking tokens used to eat the visible budget and cut the JSON mid-array.

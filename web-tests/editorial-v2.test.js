@@ -71,9 +71,10 @@ test('game results use the actual assignment and historical ranking',()=>{
  assert.equal(forcedTriageReaction([{film_key:films[2].film_key,role_id:'retire',rank:1}],hints),'Film C foi aposentado.');
 });
 
-test('Profile Review preserves distinct full and share word budgets',()=>{
- const line='palavra '.repeat(160),result=normalizeJudgment({greeting:'Oi',archetype_phrase:'',profile_reaction:'',profile_review:{full:line,share:line},reactions:[{id:'a',lines:['específica']}]},['a']);
- assert.ok(result.profile_review.full.split(/\s+/).length<=120);assert.ok(result.profile_review.full.length<=900);assert.equal(result.profile_review.share.split(/\s+/).length,60);assert.notEqual(result.profile_review.full,result.profile_review.share);
+test('Profile Review has one canonical text for site and share',()=>{
+ const line='palavra '.repeat(160),result=normalizeJudgment({greeting:'Oi',archetype_phrase:'',profile_reaction:'',profile_review:{text:line},reactions:[{id:'a',lines:['específica']}]},['a']);
+ assert.ok(result.profile_review.text.split(/\s+/).length<=80);assert.ok(result.profile_review.text.length<=900);
+ assert.equal('full' in result.profile_review,false);assert.equal('share' in result.profile_review,false);
 });
 
 test('model chain keeps every full model before Lite fallbacks',()=>{
@@ -110,7 +111,7 @@ test('Analyst failure never promotes deterministic candidates',async t=>{
  assert.equal(result.status,'failed');assert.deepEqual(result.selected,[]);assert.ok(result.attempts.length>0);
 });
 
-const strictPayload=()=>({greeting:'Oi.',archetype_phrase:'um robô fugindo com caubóis',profile_reaction:'',opening:{greeting:['Oi.'],archetype_lead:'Já entendi.',archetype_phrase:'um robô fugindo com caubóis',archetype_after:['Específico demais.'],username_line:'Vou ficar com synthetic.',taste_bit:{enabled:true,lead:'Essas escolhas são',strike:'duvidosas',correction:'corajosas',tail:'para dizer o mínimo.'},judge_claim:'Eu julgo daqui.',transition:['Vamos investigar.']},closer:['Fim.'],profile_review:{full:'Seu padrão de notas contradiz suas reviews e reaparece nas reassistidas.',share:'Notas, reviews e reassistidas discordam.',evidence_ids:['a','b']},reactions:[{id:'a',lines:['Film A contradiz a própria review.']},{id:'b',lines:['Film B volta e mantém a nota.']} ]});
+const strictPayload=()=>({greeting:'Oi.',archetype_phrase:'um robô fugindo com caubóis',profile_reaction:'',opening:{greeting:['Oi.'],archetype_lead:'Já entendi.',archetype_phrase:'um robô fugindo com caubóis',archetype_after:['Específico demais.'],username_line:'Vou ficar com synthetic.',taste_bit:{enabled:true,lead:'Essas escolhas são',strike:'duvidosas',correction:'corajosas',tail:'para dizer o mínimo.'},judge_claim:'Eu julgo daqui.',transition:['Vamos investigar.']},closer:['Fim.'],profile_review:{text:'Seu padrão de notas contradiz suas reviews e reaparece nas reassistidas.',evidence_ids:['a','b']},reactions:[{id:'a',lines:['Film A contradiz a própria review.']},{id:'b',lines:['Film B volta e mantém a nota.']} ]});
 
 test('strict opening rejects missing strike and early username',()=>{
  const films=['A','B','C','D'].map(title=>film(`Film ${title}`,5)),missing=strictPayload();missing.opening.taste_bit.strike='';
@@ -120,7 +121,7 @@ test('strict opening rejects missing strike and early username',()=>{
 });
 
 test('generic Profile Review is rejected while grounded profile behavior passes',()=>{
- const generic=strictPayload();generic.profile_review.full='Boa direção, bom roteiro, bela fotografia.';
+ const generic=strictPayload();generic.profile_review.text='Boa direção, bom roteiro, bela fotografia.';
  assert.equal(normalizeJudgment(generic,['a','b'],[],{strict:true}).ok,false);
  assert.equal(normalizeJudgment(strictPayload(),['a','b'],[],{strict:true}).ok,true);
 });
