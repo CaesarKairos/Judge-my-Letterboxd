@@ -23,8 +23,10 @@ export async function onRequestPost({request,env}) {
     console.log('ZIP parsed:',raw_export.file_count,'files');
     console.log('Analysis:',profile.reviews.length,'reviews,',analysis.overview.tags||0,'tags,',profile.lists.length,'lists,',analysis.relationships?.relations?.length||0,'relationships');
     if(!profile.films.length)return response({error:'empty_export'},422);
+    if(!env.GEMINI_API_KEY)return response({error:'missing_gemini_key',retryable:true,deterministic_analysis_available:true,analysis:{stats:analysis.stats,overview:analysis.overview}},503);
     const analyst=await selectEditorialMoments({profile,analysis,raw_export,locale,env});
-    console.log('Analyst:',analyst.model||'deterministic',analyst.candidate_count,'candidates,',analyst.selected.length,'accepted');
+    console.log('Analyst:',analyst.model||'none',analyst.status,analyst.candidate_count,'candidates,',analyst.selected.length,'accepted');
+    if(analyst.status==='failed')return response({error:'analyst_unavailable',retryable:true,deterministic_analysis_available:true,generation_meta:{analyst:{status:'failed',attempts:analyst.attempts||[]}},analysis:{stats:analysis.stats,overview:analysis.overview}},503);
     const materialized=materializeCandidates(analyst.selected,analysis.moments);
     analysis.moments=buildScriptEngine(materialized,profile.reviews.length);
     analysis.interactions=await enrichGameInteractions(selectInteractions(analyst.interaction_candidates||[],profile),env,locale);

@@ -17,6 +17,11 @@ const source=await readFile(zipPath),buffer=source.buffer.slice(source.byteOffse
 const entries=await unzipText(buffer),profile=parseExport(entries),analysis=analyzeExport(profile,env.JUDGE_LANGUAGE==='en-US'?'en-US':'pt-BR');
 const locale=env.JUDGE_LANGUAGE==='en-US'?'en-US':'pt-BR';
 const analyst=await selectEditorialMoments({profile,analysis,raw_export:buildRawExport(entries),locale,env});
+if(analyst.status!=='complete'){
+ console.error(JSON.stringify({status:'failed',stage:'analyst',model:analyst.model||null,attempts:analyst.attempts||[],candidatePool:analyst.candidate_count,writerCalled:false}));
+ process.exitCode=1;
+ throw new Error('Analyst indisponível; o Writer não foi chamado.');
+}
 analysis.moments=buildScriptEngine(materializeCandidates(analyst.selected,analysis.moments),profile.reviews.length);
 analysis.interactions=await enrichGameInteractions(selectInteractions(analyst.interaction_candidates||[],profile),env,locale);
 analysis.top_four_semantics=analyst.top_four_semantics||[];analysis.callbacks=callbackCandidates(analysis.moments);

@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {archetypePhraseValid,normalizeJudgment} from '../functions/_lib/gemini.js';
+import {archetypePhraseValid,normalizeJudgment,writeJudgment} from '../functions/_lib/gemini.js';
 import {buildScriptEngine,selectInteractions} from '../functions/_lib/editorial.js';
 import {buildRelationships} from '../functions/_lib/relationships.js';
 import {analyzeExport,userAffinityScore} from '../functions/_lib/letterboxd.js';
 import {enrichGameInteractions,TMDB_MIN_VOTE_COUNT} from '../functions/_lib/tmdb-games.js';
 import {blindRankOutcome,forcedTriageReaction} from '../js/game-results.js';
+import {mergeModels} from '../functions/_lib/models.js';
+import {selectEditorialMoments} from '../functions/_lib/analyst.js';
 
 const film=(title,rating)=>({film_key:title.toLowerCase().replaceAll(' ','-'),title,year:'2000',rating});
 const base=films=>({films,sessions:[],reviews:[],lists:[],topFour:[],watchlist:0,likes:{films:0}});
@@ -72,4 +74,50 @@ test('game results use the actual assignment and historical ranking',()=>{
 test('Profile Review preserves distinct full and share word budgets',()=>{
  const line='palavra '.repeat(160),result=normalizeJudgment({greeting:'Oi',archetype_phrase:'',profile_reaction:'',profile_review:{full:line,share:line},reactions:[{id:'a',lines:['específica']}]},['a']);
  assert.ok(result.profile_review.full.split(/\s+/).length<=120);assert.ok(result.profile_review.full.length<=900);assert.equal(result.profile_review.share.split(/\s+/).length,60);assert.notEqual(result.profile_review.full,result.profile_review.share);
+});
+
+test('model chain keeps every full model before Lite fallbacks',()=>{
+ assert.deepEqual(mergeModels(['primary','explicit-lite','explicit-full'],['discovered-lite','discovered-full']),['primary','explicit-full','discovered-full','explicit-lite','discovered-lite']);
+});
+
+test('Analyst failure never promotes deterministic candidates',async t=>{
+ t.mock.method(globalThis,'fetch',async()=>Response.json({error:{}},{status:503}));
+ const profile={...base([film('Film A',5)]),handle:'synthetic',name:'Synthetic'},analysis={moments:[{id:'measurement',type:'stat',facts:'one measurement'}],overview:{},relationships:{},review_style:null,review_coverage:{}};
+ const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_ANALYST_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0'}});
+ assert.equal(result.status,'failed');assert.deepEqual(result.selected,[]);assert.ok(result.attempts.length>0);
+});
+
+const strictPayload=()=>({greeting:'Oi.',archetype_phrase:'um robô fugindo com caubóis',profile_reaction:'',opening:{greeting:['Oi.'],archetype_lead:'Já entendi.',archetype_phrase:'um robô fugindo com caubóis',archetype_after:['Específico demais.'],username_line:'Vou ficar com synthetic.',taste_bit:{enabled:true,lead:'Essas escolhas são',strike:'duvidosas',correction:'corajosas',tail:'para dizer o mínimo.'},judge_claim:'Eu julgo daqui.',transition:['Vamos investigar.']},closer:['Fim.'],profile_review:{full:'Seu padrão de notas contradiz suas reviews e reaparece nas reassistidas.',share:'Notas, reviews e reassistidas discordam.',evidence_ids:['a','b']},reactions:[{id:'a',lines:['Film A contradiz a própria review.']},{id:'b',lines:['Film B volta e mantém a nota.']} ]});
+
+test('strict opening rejects missing strike and early username',()=>{
+ const films=['A','B','C','D'].map(title=>film(`Film ${title}`,5)),missing=strictPayload();missing.opening.taste_bit.strike='';
+ assert.equal(normalizeJudgment(missing,['a','b'],films,{strict:true,handle:'synthetic'}).ok,false);
+ const early=strictPayload();early.opening.greeting=['Oi, synthetic.'];assert.equal(normalizeJudgment(early,['a','b'],films,{strict:true,handle:'synthetic'}).ok,false);
+ assert.equal(normalizeJudgment(strictPayload(),['a','b'],films,{strict:true,handle:'synthetic'}).ok,true);
+});
+
+test('generic Profile Review is rejected while grounded profile behavior passes',()=>{
+ const generic=strictPayload();generic.profile_review.full='Boa direção, bom roteiro, bela fotografia.';
+ assert.equal(normalizeJudgment(generic,['a','b'],[],{strict:true}).ok,false);
+ assert.equal(normalizeJudgment(strictPayload(),['a','b'],[],{strict:true}).ok,true);
+});
+
+test('complete Lite is complete but quality degraded; partial means missing content',async t=>{
+ const profile={...base([]),handle:'synthetic'},analysis={moments:[{id:'a',film:{title:'Film A'},facts:'Film A fact'},{id:'b',film:{title:'Film B'},facts:'Film B fact'}],overview:{},review_style:null,callbacks:[],interactions:[]};let calls=0;
+ t.mock.method(globalThis,'fetch',async()=>{calls++;if(calls<=2)return Response.json({error:{}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:[{id:'a',lines:['Film A muda o padrão.']},{id:'b',lines:['Film B quebra a regra.']}]})}]}}]});});
+ const complete=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_WRITER_FALLBACK_MODELS:'backup-lite',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ assert.equal(complete.generation_status,'complete');assert.equal(complete.model_quality,'fallback_lite');assert.equal(complete.quality_degraded,true);
+});
+
+test('eight of ten recovered reactions are genuinely partial',async t=>{
+ const moments=Array.from({length:10},(_,index)=>({id:`beat-${index}`,film:{title:`Film ${index}`},facts:`Film ${index} fact`})),profile={...base([]),handle:'synthetic'},analysis={moments,overview:{},review_style:null,callbacks:[],interactions:[]};
+ t.mock.method(globalThis,'fetch',async()=>Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.slice(0,8).map(row=>({id:row.id,lines:[`${row.film.title} quebra o padrão.`]}))})}]}}]}));
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ assert.equal(result.generation_status,'partial');assert.equal(result.reactions.length,8);assert.equal(result.quality_degraded,false);
+});
+
+test('generic reaction majority triggers Writer repair',async t=>{
+ const moments=['A','B','C'].map(letter=>({id:letter.toLowerCase(),film:{title:`Film ${letter}`},facts:`Film ${letter} fact`})),profile={...base([]),handle:'synthetic'},analysis={moments,overview:{},review_style:null,callbacks:[],interactions:[]};let calls=0;
+ t.mock.method(globalThis,'fetch',async()=>{calls++;const generic={greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.map(row=>({id:row.id,lines:['Isso diz muito sobre você.']}))},specific={...generic,reactions:moments.map(row=>({id:row.id,lines:[`${row.film.title} contradiz a própria regra.`]}))};return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(calls===1?generic:specific)}]}}]});});
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});assert.equal(result.generation_status,'complete');assert.equal(calls,2);
 });

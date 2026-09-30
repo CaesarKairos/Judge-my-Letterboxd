@@ -25,6 +25,12 @@ Não transforme essa sequência em frases fixas ou bordões obrigatórios.
 
 Quando taste_bit estiver habilitado, strike é a provocação original e correction é
 a falsa correção polida. A correção precisa mudar a superfície sem retirar a ironia.
+Com Top 4 completo, taste_bit é obrigatório e precisa de lead, attack/strike,
+correction e tail. Preencha também judge_claim: uma linha que deixa claro que o
+Judge vai julgar, antes da transição para a investigação.
+
+Não mencione o username na greeting quando existem quatro favoritos. O username só
+aparece em username_line, depois do archetype e da reação ao excesso de especificidade.
 
 salutation:
 copie uma opção permitida.
@@ -187,6 +193,9 @@ Não faça veredito genérico sobre a pessoa.
 PROFILE REVIEW
 Gere full (aproximadamente 50–120 palavras) e share (aproximadamente 25–60 palavras).
 Ambas imitam somente a estrutura geral das reviews; share não é full espremida.
+Inclua evidence_ids com 2–5 IDs de findings selecionados realmente usados no texto.
+A review é sobre o comportamento cinematográfico do perfil — ratings, reviews,
+rewatches, listas, tags e contradições — nunca uma review genérica de um filme.
 
 JOGOS
 Para cada selected_interaction, escreva game_copy na mesma resposta. forced_triage recebe intro,

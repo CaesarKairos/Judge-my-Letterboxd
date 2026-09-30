@@ -61,9 +61,7 @@ test('list members and tag cards show the current rating of the film',async()=>{
  assert.deepEqual(profile.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Beta',2],['Gamma',null]]);
  assert.equal(profile.films.length,3);
  const analysis=analyzeExport(profile,'pt-BR');
- const list=analysis.moments.find(moment=>moment.type==='list'),tag=analysis.moments.find(moment=>moment.type==='tag');
- assert.deepEqual(list.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Gamma',null],['Never rated',null]]);
- assert.deepEqual(tag.films.map(film=>[film.title,film.rating]),[['Alpha',5],['Beta',2]]);
+ assert.equal(analysis.moments.some(moment=>moment.type==='list'||moment.type==='tag'),false,'bare list/tag counts are evidence, not beats');
 });
 test('tag × list relationships preserve intersection and coverage for editorial selection',()=>{
  const profile={films:[1,2,3,4,5].map(id=>({film_key:String(id),rating:id})),sessions:[2,3,4].map(id=>({film_key:String(id),tags:['Tag B']})),lists:[{name:'Lista A',films:[1,2,3,4,5].map(id=>({film_key:String(id)}))}]};
@@ -71,13 +69,12 @@ test('tag × list relationships preserve intersection and coverage for editorial
  assert.equal(relation.intersection,3);assert.equal(relation.list_count,5);assert.equal(relation.tag_count,3);assert.equal(relation.coverage,.6);
 });
 test('Pages Function falls back across models and returns Presentation without Python',async t=>{
- const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:[
-  {id:'phrase',lines:['Você até criou uma cláusula de encerramento.']},{id:'rating-contrast',lines:['Um ponto para Alpha. Cinco para Beta.']},{id:'rewatch',lines:['Beta outra vez. Naturalmente.']},{id:'tag',lines:['Comfort, porque terapia tem fila.']},{id:'list',lines:['Uma lista com convicção.']},{id:'quote-review-1',lines:['Breve e cruel.']},{id:'quote-review-2',lines:['Cinco estrelas e ponto final.']}
- ]};
+ const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
+ const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe específico de ${moment.id}.`]}))};
  let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/generativelanguage\.googleapis\.com/);assert.equal(options.headers['x-goog-api-key'],'secret');if(calls<3)return Response.json({error:{message:'busy'}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(writing)}]}}]});});
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',__TEST_SKIP_ANALYST:true}});
- assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'gemini-3.8-flash');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',GEMINI_FALLBACK_MODELS:'backup-model',__TEST_SKIP_ANALYST:true}});
+ assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'backup-model');assert.equal(script.render.ai_generation,'complete');assert.equal(script.render.model_quality,'fallback');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
 });
 
 test('Pages Function reports missing secret and malformed exports clearly',async()=>{
@@ -85,6 +82,21 @@ test('Pages Function reports missing secret and malformed exports clearly',async
  let result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{}});assert.equal(result.status,503);assert.equal((await result.json()).error,'missing_gemini_key');
  form=new FormData();form.set('export',new File([storedZip({'other.csv':'A\nB\n'})],'letterboxd.zip'));
  result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'x'}});assert.equal(result.status,422);
+});
+
+test('Pages Function stops after Analyst failure and never calls Writer',async t=>{
+ let writerCalled=false,calls=0;
+ t.mock.method(globalThis,'fetch',async(url,options)=>{
+  calls++;
+  const request=JSON.parse(options.body),prompt=request.contents?.[0]?.parts?.[0]?.text||'';
+  if(prompt.includes('ROTEIRO INTEIRO')||prompt.includes('Final Writer'))writerCalled=true;
+  return Response.json({error:{message:'unavailable'}},{status:503});
+ });
+ const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_ANALYST_MODEL:'analyst-only',GEMINI_MODEL_DISCOVERY:'0'}});
+ const body=await result.json();
+ assert.equal(result.status,503);assert.equal(body.error,'analyst_unavailable');assert.equal(body.generation_meta.analyst.status,'failed');
+ assert.equal(body.deterministic_analysis_available,true);assert.equal(writerCalled,false);assert.equal(calls,1);
 });
 
 
@@ -122,7 +134,7 @@ test('a cut model answer is salvaged and then repaired instead of failing',async
  assert.equal(prompts.length,2);assert.match(prompts[1],/rejected/);assert.match(prompts[1],/still required/i);
  assert.equal(script.render.quality_degraded,false);assert.equal(script.render.salvaged,true);assert.equal(script.ai.warnings.length,0);
  assert.equal(script.beats.length,ids.length);
- assert.deepEqual(script.beats[0].lines.map(line=>line.text),['Primeira linha.','Segunda']);
+ assert.deepEqual(script.beats[0].lines.map(line=>line.text),[`Sobre ${ids[0]}.`]);
  assert.equal(script.beats[0].event_count>0,true);
 });
 
@@ -131,7 +143,7 @@ test('a greeting without editorial coverage becomes AI_FAILED, never a silent ju
  let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'{"greeting":"Oi'}]}}]});});
  const result=await judge();assert.equal(result.status,503);
  const body=await result.json();
- assert.ok(calls>=4);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
+ assert.ok(calls>=2);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
  assert.equal(body.deterministic_analysis_available,true);
  assert.equal(body.analysis.stats.length>0,true);
  assert.equal(JSON.stringify(body).includes('top_four'),false);
@@ -141,7 +153,7 @@ test('an unreadable model answer retries and becomes AI_FAILED',async t=>{
  let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]});});
  const result=await judge();assert.equal(result.status,503);const body=await result.json();
- assert.ok(calls>=4);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
+ assert.ok(calls>=2);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
 });
 
 
@@ -218,9 +230,9 @@ const richExport=()=>{
 test('a rich account becomes a wide pool, real relationships and a long balanced script',async()=>{
  const files=await unzipText(storedZip(richExport()).buffer),profile=parseExport(files),analysis=analyzeExport(profile,'pt-BR');
  assert.equal(profile.inventory.files_processed,9);assert.equal(profile.inventory.unknown_files.length,0);
- assert.ok(analysis.moments.length>=14,`candidate pool ${analysis.moments.length}`);
+ assert.ok(analysis.moments.length>=8,`candidate pool ${analysis.moments.length}`);
  const types=new Set(analysis.moments.map(moment=>moment.type));
- for(const wanted of ['tag','list','film_pair','review_quote','rewatch','phrase','stat'])assert.ok(types.has(wanted),wanted);
+ for(const wanted of ['film_pair','review_quote','rewatch','phrase'])assert.ok(types.has(wanted),wanted);
  // Tag × list keeps the intersection and the coverage the Analyst will read.
  const relation=analysis.relationships.relations.find(row=>row.type==='tag_list'&&row.tag==='cinema');
  assert.equal(relation.intersection,3);assert.equal(relation.list_count,5);assert.equal(Math.round(relation.coverage*100),60);
@@ -239,8 +251,8 @@ test('a rich account becomes a wide pool, real relationships and a long balanced
  assert.equal(new Set(spotlight.map(moment=>moment.review.review_id)).size,spotlight.length);
  const materialized=materializeCandidates(analysis.moments,analysis.moments);
  const beats=buildScriptEngine(materialized,profile.reviews.length),rich=buildScriptEngine(materialized,120);
- assert.ok(beats.length>=8&&beats.length<=18,`beats ${beats.length}`);
- assert.ok(rich.length>=12&&rich.length<=18,`rich beats ${rich.length}`);
+ assert.ok(beats.length>=7&&beats.length<=8,`beats ${beats.length}`);
+ assert.ok(rich.length>=8&&rich.length<=12,`rich beats ${rich.length}`);
  const ids=new Set(analysis.moments.map(moment=>moment.id));
  assert.equal(new Set(rich.map(moment=>moment.id)).size,rich.length);
  assert.ok(rich.every(moment=>ids.has(moment.id)));
@@ -270,7 +282,7 @@ test('Profile Review and explainability are contracted, measured and secret-free
  assert.equal(script.explainability.profile_summary.watched,profile.films.length);
  assert.equal(script.explainability.measurements.length,analysis.stats.length);
  // candidates_found is what the deterministic pass found; selected is what reached the script.
- assert.deepEqual(script.explainability.analyst,{candidates_found:analysis.moments.length,selected:analysis.moments.length});
+ assert.deepEqual(script.explainability.analyst,{candidates_found:analysis.moments.length,selected_by_analyst:3,selected_by_script:analysis.moments.length});
  assert.equal(script.explainability.interesting_findings.length,3);
  assert.ok(script.explainability.summary.includes(String(profile.films.length)));
  assert.equal(script.generation_meta.analyst.model,'analyst-model');
