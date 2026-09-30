@@ -145,3 +145,10 @@ test('generic reaction majority triggers Writer repair',async t=>{
  t.mock.method(globalThis,'fetch',async()=>{calls++;const generic={greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.map(row=>({id:row.id,lines:['Isso diz muito sobre você.']}))},specific={...generic,reactions:moments.map(row=>({id:row.id,lines:[`${row.film.title} contradiz a própria regra.`]}))};return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(calls===1?generic:specific)}]}}]});});
  const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});assert.equal(result.generation_status,'complete');assert.equal(calls,2);
 });
+
+test('Writer never repeats a 429 and stops immediately on project quota',async t=>{
+ const profile={...base([]),handle:'synthetic'},analysis={moments:[{id:'a',film:{title:'Film A'},facts:'Film A fact'}],overview:{},review_style:null,callbacks:[],interactions:[]};
+ let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota; check billing.'}},{status:429});});
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_WRITER_FALLBACK_MODELS:'backup',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ assert.equal(calls,1);assert.equal(result.generation_status,'failed');assert.equal(result.reason,'quota_exceeded');
+});

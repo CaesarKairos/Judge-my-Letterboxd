@@ -84,6 +84,16 @@ test('Pages Function reports missing secret and malformed exports clearly',async
  result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'x'}});assert.equal(result.status,422);
 });
 
+test('a 429 in one request never poisons a later request in the same worker isolate',async t=>{
+ const sharedEnv={GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true};let calls=0;
+ t.mock.method(globalThis,'fetch',async()=>{calls++;if(calls===1)return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});
+  const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
+  return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe de ${moment.id}.`]}))})}]}}]});});
+ const request=()=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return new Request('https://example.com/api/judge',{method:'POST',body:form});};
+ const first=await onRequestPost({request:request(),env:sharedEnv});assert.equal(first.status,503);assert.equal((await first.json()).reason,'quota_exceeded');
+ const second=await onRequestPost({request:request(),env:sharedEnv});assert.equal(second.status,200);assert.equal((await second.json()).version,'presentation-v2');assert.equal(calls,3);
+});
+
 test('Pages Function stops after Analyst failure and never calls Writer',async t=>{
  let writerCalled=false,calls=0;
  t.mock.method(globalThis,'fetch',async(url,options)=>{

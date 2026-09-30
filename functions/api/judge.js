@@ -13,6 +13,9 @@ const statusFor=error=>({missing_gemini_key:503,gemini_rate_limit:429,invalid_zi
 
 export async function onRequestPost({request,env}) {
   try{
+    // Keep mutable model state request-local. Cloudflare may reuse the bindings object across
+    // visitors, so writing failures directly onto `env` can poison later judgments.
+    const runEnv=Object.create(env||null);
     const length=Number(request.headers.get('Content-Length')||0);if(length>MAX_UPLOAD+1024*1024)return response({error:'file_too_large'},413);
     const form=await request.formData(),file=form.get('export'),locale=form.get('locale')==='en-US'?'en-US':'pt-BR';
     if(!file||typeof file.arrayBuffer!=='function')return response({error:'missing_export'},400);
@@ -23,8 +26,8 @@ export async function onRequestPost({request,env}) {
     console.log('ZIP parsed:',raw_export.file_count,'files');
     console.log('Analysis:',profile.reviews.length,'reviews,',analysis.overview.tags||0,'tags,',profile.lists.length,'lists,',analysis.relationships?.relations?.length||0,'relationships');
     if(!profile.films.length)return response({error:'empty_export'},422);
-    if(!env.GEMINI_API_KEY)return response({error:'missing_gemini_key',retryable:true,deterministic_analysis_available:true,analysis:{stats:analysis.stats,overview:analysis.overview}},503);
-    const analyst=await selectEditorialMoments({profile,analysis,raw_export,locale,env});
+    if(!runEnv.GEMINI_API_KEY)return response({error:'missing_gemini_key',retryable:true,deterministic_analysis_available:true,analysis:{stats:analysis.stats,overview:analysis.overview}},503);
+    const analyst=await selectEditorialMoments({profile,analysis,raw_export,locale,env:runEnv});
     console.log('Analyst:',analyst.model||'none',analyst.status,analyst.candidate_count,'candidates,',analyst.selected.length,'accepted |',
       'top_four_semantics',analyst.top_four_semantics_status,'| editorial',analyst.editorial_strength||'empty');
     // A failed Analyst still means no session: deterministic candidates never pretend to be a
@@ -35,13 +38,13 @@ export async function onRequestPost({request,env}) {
       analysis:{stats:analysis.stats,overview:analysis.overview}},503);
     const editorial=buildEditorialSelection({profile,analysis,analyst,pool:analyst.interaction_pool||[],richness:profile.reviews.length});
     analysis.moments=editorial.moments;
-    analysis.interactions=await enrichGameInteractions(editorial.interactions,env,locale);
+    analysis.interactions=await enrichGameInteractions(editorial.interactions,runEnv,locale);
     analysis.top_four_semantics=analyst.top_four_semantics||[];
     analysis.callbacks=callbackCandidates(analysis.moments);
     console.log('Script:',analysis.moments.length,'moments |','Writer called: true');
-    const writing=await writeJudgment({profile,analysis,locale,env});
+    const writing=await writeJudgment({profile,analysis,locale,env:runEnv});
     console.log('Writer:',writing.generation_status||'complete',writing._model||'none',(writing.reactions||[]).length+'/'+analysis.moments.length,'reactions','archetype',Boolean(writing.archetype_phrase),'profile_review',Boolean(writing.profile_review?.text));
-    if(writing.generation_status==='failed')return response({error:'writer_unavailable',stage:'writer',reason:'no_usable_model_response',retryable:true,
+    if(writing.generation_status==='failed')return response({error:'writer_unavailable',stage:'writer',reason:writing.reason||'no_usable_model_response',retryable:true,
       attempts:writing._attempts||[],deterministic_analysis_available:true,
       generation_meta:{writer:{status:'failed',attempts:writing._attempts||[]}},
       analysis:{stats:analysis.stats,overview:analysis.overview}},503);

@@ -233,7 +233,7 @@ test('an exhausted quota is named instead of hidden behind a timeout',async t=>{
   const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'})});
   assert.equal(result.status,'failed');
   assert.equal(result.reason,'quota_exceeded');
-  assert.deepEqual(result.unavailable_models,['primary','backup-a']);
+  assert.deepEqual(result.unavailable_models,['primary']);
 });
 
 });
@@ -260,8 +260,8 @@ test('every discovered model is reachable: models 7 and 8 run when the first six
   assert.equal(result.attempts.filter(row=>row.status==='http_404').length,7);
 });
 
-test('a 429 or a 404 is tried once per model and never retried',async t=>{
-  const calls=responder(t,[Response.json({error:{code:429,message:'quota'}},{status:429}),
+test('a transient 429 or a 404 is tried once per model and never retried',async t=>{
+  const calls=responder(t,[Response.json({error:{code:429,message:'rate limit'}},{status:429}),
     Response.json({error:{code:404,message:'gone'}},{status:404}),
     answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
   const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});

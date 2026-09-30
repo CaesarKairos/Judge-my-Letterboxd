@@ -1,5 +1,5 @@
 const DURATIONS = new Set(['short', 'medium', 'long']);
-import {discoverTextModels,mergeModels} from './models.js';
+import {discoverTextModels,mergeModels,modelUnavailable,noteModelFailure} from './models.js';
 import {WRITER_PROMPT} from './generated-prompts.js';
 // The Writer and the Analyst recover a cut reply with the same implementation.
 import {salvageJson} from './json-repair.js';
@@ -96,7 +96,7 @@ export async function writeJudgment({profile,analysis,locale,env}) {
 
   const configured=[env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(value=>value.trim()).filter(Boolean)],models=mergeModels(configured,env.__TEST_SKIP_ANALYST?[]:await discoverTextModels(env));
   const attempts=[];const merged=new Map();const deadline=Date.now()+80000;
-  let lastStatus=500,lastModel=models[0],usable=0,greeting='',archetype='',profileReaction='',profileReview=null,gameCopy=[],opening=null,closer=[],problems=[],salvaged=false,stopped=false;
+  let lastStatus=500,lastModel=models[0],usable=0,greeting='',archetype='',profileReaction='',profileReview=null,gameCopy=[],opening=null,closer=[],problems=[],salvaged=false,stopped=false,failureReason='no_usable_model_response';
   const seen=()=>ids.filter(id=>!merged.has(id));
   const partial=()=>({greeting,archetype_phrase:archetype,profile_reaction:profileReaction,opening,closer,profile_review:profileReview,game_copy:gameCopy,reactions:[...merged.values()]});
   // Sent back to the model whenever the previous answer was rejected, so each retry
@@ -118,6 +118,7 @@ export async function writeJudgment({profile,analysis,locale,env}) {
 
   for(const model of models){
     if(Date.now()>deadline)break;
+    if(modelUnavailable(env,model)){console.log('Writer skipped (unavailable in this run):',model);continue;}
     lastModel=model;let attempt=0,thinking=true,repairing=false;
     while(attempt<2&&Date.now()<deadline){
       const generationConfig={temperature:.8,maxOutputTokens:8192,responseMimeType:'application/json',responseSchema:schema,...(thinking?{thinkingConfig:{thinkingBudget:0}}:{})};
@@ -144,11 +145,14 @@ export async function writeJudgment({profile,analysis,locale,env}) {
       const detail=(await response.text()).slice(0,300);
       if(response.status===400&&thinking){thinking=false;console.error('Gemini rejected thinkingConfig',model,detail.slice(0,120));continue;}
       console.error('Gemini request failed',model,response.status,detail);
+      noteModelFailure(env,model,response.status);
+      if(response.status===429){const globalQuota=/quota|billing|resource_exhausted/i.test(detail);
+        failureReason=globalQuota?'quota_exceeded':'rate_limited';attempt=2;if(globalQuota)break;}
       if([401,403].includes(response.status))break;
       if(![429,500,502,503,504].includes(response.status))break;
       attempt++;if(attempt<2)await new Promise(resolve=>setTimeout(resolve,400*attempt));
     }
-    if([401,403].includes(lastStatus))break;
+    if([401,403].includes(lastStatus)||failureReason==='quota_exceeded')break;
   }
   // The judgment still exists without the model: evidence, stats and opening are all
   // deterministic, so a partial script beats an error screen whenever anything arrived.
@@ -163,6 +167,6 @@ export async function writeJudgment({profile,analysis,locale,env}) {
   // attempt, while this run remains honest: reactions are silent and marked degraded.
   problems=[...new Set([...problems,`no usable model response after ${attempts.length} attempts`])];
   console.error('Judge unavailable after model attempts',attempts.length);
-  return {generation_status:'failed',error:'ai_unavailable',retryable:true,deterministic_analysis_available:true,_model:lastModel,_attempts:attempts,_warnings:problems};
+  return {generation_status:'failed',error:'ai_unavailable',reason:failureReason,retryable:true,deterministic_analysis_available:true,_model:lastModel,_attempts:attempts,_warnings:problems};
 }
 
