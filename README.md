@@ -249,8 +249,12 @@ Falha no Analyst preserva o roteiro local e pula o Writer; falha no Writer prese
 todos os dados e as falas já aceitas. Saída parcial fica marcada e retorna código 1.
 
 No endpoint web, o Analyst é uma barreira obrigatória: se todos os modelos falharem,
-ele retorna `analyst_unavailable` com as medições locais auditáveis e o Writer não é
-chamado. Seleção determinística sem Analyst existe apenas no modo explícito de teste.
+ele retorna `analyst_unavailable` (`stage: analyst`, com `reason` e `attempts`) e o
+Writer não é chamado. Seleção determinística sem Analyst existe apenas no modo
+explícito de teste. Uma falha real significa "não obtivemos análise" (nenhum modelo
+respondeu, credencial, cota/rate limit sem reserva, timeout ou nenhuma resposta
+utilizável após repair) — nunca "o modelo trouxe três achados excelentes em vez de
+quatro".
 
 Quando o erro é 404/429/5xx, o modelo configurado é trocado pelo próximo da cadeia
 antes de desistir, e o modelo que respondeu aparece em `served_model`. Depois de
@@ -625,19 +629,77 @@ relações. O Final Writer recebe apenas os momentos já materializados e ordena
 o fingerprint de estilo e callbacks possíveis. As duas etapas usam uma chamada por
 etapa, com deadline e fallback de modelo.
 
+#### Contrato do Analyst
+
+O Analyst declara o contrato em `responseSchema` (`ANALYST_SCHEMA`), não em prosa: os
+três arrays (`selected`, `interaction_candidates`, `top_four_semantics`) são exigidos
+pela API e pelo gate. Antes, `top_four_semantics` era exigido no aceite sem nunca ter
+sido enviado como schema — o modelo devolvia uma seleção perfeita, omitia um array e a
+sessão inteira morria.
+
+- `buildAnalystContext()` (`functions/_lib/analyst-context.js`) monta a ÚNICA
+  representação enviada: filmes, ratings, diary, reviews integrais, listas, tags,
+  likes, watchlist, comments, review_style, review_coverage, relações, afinidade,
+  medições candidatas e Top 4. Tabelas que o perfil normalizado já carrega aparecem
+  apenas no inventário (`export_inventory`); as que não têm equivalente
+  (`watchlist`, `comments`, `likes/*`) mantêm as linhas; datas de logging/rating viram
+  `library_log`. Nada é truncado em silêncio: as reviews mantêm o texto inteiro e
+  `segments` (que repetia palavra por palavra) virou `markup`.
+- Subcontratos separados: `editorialSelectionValid` e `topFourSemanticsValid`. Uma
+  seleção válida nunca é descartada porque o Top 4 veio incompleto.
+- Repair direcionado: `repair_semantics` (pede só os `film_key` ausentes, sem reenviar
+  a conta), `repair_findings` ("adicione outros achados só se forem genuinamente
+  fortes") e `repair_full` (rejeição completa, com o parcial preservado).
+- `salvageJson` vive em `functions/_lib/json-repair.js` e é a MESMA implementação
+  usada pelo Writer: `MAX_TOKENS` vira `truncated_output` e o que chegou antes do corte
+  é preservado e reparado, em vez de virar `invalid_response`.
+- Status: `complete` (seleção forte + Top 4), `thin` (poucos achados, mas válidos) e
+  `failed` (nenhum conteúdo utilizável). `top_four_semantics_status` é registrado à
+  parte (`complete`/`failed`/`not_required`), então um Top 4 ausente não derruba a
+  sessão: ela continua com `thin`/`complete` e a informação fica auditável.
+
+#### Cadeia de modelos, deadline e quota
+
+- `mergeModels(configured,discovered,limit)`: o primário sempre primeiro, reservas
+  explícitas, catálogo descoberto e variantes Lite por último. O Analyst usa até 6
+  modelos (`ANALYST_CHAIN_LIMIT`), o Writer até 8; a descoberta lista até 12
+  (`DISCOVERY_LIMIT`) para não entregar a uma etapa uma lista já cortada para a outra.
+- O timeout de cada requisição respeita o teto (20s) e reserva uma fatia mínima (8s)
+  para cada modelo restante, dentro do deadline de 75s da etapa: um modelo lento não
+  consome a cadeia inteira.
+- 404/429/400 incompatível avançam IMEDIATAMENTE (o modelo sai da etapa). 5xx também
+  avança: com a cadeia disponível, repetir um modelo sobrecarregado custa mais do que
+  tentar o próximo. Status HTTP, `finishReason`, tamanho da resposta, `json`
+  (`valid`/`salvaged`/`unreadable`), `timeout_ms` e `duration_ms` ficam em `attempts`.
+- `thinkingConfig.thinkingBudget=0` é enviado por padrão (o erro envenenava o orçamento
+  de saída em modelos 2.5) e é removido automaticamente se a API rejeitar com 400.
+- Falha por cota ou rate limit é classificada como `quota_exceeded`/`rate_limited`, e o
+  frontend mostra a mensagem de espera em vez de culpar a leitura do perfil.
+
 Variáveis específicas podem separar os modelos:
 
 - `GEMINI_ANALYST_MODEL` e `GEMINI_ANALYST_FALLBACK_MODELS`;
 - `GEMINI_WRITER_MODEL` e `GEMINI_WRITER_FALLBACK_MODELS`;
 - `GEMINI_MODEL` e `GEMINI_FALLBACK_MODELS` continuam compatíveis;
-- `GEMINI_MODEL_DISCOVERY=0` desativa a descoberta server-side.
+- `GEMINI_MODEL_DISCOVERY=0` desativa a descoberta server-side;
+- `JUDGE_DEBUG_CONFIG=1` habilita `GET /api/config` (diagnóstico local: chave presente,
+  descoberta ligada, cadeias montadas, modelos configurados fora do catálogo). Sem essa
+  variável a rota responde 404 e nada de configuração é exposto; a chave nunca é
+  devolvida em nenhum caso.
+
+Deixar `GEMINI_FALLBACK_MODELS` vazio é o padrão recomendado: a descoberta monta a
+cadeia a partir de `models.list`, e um nome fixo envelhece (404 remove o modelo da
+etapa, mas o usuário perdeu uma reserva).
 
 A geração possui três resultados:
 
-- `complete`: abertura, roteiro, closer e Profile Review utilizáveis;
+- `complete`: seleção forte (ou `thin`) aceita pelo Analyst, abertura, roteiro, closer
+  e Profile Review utilizáveis;
 - `partial`: abertura coerente e pelo menos 70% dos momentos com reação;
-- `failed`: a API devolve `ai_unavailable`; o chat não começa e a análise local só
-  aparece quando o visitante escolhe essa ação.
+- `failed`: a API devolve `writer_unavailable` (`stage: writer`); o chat não começa e a
+  análise local só aparece quando o visitante escolhe essa ação. Falha na leitura do
+  perfil devolve `analyst_unavailable` (`stage: analyst`) com outra mensagem: o Judge
+  não terminou de ler o perfil, em vez de "leu tudo e perdeu a fala".
 
 `presentation-v2` acrescenta `generation_meta`, `profile_review`, jogos contextuais e
 `explainability`. O frontend ainda aceita `presentation-v1`. Ao final da sessão,
@@ -687,16 +749,37 @@ amostra tem menos de 100 votos. Qualquer média externa é identificada como
 ### Observabilidade
 
 Em `wrangler pages dev` o console da Function mostra o caminho inteiro: arquivos
-lidos, reviews/tags/listas/relações, candidatos e aceitos do Analyst, tamanho do
-request de cada etapa, modelo servido, reações por beat, archetype/closer/Profile
-Review e o estado final da apresentação. Nem a chave da API nem o prompt aparecem
-em log ou resposta.
+lidos, reviews/tags/listas/relações, tamanho do contexto e das seções do Analyst,
+cadeia numerada de modelos, cada tentativa (modelo, fase, status HTTP, `finishReason`,
+tamanho da resposta, `json` valid/salvaged/unreadable, `timeout_ms`, `duration_ms`),
+repairs disparados, achados preservados, Top 4 por `film_key`, `Writer called: true`,
+modelo servido, reações por beat, archetype/closer/Profile Review e o estado final da
+apresentação. Nem a chave da API nem o prompt aparecem em log ou resposta.
+
+Fora da nuvem, dois harnesses repetem a execução real com o export do workspace:
+
+```bash
+node scripts/analyst-diagnostic.mjs caminho-do-export.zip
+node scripts/test-web-pipeline.mjs caminho-do-export.zip
+node scripts/test-web-pipeline.mjs caminho-do-export.zip --stub
+```
+
+O primeiro mostra a conversa HTTP completa do Analyst e o motivo concreto de cada
+rejeição. O segundo roda o pipeline inteiro; `--stub` responde o lado do modelo
+localmente (marcado no log) para quando a conta está sem cota, mantendo export,
+contexto, Script Engine, contrato do Writer e apresentação reais.
 
 ### Testes
 
 `npm run test:web` cobre parser, análise determinística, relações, Script Engine,
 contrato da apresentação, `ai_unavailable`, estado parcial, Profile Review,
-explainability e o fingerprint enviado ao Writer. `npm run test:browser` cobre
-layouts, demo, harness, os dois cartões compartilháveis (PNG 1080×1350, download
+explainability e o fingerprint enviado ao Writer. `web-tests/analyst.test.js` cobre o
+contrato do Analyst: Top 4 ausente/parcial com repair direcionado, seleção preservada
+quando o repair de semantics falha, JSON truncado vira `truncated_output`, o request
+carrega `responseMimeType`/`responseSchema`/`maxOutputTokens`, 429 e 404 avançam a
+cadeia, descoberta estende a cadeia, `thin` não é falha, falha real devolve
+`analyst.status = failed` sem promover candidatos determinísticos, a deduplicação do
+contexto e as mensagens distintas de Analyst/Writer no frontend. `npm run test:browser`
+cobre layouts, demo, harness, os dois cartões compartilháveis (PNG 1080×1350, download
 como fallback), o card da Profile Review, "Entenda como este output foi gerado" e
 o fluxo `AI_FAILED` com a análise local como escolha.

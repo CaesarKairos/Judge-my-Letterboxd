@@ -9,8 +9,11 @@ export async function judgeExport(file, locale, signal) {
     if (!response.ok) {
       let body={};try{body=await response.json();}catch{}
       const reason=body.error||'';
-      const known={missing_gemini_key:'configuration',ai_unavailable:'aiUnavailable',analyst_unavailable:'aiUnavailable',invalid_zip:'zip',unsupported_zip:'zip',not_letterboxd_export:'exportFormat',empty_export:'emptyExport',file_too_large:'large',gemini_rate_limit:'rate',gemini_failure:'server',gemini_invalid_response:'modelInvalid'};
-      const error=new Error(known[reason]||({404:'unavailable',501:'unavailable',503:'configuration',429:'rate',413:'large',422:'exportFormat'})[response.status]||'server');
+      const known={missing_gemini_key:'configuration',ai_unavailable:'aiUnavailable',writer_unavailable:'writerUnavailable',analyst_unavailable:'analystUnavailable',invalid_zip:'zip',unsupported_zip:'zip',not_letterboxd_export:'exportFormat',empty_export:'emptyExport',file_too_large:'large',gemini_rate_limit:'rate',gemini_failure:'server',gemini_invalid_response:'modelInvalid'};
+      // A stage failure caused by the quota or by a rate limit is a waiting problem, not a
+      // "the Judge could not read you" problem: the copy has to say the true thing.
+      const waiting={quota_exceeded:true,rate_limited:true}[body.reason];
+      const error=new Error(waiting?'rate':known[reason]||({404:'unavailable',501:'unavailable',503:'configuration',429:'rate',413:'large',422:'exportFormat'})[response.status]||'server');
       error.payload=body;throw error;
     }
     let data; try { data = await response.json(); } catch { throw new Error('invalid'); }

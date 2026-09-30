@@ -95,7 +95,7 @@ test('Pages Function stops after Analyst failure and never calls Writer',async t
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
  const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_ANALYST_MODEL:'analyst-only',GEMINI_MODEL_DISCOVERY:'0'}});
  const body=await result.json();
- assert.equal(result.status,503);assert.equal(body.error,'analyst_unavailable');assert.equal(body.generation_meta.analyst.status,'failed');
+ assert.equal(result.status,503);assert.equal(body.error,'analyst_unavailable');assert.equal(body.stage,'analyst');assert.equal(body.generation_meta.analyst.status,'failed');
  assert.equal(body.deterministic_analysis_available,true);assert.equal(writerCalled,false);assert.equal(calls,1);
 });
 
@@ -143,7 +143,7 @@ test('a greeting without editorial coverage becomes AI_FAILED, never a silent ju
  let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'{"greeting":"Oi'}]}}]});});
  const result=await judge();assert.equal(result.status,503);
  const body=await result.json();
- assert.ok(calls>=2);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
+ assert.ok(calls>=2);assert.equal(body.error,'writer_unavailable');assert.equal(body.stage,'writer');assert.equal(body.retryable,true);
  assert.equal(body.deterministic_analysis_available,true);
  assert.equal(body.analysis.stats.length>0,true);
  assert.equal(JSON.stringify(body).includes('top_four'),false);
@@ -153,7 +153,7 @@ test('an unreadable model answer retries and becomes AI_FAILED',async t=>{
  let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]});});
  const result=await judge();assert.equal(result.status,503);const body=await result.json();
- assert.ok(calls>=2);assert.equal(body.error,'ai_unavailable');assert.equal(body.retryable,true);
+ assert.ok(calls>=2);assert.equal(body.error,'writer_unavailable');assert.equal(body.stage,'writer');assert.equal(body.retryable,true);
 });
 
 
@@ -303,3 +303,33 @@ test('the Writer receives a style fingerprint and never the key',async t=>{
  assert.equal(body.includes('test-key-must-not-leak'),false);
  assert.equal(body.includes('GEMINI'),false);
 });
+
+test('a thin Analyst still delivers a session instead of an error screen',async t=>{
+ const {profile,analysis}=await readExport(),ids=analysis.moments.slice(0,3).map(moment=>moment.id);
+ // A real account can produce three excellent findings and twenty mediocre ones: that is a
+ // shorter session, never analyst_unavailable.
+ const semantics=profile.topFour.map(film=>({film_key:film.film_key,ingredients:['arquetipo','ambiente']}));
+ const reaction={selected:ids.map(id=>({id,type:'stat',observation:`observacao ${id}`,why_interesting:'motivo',interestingness:.9,confidence:.9})),interaction_candidates:[],top_four_semantics:semantics};
+ const writing={greeting:'Oi.',archetype_phrase:'um robo fugindo com caubois',profile_reaction:'',closer:['E isso ai.'],
+  opening:{greeting:['Oi.'],archetype_lead:'Ja entendi.',archetype_phrase:'um robo fugindo com caubois',archetype_after:['Especifico demais.'],username_line:'Vou ficar com critic.',
+   taste_bit:{enabled:true,lead:'Essas escolhas sao',strike:'duvidosas',correction:'corajosas',tail:'para dizer o minimo.'},judge_claim:'Eu julgo daqui.',transition:['Vamos investigar.']},
+  profile_review:{full:'O perfil mediu poucas coisas e ainda assim contradiz a propria nota e as reassistidas.',share:'Poucas medidas, muita conviccao.',evidence_ids:ids.slice(0,2)},
+  reactions:ids.map(id=>({id,lines:[`O dado de ${id} contradiz a propria nota.`]}))};
+ let analystCalls=0;
+ t.mock.method(globalThis,'fetch',async(url,options)=>{
+  const prompt=JSON.parse(options.body).contents[0].parts[0].text;
+  if(prompt.includes('ROTEIRO INTEIRO'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(writing)}]}}]});
+  analystCalls++;
+  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(reaction)}]}}]});
+ });
+ const result=await judge({__TEST_SKIP_ANALYST:false,GEMINI_ANALYST_MODEL:'analyst-only'});
+ assert.equal(result.status,200);
+ const script=await result.json();
+ assert.equal(script.generation_meta.analyst.status,'thin');
+ assert.equal(script.render.ai_generation,'complete');
+ assert.equal(script.beats.length,3);
+ assert.equal(script.ai.warnings.length,0);
+ // The thin path still repairs once, asking for more material instead of failing.
+ assert.equal(analystCalls,2);
+});
+

@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {validateScript} from '../js/utils.js';
 import {matchMovie,onRequestGet as getPoster} from '../functions/api/poster.js';
 import {onRequestGet as getJudge} from '../functions/api/judge.js';
+import {onRequestGet as getConfig} from '../functions/api/config.js';
 test('real fixture preserves all original narrative and evidence',()=>{
  const demo=JSON.parse(readFileSync('data/demo-presentation.json','utf8'));validateScript(demo);
  const original=JSON.parse(readFileSync('output/presentation_script.json','utf8'));
@@ -54,4 +55,21 @@ test('poster without secret falls back; invalid query returns 400; web judge hea
  const result=await getPoster({request:new Request('https://example.com/api/poster?title=Movie'),env:{}});const body=await result.json();assert.equal(body.resolved,false);assert.equal(body.reason,'missing_tmdb_key');
  assert.equal((await getPoster({request:new Request('https://example.com/api/poster?title=Movie&year=bad'),env:{}})).status,400);
  assert.equal(getJudge().status,200);assert.equal((await getJudge().json()).runtime,'cloudflare-pages');
+
+test('configuration diagnostics are dev-only and never expose the key',async t=>{
+  assert.equal((await getConfig({env:{GEMINI_API_KEY:'secret-value'}})).status,404);
+  t.mock.method(globalThis,'fetch',async()=>Response.json({models:[{name:'models/full-A',supportedGenerationMethods:['generateContent']}]}));
+  const result=await getConfig({env:{GEMINI_API_KEY:'secret-value',JUDGE_DEBUG_CONFIG:'1',GEMINI_MODEL:'primary',GEMINI_ANALYST_FALLBACK_MODELS:'backup'}});
+  assert.equal(result.status,200);
+  const body=await result.json();
+  assert.equal(body.gemini_key_present,true);
+  assert.equal(body.model_discovery_enabled,true);
+  assert.equal(body.primary_model,'primary');
+  assert.equal(body.fallback_count,1);
+  assert.deepEqual(body.discovered_models,['full-A']);
+  assert.deepEqual(body.chains.analyst,['primary','backup','full-A']);
+  // A diagnostic endpoint that leaks the key would be worse than no endpoint at all.
+  assert.equal(JSON.stringify(body).includes('secret-value'),false);
+});
+
 });
