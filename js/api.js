@@ -9,7 +9,7 @@ export async function judgeExport(file, locale, signal) {
     if (!response.ok) {
       let body={};try{body=await response.json();}catch{}
       const reason=body.error||'';
-      const known={missing_gemini_key:'configuration',ai_unavailable:'aiUnavailable',invalid_zip:'zip',unsupported_zip:'zip',not_letterboxd_export:'exportFormat',empty_export:'emptyExport',file_too_large:'large',gemini_rate_limit:'rate',gemini_failure:'server',gemini_invalid_response:'modelInvalid'};
+      const known={missing_gemini_key:'configuration',ai_unavailable:'aiUnavailable',analyst_unavailable:'aiUnavailable',invalid_zip:'zip',unsupported_zip:'zip',not_letterboxd_export:'exportFormat',empty_export:'emptyExport',file_too_large:'large',gemini_rate_limit:'rate',gemini_failure:'server',gemini_invalid_response:'modelInvalid'};
       const error=new Error(known[reason]||({404:'unavailable',501:'unavailable',503:'configuration',429:'rate',413:'large',422:'exportFormat'})[response.status]||'server');
       error.payload=body;throw error;
     }

@@ -39,7 +39,7 @@ function stop(){sequence++;request?.abort();clearInterval(loadingTimer);player?.
 async function renderEnding(){
   const review=$('#profile-review'),profile=script.profile_review;
   const fullReview=profile?.full||profile?.text;review.replaceChildren();review.hidden=!fullReview;
-  if(fullReview){const lead=document.createElement('p');lead.className='eyebrow';lead.textContent=profile.lead||t('profileReview');const card=document.createElement('article');card.className='profile-review-card';const title=document.createElement('h3');title.textContent=t('profileReview');const body=document.createElement('p');body.textContent=fullReview;card.append(title,body);review.append(lead,card);}
+  if(fullReview){const leadText=profile.lead||'',card=document.createElement('article');card.className='profile-review-card';const title=document.createElement('h3');title.textContent=t('profileReview');const body=document.createElement('p');body.textContent=fullReview;if(leadText&&leadText.toLocaleLowerCase()!==t('profileReview').toLocaleLowerCase()){const lead=document.createElement('p');lead.className='eyebrow';lead.textContent=leadText;review.append(lead);}card.append(title,body);review.append(card);}
   const explain=$('#explainability'),details=script.explainability;
   explain.hidden=!details;if(details){const lines=[details.summary,...(details.findings||[])].filter(Boolean);$('#explainability-copy').textContent=lines.join('\n\n');}
   const cards=$('#share-cards'),previews=$('#share-card-previews');previews.replaceChildren();cards.hidden=!fullReview;

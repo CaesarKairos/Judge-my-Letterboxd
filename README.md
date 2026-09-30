@@ -248,6 +248,10 @@ limitado; timeout de 120s por tentativa. HTTP 400 não recebe repetição autom�
 Falha no Analyst preserva o roteiro local e pula o Writer; falha no Writer preserva
 todos os dados e as falas já aceitas. Saída parcial fica marcada e retorna código 1.
 
+No endpoint web, o Analyst é uma barreira obrigatória: se todos os modelos falharem,
+ele retorna `analyst_unavailable` com as medições locais auditáveis e o Writer não é
+chamado. Seleção determinística sem Analyst existe apenas no modo explícito de teste.
+
 Quando o erro é 404/429/5xx, o modelo configurado é trocado pelo próximo da cadeia
 antes de desistir, e o modelo que respondeu aparece em `served_model`. Depois de
 401/403/429 esgotar toda a corrente, a execução para: insistir com credencial inválida
@@ -378,10 +382,9 @@ typing → saudação → typing → "Você deve ser o..." → arquétipo (4 con
 - O par de adjetivos vem de `taste_adjective_pairs`: a IA pode escolher um par
   inteiro, nunca misturar palavras de pares diferentes; fora do pool, o par do Script
   Engine é mantido e o descarte fica registrado em `ai.warnings`.
-- `top_four_archetype` exige exatamente quatro conceitos, de uma ou duas palavras,
-  distintos, sobre TEMA/atmosfera/cenário/elemento narrativo dos quatro favoritos —
-  nunca um diagnóstico da pessoa. Menos de quatro (ou conceito fora das regras) →
-  o bloco do arquétipo é omitido e a abertura segue sem ele.
+- `top_four_archetype` exige uma frase gramatical curta que componha semanticamente os
+  quatro favoritos — nunca uma lista de títulos, rótulo genérico ou diagnóstico da
+  pessoa. Se a validação falhar, o bloco e seu card compartilhável são omitidos.
 - A reação do reveal é opcional (0 ou 1 linha, no máximo 14 palavras) e só pode citar
   números já exibidos.
 - A graça do "título grande demais" é o fracasso deliberado do template: a IA cria o
@@ -438,6 +441,11 @@ slot de IA), reveal de números, todos os Editorial Moments com seus dados, pôs
 identificados por `film_key` e pausas no lugar das falas. Os campos de reação ficam
 vazios e `render.ai_generation` diz `skipped` ou `failed`. Nenhuma frase fixa é
 inserida para parecer julgamento.
+
+`render.ai_generation` descreve completude (`complete` ou `partial`), enquanto
+`render.model_quality` descreve o modelo servido (`primary`, `fallback` ou
+`fallback_lite`). Assim, uma resposta completa de um modelo Lite continua completa,
+mas vem com `quality_degraded: true`; `partial` é reservado a conteúdo incompleto.
 
 ## Regras de análise e validação
 

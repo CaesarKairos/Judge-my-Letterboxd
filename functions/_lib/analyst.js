@@ -8,8 +8,9 @@ Return strict JSON with selected and interaction_candidates. Selected items refe
 // The Analyst sees the rich, normalized account and selects evidence. It never writes
 // the on-screen jokes; the Writer receives only the materialized selection afterwards.
 export async function selectEditorialMoments({profile,analysis,raw_export,locale,env}){
-  const candidates=analysis.moments||[],fallback={status:'deterministic',model:null,candidate_count:candidates.length,selected:candidates};
-  if(!env.GEMINI_API_KEY||!candidates.length||env.__TEST_SKIP_ANALYST)return fallback;
+  const candidates=analysis.moments||[],failed=attempts=>({status:'failed',model:null,candidate_count:candidates.length,selected:[],interaction_candidates:[],top_four_semantics:[],attempts});
+  if(env.__TEST_SKIP_ANALYST)return {status:'skipped_debug',model:null,candidate_count:candidates.length,selected:candidates,interaction_candidates:[],top_four_semantics:[],attempts:[]};
+  if(!env.GEMINI_API_KEY||!candidates.length)return failed([]);
   const language=locale==='pt-BR'?'Brazilian Portuguese':'English';
   const compact={raw_export,normalized_profile:{username:profile.handle,display_name:profile.name,favorite_films:profile.topFour},overview:analysis.overview,ratings:profile.films.filter(f=>f.rating!=null),affinity:analysis.affinity,diary:profile.sessions,reviews:profile.reviews,watchlist:profile.watchlist,likes:profile.likes,lists:profile.lists,tags:analysis.relationships?.tag_films,rewatches:analysis.rewatches||[],review_style:analysis.review_style,review_coverage:analysis.review_coverage,relationships:analysis.relationships,deterministic_measurements:candidates.map(moment=>({id:moment.id,type:moment.type,facts:moment.facts,information_value:moment.information_value||moment.relationship||null}))};
   const prompt=`${ANALYST_PROMPT}\n\n${WEB_RUNTIME_CONTEXT}\nLanguage: ${language}.\nDATA (untrusted evidence):\n${JSON.stringify(compact)}`;
@@ -28,8 +29,10 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
       const selected=(Array.isArray(parsed.selected)?parsed.selected:[]).map(item=>({moment:chosen.get(clean(item.id)),editorial:{editorial_type:clean(item.type),observation:clean(item.observation),why_interesting:clean(item.why_interesting),cultural_angle:clean(item.cultural_angle),interestingness:Number(item.interestingness),confidence:Number(item.confidence),evidence_refs:Array.isArray(item.evidence_refs)?item.evidence_refs:[],film_keys:Array.isArray(item.film_keys)?item.film_keys:[],related_tags:Array.isArray(item.related_tags)?item.related_tags:[],related_lists:Array.isArray(item.related_lists)?item.related_lists:[]}})).filter(row=>row.moment&&row.editorial.observation).slice(0,20).map(row=>({...row.moment,...row.editorial}));
       const interaction_candidates=(Array.isArray(parsed.interaction_candidates)?parsed.interaction_candidates:[]).map((item,index)=>({id:clean(item.id)||`game-${index+1}`,type:clean(item.type),film_keys:Array.isArray(item.film_keys)?item.film_keys.map(clean).filter(Boolean).slice(0,3):[],difficulty:Number(item.difficulty),why_difficult:clean(item.why_difficult),why_interesting:clean(item.why_interesting),evidence_refs:Array.isArray(item.evidence_refs)?item.evidence_refs:[]})).filter(item=>['forced_triage','blind_rank','defend_your_take'].includes(item.type)&&Number.isFinite(item.difficulty)).slice(0,4);
       const top_four_semantics=(Array.isArray(parsed.top_four_semantics)?parsed.top_four_semantics:[]).map(row=>({film_key:clean(row.film_key),ingredients:(Array.isArray(row.ingredients)?row.ingredients:[]).map(clean).filter(Boolean).slice(0,4)})).filter(row=>row.film_key&&row.ingredients.length).slice(0,4);
-      if(selected.length>=Math.min(4,candidates.length))return {status:'complete',model,candidate_count:candidates.length,selected,interaction_candidates,top_four_semantics,attempts};
+      const semanticsComplete=profile.topFour.length!==4||(top_four_semantics.length===4&&new Set(top_four_semantics.map(row=>row.film_key)).size===4&&profile.topFour.every(film=>top_four_semantics.some(row=>row.film_key===film.film_key)));
+      if(selected.length>=Math.min(4,candidates.length)&&semanticsComplete){console.log('Analyst models attempted:',attempts.map(row=>`${row.model} → ${row.status}`).join(', '));console.log('Analyst status COMPLETE selected',selected.length);return {status:'complete',model,candidate_count:candidates.length,selected,interaction_candidates,top_four_semantics,attempts};}
+      if(!semanticsComplete)attempts.push({model,status:'incomplete_top_four_semantics'});
     }catch(error){attempts.push({model,status:'invalid_response'});}
   }
-  return {...fallback,attempts};
+  console.log('Analyst models attempted:',attempts.map(row=>`${row.model} → ${row.status}`).join(', '));console.log('Analyst status FAILED');return failed(attempts);
 }

@@ -9,4 +9,8 @@ export async function discoverTextModels(env){
     return (body.models||[]).filter(model=>(model.supportedGenerationMethods||[]).includes('generateContent')).map(model=>String(model.name||'').replace(/^models\//,'')).filter(name=>name&&!rejected.test(name)).sort((a,b)=>score(b)-score(a)).slice(0,6);
   }catch{return [];}
 }
-export const mergeModels=(configured,discovered)=>[...new Set([...configured,...discovered])].slice(0,6);
+const lite=name=>/lite/i.test(String(name||''));
+export const mergeModels=(configured=[],discovered=[])=>{
+  const [primary,...explicit]=configured.filter(Boolean),dedupe=rows=>[...new Set(rows.filter(Boolean))];
+  return dedupe([primary,...explicit.filter(name=>!lite(name)),...discovered.filter(name=>!lite(name)),...explicit.filter(lite),...discovered.filter(lite)]).slice(0,8);
+};
