@@ -26,12 +26,13 @@ const semanticsAnswer=rows=>answer({top_four_semantics:semanticsOf(rows)});
 const bodyOf=options=>JSON.parse(options.body);
 const promptsOf=calls=>calls.map(call=>bodyOf(call.options).contents[0].parts[0].text);
 
-// The mock answers a queue of behaviours and keeps every request for inspection.
+// The mock answers a queue of behaviours and keeps every request for inspection. A single
+// function entry is a persistent handler instead of a one-shot answer.
 const responder=(t,list)=>{
   const calls=[];
   t.mock.method(globalThis,'fetch',async(url,options)=>{
     calls.push({url:String(url),options});
-    const next=list.shift();
+    const next=list.length===1&&typeof list[0]==='function'?list[0]:list.shift();
     if(typeof next==='function')return next(calls.at(-1),calls);
     return next||Response.json({error:{message:'no more answers'}},{status:503});
   });
@@ -234,3 +235,88 @@ test('an exhausted quota is named instead of hidden behind a timeout',async t=>{
 });
 
 });
+
+// --- the chain is limited by the deadline, never by a fixed count ------------------------
+test('every discovered model is reachable: models 7 and 8 run when the first six fail fast',async t=>{
+  const wide=Array.from({length:8},(_,index)=>`gemini-3.${index+1}-flash`);
+  const calls=responder(t,[call=>{
+    if(!call.url.includes(':generateContent'))return Response.json({models:wide.map(name=>({name:`models/${name}`,supportedGenerationMethods:['generateContent']}))});
+    if(call.url.includes('gemini-3.2-flash')||call.url.includes('gemini-3.1-flash'))
+      return answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)});
+    return Response.json({error:{code:404,message:'gone'}},{status:404});
+  }]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_MODEL_DISCOVERY:'1'})});
+  // primary + 8 discovered, all of them in the chain: nothing is cut before the deadline says so.
+  assert.equal(result.chain.length,9);
+  assert.equal(result.status,'complete');
+  assert.ok(['gemini-3.2-flash','gemini-3.1-flash'].includes(result.model),String(result.model));
+  const attempted=result.attempts.map(row=>row.model);
+  assert.equal(attempted.length,8,'the eight generateContent attempts');
+  assert.equal(attempted.at(-1),'gemini-3.2-flash');
+  assert.equal(calls.length,9);
+  // A 404 answered in milliseconds never stopped a later discovered model.
+  assert.equal(result.attempts.filter(row=>row.status==='http_404').length,7);
+});
+
+test('a 429 or a 404 is tried once per model and never retried',async t=>{
+  const calls=responder(t,[Response.json({error:{code:429,message:'quota'}},{status:429}),
+    Response.json({error:{code:404,message:'gone'}},{status:404}),
+    answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  assert.deepEqual(calls.map(call=>call.url.match(/models\/([^:]+)/)[1]),['primary','backup-a','backup-b']);
+  assert.equal(result.attempts.filter(row=>row.model==='primary').length,1);
+  assert.equal(result.attempts.filter(row=>row.model==='backup-a').length,1);
+  assert.equal(result.status,'complete');
+});
+
+test('a 5xx gets one short retry, then the chain advances',async t=>{
+  const calls=responder(t,[Response.json({error:{code:503,message:'high demand'}},{status:503}),
+    Response.json({error:{code:503,message:'high demand'}},{status:503}),
+    answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'})});
+  const primary=result.attempts.filter(row=>row.model==='primary');
+  assert.deepEqual(primary.map(row=>row.phase),['initial','retry_5xx']);
+  assert.deepEqual(primary.map(row=>row.status),['http_503','http_503']);
+  assert.equal(result.status,'complete');
+  assert.equal(result.model,'backup-a');
+  assert.equal(calls.length,3);
+});
+
+test('a non-2xx answer is never parsed as generation output',async t=>{
+  responder(t,[Response.json({error:{code:429,status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota'}},{status:429})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
+  const [attempt]=result.attempts;
+  assert.equal(attempt.status,'http_429');
+  assert.equal(attempt.http,429);
+  assert.deepEqual(attempt.provider_error,{code:429,status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota'});
+  assert.equal(attempt.parse_error,undefined,'an error body is not a truncated reply');
+  assert.equal(attempt.json,undefined);
+  assert.equal(attempt.finishReason,undefined);
+  assert.equal(result.reason,'quota_exceeded');
+});
+
+test('the deadline stops the walk instead of looping forever',async t=>{
+  const calls=responder(t,[answer({selected:selection(ids),top_four_semantics:semanticsOf(profile.topFour)})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({__TEST_ANALYST_DEADLINE_MS:-1,GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  assert.equal(calls.length,0,'not a single request after the deadline');
+  assert.equal(result.status,'failed');
+  assert.equal(result.stop_reason,'deadline');
+  assert.equal(result.reason,'deadline');
+  assert.deepEqual(result.selected,[]);
+});
+
+test('a model that is unavailable in this run is not paid for again',async t=>{
+  const calls=responder(t,[call=>call.url.includes('/models/primary:')?Response.json({error:{code:404,message:'gone'}},{status:404})
+    :answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
+  const shared=env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'});
+  const first=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:shared});
+  assert.equal(first.attempts.filter(row=>row.model==='primary').length,1);
+  assert.equal(first.status,'complete');
+  const before=calls.length;
+  const second=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:shared});
+  assert.equal(calls.length,before+1,'the Writer stage would not pay for the dead model again');
+  assert.equal(second.attempts.some(row=>row.model==='primary'),false);
+  assert.equal(second.status,'complete');
+  assert.equal(second.unavailable_models.includes('primary'),true);
+});
+

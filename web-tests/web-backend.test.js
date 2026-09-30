@@ -96,7 +96,11 @@ test('Pages Function stops after Analyst failure and never calls Writer',async t
  const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_ANALYST_MODEL:'analyst-only',GEMINI_MODEL_DISCOVERY:'0'}});
  const body=await result.json();
  assert.equal(result.status,503);assert.equal(body.error,'analyst_unavailable');assert.equal(body.stage,'analyst');assert.equal(body.generation_meta.analyst.status,'failed');
- assert.equal(body.deterministic_analysis_available,true);assert.equal(writerCalled,false);assert.equal(calls,1);
+ assert.equal(body.deterministic_analysis_available,true);assert.equal(writerCalled,false);
+ // One model, one short retry after the 5xx, and then Analyst FAILED: the Writer never runs and
+ // the deterministic pool is not promoted to a judgment.
+ assert.equal(calls,2);assert.equal(body.attempts.length,2);assert.equal(body.reason,'no_usable_analysis');
+ assert.ok(body.attempts.every(row=>row.provider_error.code===503));
 });
 
 

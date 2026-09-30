@@ -1,6 +1,6 @@
 const clean=value=>String(value||'').replace(/\s+/g,' ').trim();
 import {ANALYST_PROMPT} from './generated-prompts.js';
-import {discoverTextModels,mergeModels,configuredWithoutDiscovery,describeChain,ANALYST_CHAIN_LIMIT} from './models.js';
+import {discoverTextModels,mergeModels,configuredWithoutDiscovery,describeChain,modelUnavailable,noteModelFailure,MODEL_SAFETY_CEILING} from './models.js';
 import {ANALYST_SCHEMA,ANALYST_SEMANTICS_SCHEMA} from './analyst-schema.js';
 import {buildAnalystContext,summarizeAnalystContext} from './analyst-context.js';
 import {readModelReply,attemptStatus} from './json-repair.js';
@@ -21,7 +21,10 @@ export const ANALYST_MAX_OUTPUT_TOKENS=8192;   // 4096 could not hold 12-20 find
 export const ANALYST_REQUEST_TIMEOUT_MS=20000; // one slow model may not consume the whole stage
 export const ANALYST_MIN_REQUEST_TIMEOUT_MS=8000; // but the tail of the chain still gets a try
 export const ANALYST_DEADLINE_MS=75000;        // shared by every attempt of the stage
-export const ANALYST_MAX_CALLS=8;              // hard cap: chain of 6, plus one repair per model
+// Safety ceilings only, for a runaway loop: the deadline is what really limits the chain, so a
+// model discovered at position 20 is still attempted while there is time left.
+export const ANALYST_CALL_CEILING=24;
+export const ANALYST_SERVER_RETRY_MS=400;      // one short retry after a 5xx, never a loop
 export const ANALYST_MIN_INTERESTINGNESS=.62;
 export const ANALYST_MIN_CONFIDENCE=.6;
 const RETRYABLE=new Set([500,502,503,504]);
@@ -121,13 +124,19 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   console.log('Analyst context:',stats.chars,'chars |',stats.reviews,'reviews |',stats.relationships,'relationships |',stats.candidate_measurements,'candidate measurements');
   console.log('Analyst context inventory: films',stats.films,'| sessions',stats.sessions,'| files kept raw:',stats.unnormalized_files.join(', ')||'none');
   const configured=analystConfigured(env),discovered=await discoverTextModels(env);
-  const chain=mergeModels(configured,discovered,ANALYST_CHAIN_LIMIT),notDiscovered=configuredWithoutDiscovery(configured,discovered);
+  const chain=mergeModels(configured,discovered,MODEL_SAFETY_CEILING),notDiscovered=configuredWithoutDiscovery(configured,discovered);
   console.log('Analyst model chain:');for(const line of describeChain(chain))console.log(' ',line);
+  console.log('Analyst chain length:',chain.length,'| the deadline decides how many are attempted');
   if(notDiscovered.length)console.log('Analyst configured models absent from discovery:',notDiscovered.join(', '));
-  const deadline=Date.now()+ANALYST_DEADLINE_MS,attempts=[],repairs=[],unavailable=new Set();
+  const deadline=Date.now()+(Number(env.__TEST_ANALYST_DEADLINE_MS)||ANALYST_DEADLINE_MS),attempts=[],repairs=[],unavailable=new Set();
   const state={selected:[],interaction_candidates:[],top_four_semantics:[],problems:[],truncated:false,salvaged:false};
   let calls=0,served=null,stopReason=null,responded=false,rateLimited=null;
-  const canCall=()=>{if(calls>=ANALYST_MAX_CALLS)return stopReason=stopReason||'call_budget';if(Date.now()>=deadline)return stopReason=stopReason||'deadline';return true;};
+  const canCall=()=>{
+    if(calls>=ANALYST_CALL_CEILING){stopReason=stopReason||'call_ceiling';return false;}
+    if(Date.now()>=deadline){stopReason=stopReason||'deadline';return false;}
+    return true;
+  };
+  const isServerError=outcome=>String(outcome?.status||'').startsWith('http_5');
 
   // One HTTP call, recorded whatever happens. `fast` means "never try this model again in
   // this session": a 404 or a 429 will not answer differently a few hundred milliseconds
@@ -152,11 +161,16 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     }
     const duration=Date.now()-started;
     if(!response.ok){
-      const detail=(await response.text().catch(()=>'')).slice(0,160);
+      const detail=(await response.text().catch(()=>'')).slice(0,200);
+      // A non-2xx answer is not generation output: it is recorded as http + provider_error +
+      // detail + duration, and never parsed as a (missing) model reply. That misleading
+      // "parse_error" in the old diagnostic came from reading an error body as a generation.
+      const providerError=(()=>{try{const body=JSON.parse(detail);return {code:body?.error?.code??response.status,status:body?.error?.status||'',message:String(body?.error?.message||'').slice(0,140)};}catch{return {code:response.status,status:'',message:detail.slice(0,140)};}})();
       // A 429 is a fact about the key or the account, not about this model: it is kept so the
-      // failure can say "quota" instead of a generic timeout.
+      // failure can say "quota" instead of a generic timeout, and the model is not retried.
       if(response.status===429)rateLimited=/quota/i.test(detail)?'quota_exceeded':rateLimited||'rate_limited';
-      attempts.push({model,phase,status:attemptStatus({status:response.status,ok:false}),http:response.status,detail,timeout_ms:timeout,duration_ms:duration});
+      noteModelFailure(env,model,response.status);
+      attempts.push({model,phase,status:attemptStatus({status:response.status,ok:false}),http:response.status,provider_error:providerError,detail,timeout_ms:timeout,duration_ms:duration});
       if(response.status===400&&thinking)return {status:'http_400',retry_without_thinking:true,fast:false};
       return {status:attemptStatus({status:response.status,ok:false}),http:response.status,fast:FAST_FAILURE.has(response.status)||!RETRYABLE.has(response.status)&&response.status>=500};
     }
@@ -193,15 +207,24 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   };
   const complete=()=>evaluateEditorialSelection(state.selected,candidates).strength==='strong'&&evaluateTopFourSemantics(state.top_four_semantics,topFour).valid;
 
+  // The chain is walked while time remains, not up to a fixed count: a 404 or a 429 that answers
+  // in under a second must never stop a later discovered model from being tried.
   for(const [index,model] of chain.entries()){
-    if(unavailable.has(model)||!canCall())break;
+    if(!canCall())break;
+    if(unavailable.has(model))continue;
+    if(modelUnavailable(env,model)){unavailable.add(model);console.log('Analyst skipped (unavailable in this run):',model);continue;}
     const modelsLeft=chain.length-index;
     let thinking=true,outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',modelsLeft});
     if(outcome.retry_without_thinking){thinking=false;stopReason=null;console.log('Analyst rejected thinkingConfig:',model);
       outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',thinking:false,modelsLeft});}
+    // A 5xx gets exactly one short retry while there is budget; otherwise the chain advances.
+    if(isServerError(outcome)&&canCall()){
+      await new Promise(resolve=>setTimeout(resolve,ANALYST_SERVER_RETRY_MS));
+      if(canCall())outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'retry_5xx',modelsLeft});
+    }
     if(outcome.reply){absorb(outcome.reply);responded=true;}
     if(outcome.fast){unavailable.add(model);continue;}
-    if(!outcome.reply)continue;
+    if(isServerError(outcome)||!outcome.reply){unavailable.add(model);continue;}
     served=model;
     if(complete())break;
     // One targeted repair on the same model: ask for the missing contract, keep everything
@@ -224,7 +247,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   // The reason says what actually happened: a model answered but produced nothing usable, or
   // no model answered at all. FAILED keeps its literal meaning.
   const reason=status==='failed'?(state.truncated?'truncated_output':responded?'no_usable_analysis':rateLimited||stopReason||'no_usable_analysis'):null;
-  console.log('Analyst attempts:',attempts.map(row=>`${row.model} → ${row.status}`).join(', ')||'none');
+  console.log(`Analyst attempts (${new Set(attempts.map(row=>row.model)).size}/${chain.length} models):`,attempts.map(row=>`${row.model} → ${row.status}`).join(', ')||'none');
   console.log(status==='failed'?`Analyst FAILED: ${reason}`:`Analyst ${status.toUpperCase()}: selected ${editorial.count} (strong ${editorial.strong_count}/${editorial.target}) | top_four_semantics ${semantics.provided}/${topFour.length}`);
   return {status,reason,model:served,candidate_count:candidates.length,selected:state.selected,interaction_candidates:state.interaction_candidates,
     top_four_semantics:state.top_four_semantics,top_four_semantics_status:semantics.required?(semantics.valid?'complete':'failed'):'not_required',

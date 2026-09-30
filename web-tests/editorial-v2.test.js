@@ -80,6 +80,29 @@ test('model chain keeps every full model before Lite fallbacks',()=>{
  assert.deepEqual(mergeModels(['primary','explicit-lite','explicit-full'],['discovered-lite','discovered-full']),['primary','explicit-full','discovered-full','explicit-lite','discovered-lite']);
 });
 
+test('the chain is a ladder: complete Flash, other textual, previews, Lite last',()=>{
+ const discovered=['gemini-flash-lite-latest','gemini-3-flash-preview','gemini-3.1-pro-preview','gemini-3.8-flash','gemini-3.7-flash','gemini-2.5-flash','gemini-omni-1.1-flash'];
+ const chain=mergeModels(['gemini-flash-latest'],discovered);
+ assert.equal(chain[0],'gemini-flash-latest');
+ // Complete Flash first, newest generation first; previews and Lite never jump ahead of one.
+ assert.deepEqual(chain.slice(1,5),['gemini-3.8-flash','gemini-3.7-flash','gemini-2.5-flash','gemini-omni-1.1-flash']);
+ assert.ok(chain.indexOf('gemini-3-flash-preview')>chain.indexOf('gemini-2.5-flash'));
+ assert.ok(chain.indexOf('gemini-3.1-pro-preview')>chain.indexOf('gemini-2.5-flash'));
+ assert.equal(chain.at(-1),'gemini-flash-lite-latest');
+});
+
+test('a configured model is never duplicated and never invents a retired one',()=>{
+ assert.deepEqual(mergeModels(['gemini-flash-latest','gemini-flash-latest'],['gemini-flash-latest','gemini-3.8-flash']),
+   ['gemini-flash-latest','gemini-3.8-flash']);
+ // gemini-2.5-flash is only considered when the operator configured it or discovery confirmed it.
+ assert.equal(mergeModels(['gemini-flash-latest'],['gemini-3.8-flash','gemini-3-flash-preview']).includes('gemini-2.5-flash'),false);
+ assert.equal(mergeModels(['gemini-flash-latest']).includes('gemini-2.5-flash'),false);
+ assert.deepEqual(mergeModels(['gemini-flash-latest','gemini-2.5-flash'],[]),['gemini-flash-latest','gemini-2.5-flash']);
+ // Discovery is the source of fallbacks, so the whole catalogue order survives the merge.
+ const wide=Array.from({length:12},(_,index)=>`gemini-3.${index+1}-flash`);
+ assert.equal(mergeModels(['gemini-flash-latest'],wide).length,13);
+});
+
 test('Analyst failure never promotes deterministic candidates',async t=>{
  t.mock.method(globalThis,'fetch',async()=>Response.json({error:{}},{status:503}));
  const profile={...base([film('Film A',5)]),handle:'synthetic',name:'Synthetic'},analysis={moments:[{id:'measurement',type:'stat',facts:'one measurement'}],overview:{},relationships:{},review_style:null,review_coverage:{}};

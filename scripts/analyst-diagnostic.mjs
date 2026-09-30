@@ -27,12 +27,20 @@ globalThis.fetch=async(input,init={})=>{
   entry.status=response.status;entry.ms=Date.now()-entry.started;
   if(url.includes(':generateContent')){
     const clone=response.clone();
-    try{
-      const body=await clone.json(),candidate=body?.candidates?.[0],text=(candidate?.content?.parts||[]).map(part=>part.text||'').join('');
-      entry.finishReason=candidate?.finishReason||null;entry.response_chars=text.length;entry.blocked=Boolean(body?.promptFeedback?.blockReason);
-      try{const parsed=JSON.parse(text);entry.json='valid';entry.keys=Object.keys(parsed);entry.counts={selected:parsed.selected?.length??null,interaction_candidates:parsed.interaction_candidates?.length??null,top_four_semantics:parsed.top_four_semantics?.length??null};}
-      catch(error){entry.json=`parse_error: ${error.message.slice(0,60)}`;}
-    }catch(error){entry.json=`body_error: ${error.message.slice(0,60)}`;}
+    if(!response.ok){
+      // A non-2xx answer is not generation output: http + provider_error + detail + duration.
+      // Parsing it as a reply used to print a misleading "parse_error" for 404/429/503.
+      try{const body=await clone.json();entry.provider_error={code:body?.error?.code??response.status,status:body?.error?.status||'',message:String(body?.error?.message||'').slice(0,140)};}
+      catch{entry.provider_error={code:response.status,status:'',message:'unreadable error body'};}
+      entry.json='not_parsed (non-2xx)';
+    }else{
+      try{
+        const body=await clone.json(),candidate=body?.candidates?.[0],text=(candidate?.content?.parts||[]).map(part=>part.text||'').join('');
+        entry.finishReason=candidate?.finishReason||null;entry.response_chars=text.length;entry.blocked=Boolean(body?.promptFeedback?.blockReason);
+        try{const parsed=JSON.parse(text);entry.json='valid';entry.keys=Object.keys(parsed);entry.counts={selected:parsed.selected?.length??null,interaction_candidates:parsed.interaction_candidates?.length??null,top_four_semantics:parsed.top_four_semantics?.length??null};}
+        catch(error){entry.json=`parse_error: ${error.message.slice(0,60)}`;}
+      }catch(error){entry.json=`body_error: ${error.message.slice(0,60)}`;}
+    }
   }
   return response;
 };
@@ -43,11 +51,12 @@ const profile=parseExport(entries),analysis=analyzeExport(profile,'pt-BR'),raw_e
 console.log('Export:',entries.size,'files | films',profile.films.length,'| reviews',profile.reviews.length,'| sessions',profile.sessions.length,'| lists',profile.lists.length,'| top4',profile.topFour.length,'| candidate pool',analysis.moments.length);
 const configured=[env.GEMINI_ANALYST_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_ANALYST_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(value=>value.trim()).filter(Boolean)];
 const discovered=await discoverTextModels(env);
-console.log('Analyst model chain:',mergeModels(configured,discovered).join(' -> ')||'(none)');
-console.log('Discovery:',discovered.length?'ok':'unavailable','| key present',Boolean(env.GEMINI_API_KEY));
+console.log('Analyst model chain ('+mergeModels(configured,discovered).length+'):',mergeModels(configured,discovered).join(' -> ')||'(none)');
+console.log('Discovery:',discovered.length?`ok, ${discovered.length} textual models`:'unavailable','| key present',Boolean(env.GEMINI_API_KEY));
+if(discovered.length)console.log('Discovered:',discovered.join(', '));
 const analyst=await selectEditorialMoments({profile,analysis,raw_export,locale:'pt-BR',env});
 console.log('--- HTTP attempts ---');
-for(const entry of traffic)console.log(' ',entry.status||'-',String(entry.request_chars).padStart(7),'chars in |',String(entry.response_chars??'-').padStart(6),'chars out |',entry.finishReason||'-','|',entry.json||'-','|',entry.ms+'ms |',entry.url.split('/models/')[1]?.split(':')[0]||entry.url.split('?')[0]);
+for(const entry of traffic)console.log(' ',entry.status||'-',String(entry.request_chars).padStart(7),'chars in |',String(entry.response_chars??'-').padStart(6),'chars out |',entry.finishReason||'-','|',entry.json||(entry.provider_error?`provider_error ${entry.provider_error.code} ${entry.provider_error.status}`.trim():'-'),'|',entry.ms+'ms |',entry.url.split('/models/')[1]?.split(':')[0]||entry.url.split('?')[0]);
 console.log('--- Analyst attempts ---');
 for(const row of analyst.attempts||[])console.log(' ',JSON.stringify(row));
 console.log('--- Analyst result ---');

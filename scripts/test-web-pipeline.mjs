@@ -8,7 +8,7 @@ import {buildRawExport} from '../functions/_lib/raw-export.js';
 import {materializeCandidates,buildScriptEngine,callbackCandidates,selectInteractions} from '../functions/_lib/editorial.js';
 import {enrichGameInteractions} from '../functions/_lib/tmdb-games.js';
 
-const zipPath=process.argv[2],stub=process.argv.includes('--stub');
+const zipPath=process.argv[2],stub=process.argv.includes('--stub'),started=Date.now();
 if(!zipPath)throw new Error('Uso: node scripts/test-web-pipeline.mjs caminho-do-export.zip [--stub]');
 const envText=await readFile('.env','utf8');
 const env=Object.fromEntries(envText.split(/\r?\n/).map(line=>line.match(/^([A-Z0-9_]+)=(.*)$/)).filter(Boolean).map(match=>[match[1],match[2].replace(/^['"]|['"]$/g,'')]));
@@ -55,4 +55,4 @@ analysis.interactions=await enrichGameInteractions(selectInteractions(analyst.in
 analysis.top_four_semantics=analyst.top_four_semantics||[];analysis.callbacks=callbackCandidates(analysis.moments);
 const writing=await writeJudgment({profile,analysis,locale,env});
 const script=buildPresentation({profile,analysis,writing,locale,analyst});
-console.log(JSON.stringify({version:script.version,runtime:script.render.runtime,candidatePool:analyst.candidate_count,acceptedByAnalyst:analyst.selected.length,rejectedLowInformation:script.editorial_quality.rejection_reasons.low_information.length,events:script.events.length,beats:script.beats.length,gameCandidates:(analyst.interaction_candidates||[]).length,games:script.editorial_quality.selected_games,topFour:script.opening.top_four.length,analystModel:analyst.model,writerModel:writing._model,aiCalls:script.ai.calls}));
+console.log(JSON.stringify({version:script.version,runtime:script.render.runtime,candidatePool:analyst.candidate_count,acceptedByAnalyst:analyst.selected.length,rejectedLowInformation:script.editorial_quality.rejection_reasons.low_information.length,events:script.events.length,beats:script.beats.length,gameCandidates:(analyst.interaction_candidates||[]).length,games:script.editorial_quality.selected_games,topFour:script.opening.top_four.length,analystModel:analyst.model,analystStatus:analyst.status,writerModel:writing._model,aiCalls:script.ai.calls,elapsed_ms:Date.now()-started}));
