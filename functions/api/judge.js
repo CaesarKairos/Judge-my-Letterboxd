@@ -4,7 +4,8 @@ import {writeJudgment} from '../_lib/gemini.js';
 import {buildPresentation} from '../_lib/judge.js';
 import {selectEditorialMoments} from '../_lib/analyst.js';
 import {buildRawExport} from '../_lib/raw-export.js';
-import {materializeCandidates,buildScriptEngine,callbackCandidates} from '../_lib/editorial.js';
+import {materializeCandidates,buildScriptEngine,callbackCandidates,selectInteractions} from '../_lib/editorial.js';
+import {enrichGameInteractions} from '../_lib/tmdb-games.js';
 
 const MAX_UPLOAD=50*1024*1024;
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -26,6 +27,8 @@ export async function onRequestPost({request,env}) {
     console.log('Analyst:',analyst.model||'deterministic',analyst.candidate_count,'candidates,',analyst.selected.length,'accepted');
     const materialized=materializeCandidates(analyst.selected,analysis.moments);
     analysis.moments=buildScriptEngine(materialized,profile.reviews.length);
+    analysis.interactions=await enrichGameInteractions(selectInteractions(analyst.interaction_candidates||[],profile),env,locale);
+    analysis.top_four_semantics=analyst.top_four_semantics||[];
     analysis.callbacks=callbackCandidates(analysis.moments);
     console.log('Script:',analysis.moments.length,'moments');
     const writing=await writeJudgment({profile,analysis,locale,env});

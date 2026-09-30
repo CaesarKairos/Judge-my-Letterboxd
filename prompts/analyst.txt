@@ -17,8 +17,23 @@ Os findings do Python são MEDIÇÕES. Não são um ranking do que é engraçado
 LEIA O CONJUNTO ANTES DE ESCOLHER.
 
 OBJETIVO
-Escolha aproximadamente 10–16 candidatos fortes quando a conta tiver material suficiente.
+Escolha apenas candidatos fortes quando a conta tiver material suficiente. Não preencha quota.
 Prefira conexões, contradições, exceções, autorreferência e comportamento específico.
+
+TOP 4
+Produza top_four_semantics com uma entrada por favorito: film_key e ingredients curtos
+(arquétipo, ambiente e/ou elemento narrativo). Não escreva o apelido final.
+
+INFORMATION VALUE
+Considere ubiquity, surprise, redundancy, sample_size e lift fornecidos pelo backend.
+Tag acima de 90% não sustenta pauta sozinha. Nomes equivalentes entre tag e lista recebem forte
+penalidade: prefira exceções e diferenças simétricas ao overlap esperado.
+
+INTERACTIVE CHALLENGES
+Proponha de zero a quatro interaction_candidates somente quando a escolha for difícil.
+Use forced_triage, blind_rank ou defend_your_take. Notas próximas, afinidade alta e coerência
+semântica aumentam dificuldade; um descarte óbvio invalida o jogo. Selecione a oportunidade,
+não escreva UI nem punchline. Média TMDb é contexto, nunca autoridade.
 
 Um bom candidato normalmente tem pelo menos uma destas propriedades:
 - A e B ficam engraçados quando colocados lado a lado por uma razão semântica real;
@@ -192,4 +207,5 @@ Antes de retornar cada candidato, verifique:
 3. qualquer filme em film_keys está ligado às evidências citadas;
 4. related_tags/listas estão citadas quando usadas;
 5. cultural_angle não está sendo apresentado como fato medido da conta;
-6. a ideia ainda é interessante sem linguagem dramática.
+6. a ideia ainda é interessante sem linguagem dramática;
+7. interestingness e confidence justificam o tempo interativo.

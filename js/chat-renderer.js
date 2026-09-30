@@ -3,6 +3,7 @@ import {t} from './i18n.js';
 import {Playback,timing,readWait} from './animations.js';
 import {renderAttachment,filmStrip} from './event-renderer.js';
 import {disconnectPosters} from './poster-service.js';
+import {blindRankOutcome,forcedTriageReaction} from './game-results.js';
 export function typingDots(){const node=el('div','typing');node.setAttribute('aria-label',t('typing'));for(let i=0;i<3;i++){const dot=el('span');dot.setAttribute('aria-hidden','true');node.append(dot);}return node;}
 export class ChatPlayer {
   constructor(container,bottom,announce) {
@@ -47,6 +48,18 @@ export class ChatPlayer {
     }
     this.announce.textContent=host.textContent;await this.clock.wait(timing.messageGap);
   }
+  async game(event){
+    const card=el('section','game-card');card.dataset.event=event.type;card.setAttribute('aria-label','Interactive challenge');
+    const copy=event.copy||{},films=event.films||[],body=el('div','game-body'),actions=el('div','game-actions'),skip=el('button','game-skip',t('skip')||'Pular');skip.type='button';card.append(body,actions);this.append(card);
+    await new Promise(resolve=>{
+      let done=false,resultText='';const finish=skipped=>{if(done)return;done=true;body.replaceChildren();if(!skipped){body.append(filmStrip(films));if(event.tmdb?.sample_sufficient)body.append(el('p','game-source',`${event.external_source_label||'média do público no TMDb'}: ${event.tmdb.vote_average} (${event.tmdb.vote_count} votos)`));body.append(el('p','game-result',resultText||copy.reveal_copy||'Escolhas registradas. Agora as notas voltam para a sala.'));}else body.append(el('p','game-result','Desafio pulado.'));actions.replaceChildren();resolve();};
+      skip.addEventListener('click',()=>finish(true));actions.append(skip);
+      if(event.type==='game_defend_take'){body.append(el('p','game-question',copy.question||'Vai sustentar essa escolha?'));for(const choice of copy.choices||[{id:'keep',label:'Mantenho.'},{id:'reconsider',label:'Talvez eu tenha pesado.'}]){const button=el('button','game-choice',choice.label);button.type='button';button.addEventListener('click',()=>{copy.reveal_copy=choice.reaction||'';finish(false);});actions.prepend(button);}return;}
+      if(event.type==='game_blind_rank'){const used=new Set(),ranks=[];let index=0;const show=()=>{body.replaceChildren();body.append(el('p','game-instructions',copy.instructions||'Coloque em 1º, 2º ou 3º sem saber o próximo.'));body.append(filmStrip([{...films[index],rating:null}]));const select=el('select','game-select');select.setAttribute('aria-label','Posição');select.append(new Option('Escolha a posição',''));for(let rank=1;rank<=3;rank++)if(!used.has(rank))select.append(new Option(`${rank}º`,String(rank)));const next=el('button','game-confirm',index===2?'Confirmar':'Próximo');next.type='button';next.disabled=true;select.addEventListener('change',()=>next.disabled=!select.value);next.addEventListener('click',()=>{const rank=Number(select.value);used.add(rank);ranks.push(rank);if(++index===films.length){const outcome=blindRankOutcome(ranks,films);resultText=copy.result_reactions?.[outcome]||copy.reveal_copy||outcome;finish(false);}else show();});body.append(select,next);select.focus();};show();return;}
+      body.append(filmStrip(films.map(film=>({...film,rating:null}))));const roles=copy.roles?.length===3?copy.roles:[{id:'high',rank:3,label:'Fica'},{id:'mid',rank:2,label:'Defende'},{id:'low',rank:1,label:'Sai'}],selects=[];for(const film of films){const select=el('select','game-select');select.setAttribute('aria-label',`Papel para ${film.title}`);select.append(new Option('Escolha um papel',''));for(const role of roles)select.append(new Option(role.label,role.id));selects.push(select);body.append(select);}const confirm=el('button','game-confirm',copy.confirm_label||'Confirmar');confirm.type='button';confirm.disabled=true;const check=()=>confirm.disabled=selects.some(select=>!select.value)||new Set(selects.map(select=>select.value)).size!==selects.length;selects.forEach(select=>select.addEventListener('change',check));confirm.addEventListener('click',()=>{const assignments=selects.map((select,index)=>{const role=roles.find(row=>row.id===select.value);return {film_key:films[index].film_key,role_id:role.id,rank:role.rank};});resultText=forcedTriageReaction(assignments,copy.reaction_hints||[]);finish(false);});actions.prepend(confirm);
+    });
+    await this.clock.wait(timing.medium);this.reveal();
+  }
   async play(script) {
     this.protectedTexts=[];
     const collect=value=>{if(!value||typeof value!=='object')return;for(const [key,item] of Object.entries(value)){if(['title','name','handle','display_name','tag','related_tag','phrase','archetype_text'].includes(key)&&typeof item==='string')this.protectedTexts.push(item);else if(typeof item==='object')collect(item);}};
@@ -56,7 +69,8 @@ export class ChatPlayer {
       await this.clock.wait(0);if(!types.has(event.type))continue;
       if(event.type==='typing'){const dots=typingDots();this.append(dots);await this.clock.wait(timing[event.duration]??timing.short);dots.remove();}
       else if(event.type==='pause')await this.clock.wait(timing[event.duration]??timing.short);
-      else if(['message','strike','correction'].includes(event.type))await this.speak(event);
+      else if(['message','strike','correction','game_intro','game_result'].includes(event.type))await this.speak(event);
+      else if(['game_forced_triage','game_blind_rank','game_defend_take'].includes(event.type))await this.game(event);
       else {const node=renderAttachment(event);if(node){this.append(node);await this.clock.wait(readWait(node.textContent,event.type==='review_quote'?timing.review:timing.evidence));}}
       if(event.cue==='top_four_reveal'&&favorites.length){
         const group=el('section','favorites');group.append(el('p','eyebrow',t('favorites')),filmStrip(favorites,true));this.append(group);await this.clock.wait(timing.medium);

@@ -1,5 +1,7 @@
 const mean=values=>values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;
 const intersection=(left,right)=>[...left].filter(key=>right.has(key));
+const difference=(left,right)=>[...left].filter(key=>!right.has(key));
+const normalizedName=value=>String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase().replace(/[→←↔×•·]/g,' ').replace(/[^\p{L}\p{N}]+/gu,' ').trim().replace(/\s+/g,' ');
 
 export function buildRelationships(profile){
   const byFilm=new Map(profile.films.map(film=>[film.film_key,film]));
@@ -11,13 +13,14 @@ export function buildRelationships(profile){
   const relations=[];
   for(const [tag,tagSet] of tagFilms)for(const [name,listSet] of listFilms){
     const shared=intersection(tagSet,listSet),ratings=shared.map(key=>byFilm.get(key)?.rating).filter(Number.isFinite);
-    if(shared.length)relations.push({type:'tag_list',tag,list:name,intersection:shared.length,list_count:listSet.size,tag_count:tagSet.size,coverage:listSet.size?shared.length/listSet.size:0,films:shared.slice(0,6),average_rating:mean(ratings)});
+    const watched=Math.max(1,profile.films.length),expected=(tagSet.size*listSet.size)/watched,redundancy=normalizedName(tag)===normalizedName(name)?1:0;
+    if(shared.length)relations.push({type:'tag_list',tag,list:name,intersection:shared.length,list_count:listSet.size,tag_count:tagSet.size,coverage:listSet.size?shared.length/listSet.size:0,coverage_list:listSet.size?shared.length/listSet.size:0,coverage_tag:tagSet.size?shared.length/tagSet.size:0,expected_overlap:expected,lift:expected?shared.length/expected:null,redundancy,surprise:expected?Math.max(0,(shared.length-expected)/Math.max(1,expected)):0,sample_size:shared.length,films:shared.slice(0,6),shared_films:shared.slice(0,6),list_without_tag:difference(listSet,tagSet).slice(0,8),tag_without_list:difference(tagSet,listSet).slice(0,8),symmetric_difference:[...difference(listSet,tagSet),...difference(tagSet,listSet)].slice(0,12),average_rating:mean(ratings)});
   }
   for(const [left,leftSet] of tagFilms)for(const [right,rightSet] of tagFilms)if(left<right){
-    const shared=intersection(leftSet,rightSet);if(shared.length)relations.push({type:'tag_tag',left,right,intersection:shared.length,jaccard:shared.length/(leftSet.size+rightSet.size-shared.length),films:shared.slice(0,6)});
+    const shared=intersection(leftSet,rightSet),expected=(leftSet.size*rightSet.size)/Math.max(1,profile.films.length);if(shared.length)relations.push({type:'tag_tag',left,right,intersection:shared.length,left_count:leftSet.size,right_count:rightSet.size,jaccard:shared.length/(leftSet.size+rightSet.size-shared.length),expected_overlap:expected,lift:expected?shared.length/expected:null,left_without_right:difference(leftSet,rightSet).slice(0,8),right_without_left:difference(rightSet,leftSet).slice(0,8),films:shared.slice(0,6)});
   }
   for(const [left,leftSet] of listFilms)for(const [right,rightSet] of listFilms)if(left<right){
-    const shared=intersection(leftSet,rightSet);if(shared.length)relations.push({type:'list_list',left,right,intersection:shared.length,jaccard:shared.length/(leftSet.size+rightSet.size-shared.length),films:shared.slice(0,6)});
+    const shared=intersection(leftSet,rightSet),expected=(leftSet.size*rightSet.size)/Math.max(1,profile.films.length);if(shared.length)relations.push({type:'list_list',left,right,intersection:shared.length,left_count:leftSet.size,right_count:rightSet.size,jaccard:shared.length/(leftSet.size+rightSet.size-shared.length),expected_overlap:expected,lift:expected?shared.length/expected:null,left_without_right:difference(leftSet,rightSet).slice(0,8),right_without_left:difference(rightSet,leftSet).slice(0,8),films:shared.slice(0,6)});
   }
   const globalRatings=profile.films.map(f=>f.rating).filter(Number.isFinite),globalMean=mean(globalRatings);
   for(const [tag,films] of tagFilms){
@@ -35,5 +38,5 @@ export function buildRelationships(profile){
   for(const [tag,films] of tagFilms){const rows=reviewLengths.filter(r=>films.has(r.film_key));if(rows.length)relations.push({type:'review_style_tag',tag,count:rows.length,average_length:mean(rows.map(r=>r.length))});}
   const favoriteKeys=new Set((profile.topFour||[]).map(f=>f.film_key));if(favoriteKeys.size)relations.push({type:'favorite_behavior',films:[...favoriteKeys].map(key=>{const film=byFilm.get(key);return {film_key:key,rating:film?.rating??null,sessions:(profile.sessions||[]).filter(s=>s.film_key===key).length,reviews:(profile.reviews||[]).filter(r=>r.film_key===key).length};})});
   relations.push({type:'watchlist_watched',watchlist_count:profile.watchlist||0,watched_count:profile.films.length});
-  return {tag_count:tagFilms.size,list_count:listFilms.size,relations:relations.sort((a,b)=>(b.coverage||b.jaccard||0)-(a.coverage||a.jaccard||0)),tag_films:[...tagFilms].map(([tag,films])=>({tag,count:films.size,films:[...films]}))};
+  return {tag_count:tagFilms.size,list_count:listFilms.size,relations:relations.sort((a,b)=>(b.surprise||b.coverage||b.jaccard||0)-(a.surprise||a.coverage||a.jaccard||0)),tag_films:[...tagFilms].map(([tag,films])=>({tag,count:films.size,films:[...films],tag_prevalence:profile.films.length?films.size/profile.films.length:0,ubiquity:profile.films.length?films.size/profile.films.length:0}))};
 }

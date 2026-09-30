@@ -631,10 +631,11 @@ A geração possui três resultados:
 - `failed`: a API devolve `ai_unavailable`; o chat não começa e a análise local só
   aparece quando o visitante escolhe essa ação.
 
-`presentation-v2` acrescenta `generation_meta`, `profile_review` e
+`presentation-v2` acrescenta `generation_meta`, `profile_review`, jogos contextuais e
 `explainability`. O frontend ainda aceita `presentation-v1`. Ao final da sessão,
-dois cards 1080×1350 são compostos em Canvas: arquétipo com Top 4 e Profile Review.
-A foto opcional fica somente no navegador. Pôsteres passam por `/api/image-proxy`,
+dois cards são compostos em Canvas — Post 1080×1350 ou Story 1080×1920 — para
+arquétipo com Top 4 e Profile Review. Os cards não usam foto, avatar ou iniciais.
+Pôsteres passam por `/api/image-proxy`,
 restrito a `image.tmdb.org`, para manter o Canvas exportável. Quando arquivos são
 aceitos pela Web Share API eles são compartilhados diretamente; nos demais
 navegadores o fallback baixa PNG.
@@ -642,10 +643,15 @@ navegadores o fallback baixa PNG.
 ### Medições determinísticas do pipeline web
 
 A etapa determinística nunca escreve piada: ela produz um POOL de candidatos (até
-48) que o Analyst lê. O Script Engine decide quantos sobrevivem — 10 para contas
-pequenas, 14 com 35+ reviews e 16 com 100+ reviews, teto de 18 — equilibrando
-famílias de beat para que review, tag, lista, rewatch e medida temporal não sejam
-engolidos por uma só.
+48) que o Analyst lê. O Script Engine aplica qualidade mínima e usa máximos de 8,
+10 ou 12 beats conforme a riqueza da conta. O máximo nunca é uma quota: sete bons
+achados continuam sendo sete.
+
+O Analyst pode propor até quatro desafios e o Script Engine seleciona no máximo
+dois, de tipos diferentes. `forced_triage` e `blind_rank` funcionam sem TMDb.
+`defend_your_take` é removido silenciosamente quando o TMDb falha ou quando sua
+amostra tem menos de 100 votos. Qualquer média externa é identificada como
+"média do público no TMDb", nunca como média do Letterboxd.
 
 - `letterboxd.js`: perfil normalizado, inventário do ZIP (`files_in_zip`,
   `files_processed`, arquivos conhecidos e desconhecidos), filmes, ratings, diary,
