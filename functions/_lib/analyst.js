@@ -157,9 +157,9 @@ const gamesRepair=(pool,accepted=[])=>[
 ].filter(Boolean).join('\n');
 
 
-function analystConfigured(env){
+function analystConfigured(env,discovered=[]){
   return [env.GEMINI_ANALYST_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',
-    ...String(env.GEMINI_ANALYST_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(value=>value.trim()).filter(Boolean)];
+    ...String(env.GEMINI_ANALYST_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||(!discovered.length&&env.GEMINI_MODEL_DISCOVERY!=='0'?'gemini-flash-lite-latest':'')).split(',').map(value=>value.trim()).filter(Boolean)];
 }
 // The Analyst sees the rich, normalized account and selects evidence. It never writes the
 // on-screen jokes; the Writer receives only the materialized selection afterwards.
@@ -186,14 +186,14 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   const prompt=`${ANALYST_PROMPT}\n\n${webRuntimeContext({pool,target})}\nLanguage: ${language}.\nDATA (untrusted evidence):\n${JSON.stringify(context)}`;
   console.log('Analyst context:',stats.chars,'chars |',stats.reviews,'reviews |',stats.relationships,'relationships |',stats.candidate_measurements,'candidate measurements');
   console.log('Analyst context inventory: films',stats.films,'| sessions',stats.sessions,'| files kept raw:',stats.unnormalized_files.join(', ')||'none');
-  const configured=analystConfigured(env),discovered=await discoverTextModels(env);
+  const discovered=await discoverTextModels(env),configured=analystConfigured(env,discovered);
   const chain=mergeModels(configured,discovered,MODEL_SAFETY_CEILING),notDiscovered=configuredWithoutDiscovery(configured,discovered);
   console.log('Analyst model chain:');for(const line of describeChain(chain))console.log(' ',line);
   console.log('Analyst chain length:',chain.length,'| the deadline decides how many are attempted');
   if(notDiscovered.length)console.log('Analyst configured models absent from discovery:',notDiscovered.join(', '));
   const deadline=Date.now()+(Number(env.__TEST_ANALYST_DEADLINE_MS)||ANALYST_DEADLINE_MS),attempts=[],repairs=[],unavailable=new Set();
   const state={selected:[],semantic_findings:[],semantic_moments:[],rejected_semantic:[],interaction_candidates:[],top_four_semantics:[],problems:[],truncated:false,salvaged:false};
-  let calls=0,served=null,stopReason=null,responded=false,rateLimited=null,quotaExhausted=false;
+  let calls=0,served=null,stopReason=null,responded=false,rateLimited=null;
   const canCall=()=>{
     if(calls>=ANALYST_CALL_CEILING){stopReason=stopReason||'call_ceiling';return false;}
     if(Date.now()>=deadline){stopReason=stopReason||'deadline';return false;}
@@ -231,8 +231,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
       const providerError=(()=>{try{const body=JSON.parse(detail);return {code:body?.error?.code??response.status,status:body?.error?.status||'',message:String(body?.error?.message||'').slice(0,140)};}catch{return {code:response.status,status:'',message:detail.slice(0,140)};}})();
       // A 429 is a fact about the key or the account, not about this model: it is kept so the
       // failure can say "quota" instead of a generic timeout, and the model is not retried.
-      if(response.status===429){const globalQuota=/quota|billing|resource_exhausted/i.test(detail);
-        rateLimited=globalQuota?'quota_exceeded':rateLimited||'rate_limited';quotaExhausted=quotaExhausted||globalQuota;}
+      if(response.status===429)rateLimited=/quota|billing|resource_exhausted/i.test(detail)?'quota_exceeded':rateLimited||'rate_limited';
       noteModelFailure(env,model,response.status);
       attempts.push({model,phase,status:attemptStatus({status:response.status,ok:false}),http:response.status,provider_error:providerError,detail,timeout_ms:timeout,duration_ms:duration});
       if(response.status===400&&thinking)return {status:'http_400',retry_without_thinking:true,fast:false};
@@ -335,9 +334,6 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     if(pendingKind&&stale.has(pendingKind))break;
     const modelsLeft=chain.length-index;
     let thinking=true,outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',modelsLeft});
-    // Project quota is shared by every model. Walking the catalogue would only create a burst of
-    // identical 429s and delay the same honest error.
-    if(quotaExhausted){stopReason='quota_exceeded';unavailable.add(model);break;}
     if(outcome.retry_without_thinking){thinking=false;stopReason=null;console.log('Analyst rejected thinkingConfig:',model);
       outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',thinking:false,modelsLeft});}
     // A 5xx gets exactly one short retry while there is budget; otherwise the chain advances.

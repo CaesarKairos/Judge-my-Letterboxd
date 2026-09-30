@@ -85,7 +85,7 @@ test('Pages Function reports missing secret and malformed exports clearly',async
 });
 
 test('a 429 in one request never poisons a later request in the same worker isolate',async t=>{
- const sharedEnv={GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true};let calls=0;
+ const sharedEnv={GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_FALLBACK_MODELS:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true};let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;if(calls===1)return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});
   const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
   return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe de ${moment.id}.`]}))})}]}}]});});

@@ -233,7 +233,7 @@ test('an exhausted quota is named instead of hidden behind a timeout',async t=>{
   const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'})});
   assert.equal(result.status,'failed');
   assert.equal(result.reason,'quota_exceeded');
-  assert.deepEqual(result.unavailable_models,['primary']);
+  assert.deepEqual(result.unavailable_models,['primary','backup-a']);
 });
 
 });
