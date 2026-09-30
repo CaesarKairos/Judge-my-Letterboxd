@@ -1,6 +1,9 @@
 const DURATIONS = new Set(['short', 'medium', 'long']);
 import {discoverTextModels,mergeModels} from './models.js';
 import {WRITER_PROMPT} from './generated-prompts.js';
+// The Writer and the Analyst recover a cut reply with the same implementation.
+import {salvageJson} from './json-repair.js';
+export {salvageJson};
 // Rhythm keys stay optional in the schema: the model almost always sends them, but one
 // missing enum must never invalidate a good answer. Requiring five extra fields per
 // reaction used to push the reply over the output limit and truncate the JSON.
@@ -27,36 +30,6 @@ const schema = {type: 'OBJECT', required: ['greeting', 'archetype_phrase', 'prof
     evidence_pause: rhythmField(), after_evidence: rhythmField(), typing: rhythmField(), between_lines: rhythmField(), after_reaction: rhythmField()
   }}}
 }};
-
-// A reply cut by the output limit is still evidence: close the open string, drop the
-// dangling separator and close every open object, then keep whatever still parses.
-export function salvageJson(text) {
-  const raw = String(text || '').replace(/^[^{[]*/, '').replace(/```[\s\S]*$/, '').trim();
-  try { return JSON.parse(raw); } catch {}
-  const stack = []; let open = false, escaped = false, out = '', done = false;
-  for (const char of raw) {
-    if (open) {
-      if (escaped) { escaped = false; out += char; continue; }
-      if (char === '\\') { escaped = true; out += char; continue; }
-      if (char === '"') { open = false; out += char; continue; }
-      out += char === '\n' || char === '\r' ? ' ' : char; continue;
-    }
-    if (char === '"') { open = true; out += char; continue; }
-    if (char === '{' || char === '[') { stack.push(char); out += char; continue; }
-    if (char === '}' || char === ']') { stack.pop(); out += char; if (!stack.length) { done = true; break; } continue; }
-    out += char;
-  }
-  // The object closed before the end: whatever follows is prose, not data.
-  if (done) { try { return JSON.parse(out); } catch { return null; } }
-  if (escaped) out = out.slice(0, -1);
-  if (open) out += '"';
-  out = out.replace(/[,:\s]+$/, '');
-  // Inside an object a trailing bare string is a key without a value, so it is dropped;
-  // inside an array it is a value cut by the limit, so it is kept.
-  if (stack.at(-1) === '{') out = out.replace(/,\s*"[^"]*"\s*$/, '');
-  while (stack.length) out = `${out.replace(/[\s,]+$/, '')}${stack.pop() === '{' ? '}' : ']'}`;
-  try { return JSON.parse(out); } catch { return null; }
-}
 
 export function archetypePhraseValid(value,titles=[]){
   const phrase=clean(value),normalized=phrase.toLocaleLowerCase(),fragments=phrase.split(',').map(clean).filter(Boolean);if(!phrase||phrase.length>110)return false;

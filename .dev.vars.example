@@ -2,4 +2,11 @@
 GEMINI_API_KEY="sua-chave-gemini"
 TMDB_API_KEY="sua-chave-tmdb-opcional"
 GEMINI_MODEL="gemini-flash-latest"
-GEMINI_FALLBACK_MODELS="gemini-2.5-flash,gemini-2.5-flash-lite"
+# Deixe vazio: o pipeline descobre os modelos disponíveis em models.list e monta a cadeia
+# (Analyst até 6, Writer até 8, Lite por último). Fixar nomes aqui envelhece: um modelo
+# aposentado gera 404 e some da cadeia. Preencha apenas para forçar reservas específicas.
+GEMINI_FALLBACK_MODELS=""
+# GEMINI_MODEL_DISCOVERY=0 desativa a descoberta e usa só o que estiver configurado.
+# GEMINI_ANALYST_MODEL / GEMINI_ANALYST_FALLBACK_MODELS e GEMINI_WRITER_MODEL /
+# GEMINI_WRITER_FALLBACK_MODELS separam as cadeias por etapa quando necessário.
+# JUDGE_DEBUG_CONFIG=1 habilita /api/config (diagnóstico local, nunca expõe a chave).

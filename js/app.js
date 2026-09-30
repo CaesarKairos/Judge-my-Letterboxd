@@ -36,6 +36,17 @@ function show(id){
   document.querySelector(`#${id} h2`)?.focus({preventScroll:true});
 }
 function stop(){sequence++;request?.abort();clearInterval(loadingTimer);player?.stop();player=null;}
+// Local and development runs may show which stage failed; production keeps the screen clean.
+// Only curated fields travel here: never a key, a prompt or a stack trace.
+const developerMode=()=>['localhost','127.0.0.1',''].includes(location.hostname)||new URLSearchParams(location.search).get('debug')==='1';
+function renderTechnicalDetails(reason,payload){
+  const box=$('#error-details'),copy=$('#error-details-copy');
+  const stage=payload?.stage||({analystUnavailable:'analyst',writerUnavailable:'writer',aiUnavailable:'writer'}[reason]||''),
+    attempts=Array.isArray(payload?.attempts)?payload.attempts:[],visible=developerMode()&&Boolean(payload)&&Boolean(stage||attempts.length);
+  box.hidden=!visible;copy.textContent='';
+  if(!visible)return;
+  copy.textContent=[`${t('technicalStage')}: ${stage||'unknown'}`,`${t('technicalAttempts')}: ${attempts.length}`,`${t('technicalReason')}: ${payload.reason||payload.error||reason}`].join(' · ');
+}
 async function renderEnding(){
   const review=$('#profile-review'),profile=script.profile_review;
   const fullReview=profile?.full||profile?.text;review.replaceChildren();review.hidden=!fullReview;
@@ -61,7 +72,7 @@ async function start(demo=false){
   $('#loading-dots').replaceChildren(typingDots());const copy=t('loading').split('|');let i=0;$('#loading-copy').textContent=copy[0];
   loadingTimer=setInterval(()=>{$('#loading-copy').textContent=copy[Math.min(++i,copy.length-1)];},2400);
   try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);await play();}
-  catch(error){if(current!==sequence)return;clearInterval(loadingTimer);lastFailure=error.payload||null;$('#local-analysis').hidden=!(error.message==='aiUnavailable'&&lastFailure?.deterministic_analysis_available);$('#error-message').textContent=t(error.message);if($('#error-message').textContent===error.message)$('#error-message').textContent=t('invalid');show('error');}
+  catch(error){if(current!==sequence)return;clearInterval(loadingTimer);lastFailure=error.payload||null;$('#local-analysis').hidden=!(['aiUnavailable','analystUnavailable','writerUnavailable'].includes(error.message)&&lastFailure?.deterministic_analysis_available);const copy=t(error.message);$('#error-message').textContent=copy===error.message?t('invalid'):copy;renderTechnicalDetails(error.message,lastFailure);show('error');}
 }
 $('#upload-form').addEventListener('submit',e=>{e.preventDefault();start();});
 for(const id of ['demo','error-demo'])$('#'+id).addEventListener('click',()=>start(true));
