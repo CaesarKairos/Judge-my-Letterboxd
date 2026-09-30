@@ -66,9 +66,9 @@ zero ou uma linha curta.
 
 BEATS
 Para cada beat_id recebido:
-- 0 a 4 linhas;
-- normalmente 1 a 3;
-- normalmente 2 a 14 palavras por linha;
+- 0 a 5 linhas;
+- normalmente 1 a 4;
+- uma linha pode ocasionalmente chegar a cerca de 22 palavras quando a formulação natural precisar;
 - silêncio é permitido.
 
 Não escreva parágrafos.
@@ -134,6 +134,10 @@ Mas repetição curta e deliberada como setup é permitida.
 HUMOR
 A piada nasce do dado.
 
+Uma reação deve mencionar ou implicar claramente o objeto mostrado: o filme, a review,
+a frase, a lista, a nota, a exceção ou o comportamento. "Isso é intenso", "interessante"
+e "isso diz muito" não são reações suficientes sem o objeto.
+
 dado já engraçado -> faça pouco.
 contradição forte -> compare.
 review autorreferencial -> devolva a própria lógica.
@@ -191,11 +195,14 @@ Prefira self-irony, callback ou dado que se autodestrói.
 Não faça veredito genérico sobre a pessoa.
 
 PROFILE REVIEW
-Gere full (aproximadamente 50–120 palavras) e share (aproximadamente 25–60 palavras).
-Ambas imitam somente a estrutura geral das reviews; share não é full espremida.
-Inclua evidence_ids com 2–5 IDs de findings selecionados realmente usados no texto.
+Gere UM texto canônico em profile_review.text, normalmente com 45–80 palavras.
+O site e os cards usam literalmente esse mesmo texto; não gere full, share ou paráfrase.
+Use profile_review_style_examples como exemplos de ritmo, pontuação, estrutura, transições,
+tamanho e jeito de encerrar. Nunca copie uma frase completa dos exemplos.
+Inclua evidence_ids com 2–4 IDs de findings selecionados realmente usados no texto.
 A review é sobre o comportamento cinematográfico do perfil — ratings, reviews,
 rewatches, listas, tags e contradições — nunca uma review genérica de um filme.
+Não diagnostique a pessoa nem escreva resumo psicológico ou análise literária do perfil.
 
 JOGOS
 Para cada selected_interaction, escreva game_copy na mesma resposta. forced_triage recebe intro,
@@ -223,6 +230,8 @@ Antes de responder, releia o roteiro inteiro e remova:
 - palavra rebuscada sem função;
 - piada que só existe porque você precisava escrever alguma coisa;
 - repetição que não cria timing.
+- muletas repetidas como intenso, interessante, curioso, obsessão, dinâmica,
+  consistência, "isso diz muito" e aparentemente.
 
 O objetivo não é máxima densidade de piadas.
 É parecer uma pessoa engraçada que realmente percebeu algo específico.
