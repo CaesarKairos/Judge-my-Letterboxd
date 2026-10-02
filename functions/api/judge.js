@@ -5,7 +5,7 @@ import {runFreeform} from '../_pipelines/freeform.js';
 
 const MAX_UPLOAD=50*1024*1024;
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-const statusFor=error=>({missing_gemini_key:503,gemini_rate_limit:429,invalid_zip:400,unsupported_zip:400,zip_too_many_files:400,zip_too_large:413,empty_export:422,not_letterboxd_export:422,gemini_invalid_response:502,analyst_unavailable:503,writer_unavailable:503,AI_FAILED:503,freeform_context_too_large:413}[error.message]||error.status||500);
+const statusFor=error=>['quota_exceeded','rate_limited'].includes(error.details?.reason)?429:({missing_gemini_key:503,gemini_rate_limit:429,invalid_zip:400,unsupported_zip:400,zip_too_many_files:400,zip_too_large:413,empty_export:422,not_letterboxd_export:422,gemini_invalid_response:502,analyst_unavailable:503,writer_unavailable:503,AI_FAILED:503,freeform_context_too_large:413}[error.message]||error.status||500);
 const textEntries=entries=>{const decoder=new TextDecoder('utf-8',{fatal:false}),result=new Map();for(const [name,bytes] of entries)if(name.toLowerCase().endsWith('.csv'))result.set(name,decoder.decode(bytes));return result;};
 
 export async function onRequestPost({request,env}){

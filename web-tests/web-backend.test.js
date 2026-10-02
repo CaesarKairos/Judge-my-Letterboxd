@@ -90,7 +90,7 @@ test('a 429 in one request never poisons a later request in the same worker isol
   const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
   return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe de ${moment.id}.`]}))})}]}}]});});
  const request=()=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return new Request('https://example.com/api/judge',{method:'POST',body:form});};
- const first=await onRequestPost({request:request(),env:sharedEnv});assert.equal(first.status,503);assert.equal((await first.json()).reason,'quota_exceeded');
+ const first=await onRequestPost({request:request(),env:sharedEnv});assert.equal(first.status,429);assert.equal((await first.json()).reason,'quota_exceeded');
  const second=await onRequestPost({request:request(),env:sharedEnv});assert.equal(second.status,200);assert.equal((await second.json()).version,'presentation-v2');assert.equal(calls,3);
 });
 

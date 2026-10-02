@@ -209,6 +209,16 @@ test('AI_FAILED carries the stage, reason and validation summary without private
   );
 });
 
+test('Freeform tries a rate-limited model only once and preserves the provider reason',async t=>{
+  const {ai}=await buildFreeformArchive(fixtureEntries());let calls=0;
+  t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota.'}},{status:429});});
+  await assert.rejects(
+    freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),
+    error=>error.message==='AI_FAILED'&&error.details.reason==='quota_exceeded'
+  );
+  assert.equal(calls,1);
+});
+
 test('broken opening and zero games are core incomplete, never publishable partial',async()=>{
   const {ai}=await buildFreeformArchive(richEntries()),bad={opening:{greeting:['Olha só quem resolveu aparecer.','critic.'],archetype_lead:'Você deve ser o...',archetype_phrase:'critic direto da bio com uma análise enorme sobre o perfil inteiro',username_line:'critic.',taste_bit:{lead:'x',strike:'y',correction:'z',tail:'w'},judge_claim:'Vou julgar.',transition:['Vamos.']},moments:fullResponse().moments,games:[],profile_review:fullResponse().profile_review};
   const result=validateFreeformResponse(bad,ai);
