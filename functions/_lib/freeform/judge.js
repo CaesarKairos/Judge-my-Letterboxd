@@ -29,12 +29,13 @@ async function evaluateReply({raw,archive,registry,env,model,deadline,attempts,r
   let payload=start.payload;
   const conversions=[...start.conversions];
   let validated=validateFreeformResponse(payload,archive,{registry});
+  const coreBeforeRepair=validated.validation_summary;
   const repairs=[];
   // Repair whenever the answer is not already perfect: optional damage is preserved while core
   // omissions (opening, games, Profile Review) are repaired before publication.
   if(validated.generation_status!=='complete'){
     const before=validated;
-    const outcome=await repairFreeform({payload,validated,registry,env,model,deadline,maxCalls:repairBudget});
+    const outcome=await repairFreeform({payload,validated,registry,env,model,deadline,maxCalls:repairBudget,revalidate:next=>validateFreeformResponse(next,archive,{registry})});
     for(const row of outcome.attempts)attempts.push(row);
     if(outcome.repairs.length){
       const again=normalizeFreeformReferences(outcome.payload,registry);
@@ -44,7 +45,7 @@ async function evaluateReply({raw,archive,registry,env,model,deadline,attempts,r
       if(score(after)>=score(before)){payload=again.payload;validated=after;repairs.push(...outcome.repairs);}
     }
   }
-  return {...validated,_conversions:conversions,_repairs:repairs};
+  return {...validated,_conversions:conversions,_repairs:repairs,_core_before_repair:coreBeforeRepair,_core_after_repair:validated.validation_summary};
 }
 const score=value=>(value.core_contract_complete?1_000_000:0)+(value.opening_valid?100_000:0)+Math.min(value.games?.length||0,value.required_games||0)*10_000+(value.profile_review_valid?5_000:0)+(value.moments?.length||0)*50-(value.moments_invalid?.length||0)*20-(value.attachments_invalid?.length||0);
 

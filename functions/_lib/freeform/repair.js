@@ -79,10 +79,14 @@ CURRENT_PROFILE_REVIEW:\n${JSON.stringify(review)}`;
 
 // Runs the smallest set of repairs that can rescue the session and patches the payload in place.
 // A repair is best-effort: a failed call never removes what was already valid.
-export async function repairFreeform({payload, validated, registry, env, model, deadline, maxCalls = 6}) {
+export async function repairFreeform({payload, validated, registry, env, model, deadline, maxCalls = 6, revalidate}) {
   const compact = registry.compact(), repairs = [], attempts = [];
   let calls = 0;
   const canCall = () => calls < maxCalls && Date.now() < deadline;
+  const validateAgain = () => {
+    if (typeof revalidate === 'function') validated = revalidate(payload);
+    return validated;
+  };
   const apply = (result, key, index) => {
     if (!result.parsed || typeof result.parsed !== 'object') return false;
     const fixed = result.parsed[key] && typeof result.parsed[key] === 'object' ? result.parsed[key] : result.parsed;
@@ -94,12 +98,25 @@ export async function repairFreeform({payload, validated, registry, env, model, 
   if (!validated.opening_valid && canCall()) {
     const result = await repairOpening({env, model, deadline, compact, opening: payload.opening||{}, problems: validated.opening_problems});
     calls++; attempts.push({model, repair: 'opening', status: result.status, finishReason: result.finishReason});
-    if (apply(result, 'opening')) repairs.push('opening');
+    if (apply(result, 'opening')) { repairs.push('opening'); validateAgain(); }
   }
+  // Games are a core component. Start from the validator's accepted games only: invalid raw games
+  // do not occupy slots and therefore cannot push valid replacements out of the required slice.
   if(validated.games_missing>0&&canCall()){
-    const result=await repairMissingGames({env,model,deadline,compact,current:payload.games||[],missing:validated.games_missing});calls++;attempts.push({model,repair:'missing_games',status:result.status,finishReason:result.finishReason});
-    if(Array.isArray(result.parsed?.games)){payload.games=[...(payload.games||[]),...result.parsed.games].slice(0,validated.required_games);repairs.push('missing_games');}
+    const validGames=[...validated.games],missing=validated.required_games-validGames.length;
+    const result=await repairMissingGames({env,model,deadline,compact,current:validGames,missing});calls++;attempts.push({model,repair:'missing_games',status:result.status,finishReason:result.finishReason});
+    if(Array.isArray(result.parsed?.games)){
+      payload.games=[...validGames,...result.parsed.games].slice(0,validated.required_games);
+      repairs.push('missing_games');validateAgain();
+    }
   }
+  // Profile Review is core too, so it must run before any optional moment/attachment cleanup.
+  if (validated.profile_review?.text && !validated.profile_review_valid && canCall()) {
+    const result = validated.profile_review_ai_like?await repairProfileReviewText({env,model,deadline,compact,review:payload.profile_review}):await repairProfileReview({env, model, deadline, compact, text: validated.profile_review.text});
+    calls++; attempts.push({model, repair: 'profile_review', status: result.status, finishReason: result.finishReason});
+    if(result.parsed?.profile_review)payload.profile_review={...(payload.profile_review||{}),...result.parsed.profile_review};else if(Array.isArray(result.parsed?.evidence_refs))payload.profile_review={...(payload.profile_review||{}),evidence_refs:result.parsed.evidence_refs};if(result.parsed){repairs.push('profile_review');validateAgain();}
+  }
+  // Everything below is optional cleanup and may use only the budget left after A/B/C.
   const targets = new Map();
   const target = index => { if (!targets.has(index)) targets.set(index, new Set()); return targets.get(index); };
   for (const item of validated.moments_invalid) target(item.index).add('moment');
@@ -110,16 +127,5 @@ export async function repairFreeform({payload, validated, registry, env, model, 
     calls++; attempts.push({model, repair: `moment_${index}`, status: result.status, finishReason: result.finishReason});
     if (apply(result, 'moments', index)) repairs.push(`moment_${index}`);
   }
-  for (const item of validated.games_invalid) {
-    if (!canCall()) break;
-    const result = await repairGame({env, model, deadline, compact, index: item.index, game: payload.games[item.index]});
-    calls++; attempts.push({model, repair: `game_${item.index}`, status: result.status, finishReason: result.finishReason});
-    if (apply(result, 'games', item.index)) repairs.push(`game_${item.index}`);
-  }
-  if (validated.profile_review?.text && !validated.profile_review_valid && canCall()) {
-    const result = validated.profile_review_ai_like?await repairProfileReviewText({env,model,deadline,compact,review:payload.profile_review}):await repairProfileReview({env, model, deadline, compact, text: validated.profile_review.text});
-    calls++; attempts.push({model, repair: 'profile_review', status: result.status, finishReason: result.finishReason});
-    if(result.parsed?.profile_review)payload.profile_review={...(payload.profile_review||{}),...result.parsed.profile_review};else if(Array.isArray(result.parsed?.evidence_refs))payload.profile_review={...(payload.profile_review||{}),evidence_refs:result.parsed.evidence_refs};if(result.parsed)repairs.push('profile_review');
-  }
-  return {payload, repairs, attempts, calls};
+  return {payload, validated, repairs, attempts, calls};
 }

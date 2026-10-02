@@ -98,9 +98,14 @@ if(failure){
   console.log('Freeform status: FAILED');
 }else{
   console.log(' model',result._model,'| finishReason',result._finish_reason,'| response chars',result._response_chars);
+  const before=result._core_before_repair||{},after=result._core_after_repair||result.validation_summary||{};
+  console.log(' CORE BEFORE REPAIR: opening',before.opening?'valid':'invalid','| problems',JSON.stringify(before.opening_problems||[]),'| games required',before.required_games??'-','| games valid',before.games_valid??'-','| games missing',before.games_missing??'-','| profile review',before.profile_review?'valid':'invalid','| ai-like',before.profile_review_ai_like?'yes':'no');
+  console.log(' CORE REPAIRS:',JSON.stringify((result._repairs||[]).filter(name=>name==='opening'||name==='missing_games'||name==='profile_review')));
+  console.log(' CORE AFTER REPAIR: opening',after.opening?'valid':'invalid','| problems',JSON.stringify(after.opening_problems||[]),'| games required',after.required_games??'-','| games valid',after.games_valid??'-','| games missing',after.games_missing??'-','| profile review',after.profile_review?'valid':'invalid','| ai-like',after.profile_review_ai_like?'yes':'no');
   console.log(' CORE CONTRACT | opening',result.opening_valid?'valid':'invalid','| username_before_archetype',result.validation_summary.username_before_archetype?'yes':'no','| archetype',result.opening?.archetype_phrase||'-','| games required',result.required_games,'| games valid',result.games.length,'| profile review',result.profile_review_valid?'valid':'invalid');
   console.log(' EDITORIAL | moments',result.moments.length);
   console.log(' FINAL DECISION |',result.generation_status);
+  console.log(' FINAL: core_contract_complete',result.core_contract_complete,'| generation_status',result.generation_status,'| model',result._model);
   console.log(' refs converted',(result._conversions||[]).length,'| repairs',JSON.stringify(result._repairs||[]));
   console.log('Freeform status:',String(result.generation_status||'complete').toUpperCase());
 }
