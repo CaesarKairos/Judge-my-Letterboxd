@@ -82,7 +82,9 @@ for(const row of traffic.filter(item=>item.kind==='editorial')){
   if(!row.summary){console.log(' HTTP',row.status,row.body_error||row.finishReason||'-');continue;}
   const s=row.summary;
   if(s.parse){console.log(' HTTP',row.status,s.parse);continue;}
-  console.log(' opening',s.opening,'| usable',s.opening_usable,'| moments',`${s.moments_valid}/${s.moments_received}`,'| attachments',`${s.attachments_valid}/${s.attachments_valid+s.attachments_invalid}`,'| games',`${s.games_valid}/${s.games_received}`,'| profile_review',s.profile_review,'| status',row.status_guess);
+  console.log(' CORE CONTRACT | opening',s.opening?'valid':'invalid','| username_before_archetype',s.username_before_archetype?'yes':'no','| games required',s.required_games,'| games valid',s.games_valid,'| games missing',s.games_missing,'| profile review',s.profile_review?'valid':'invalid');
+  console.log(' EDITORIAL | moments',`${s.moments_valid}/${s.moments_received}`,'| attachments',`${s.attachments_valid}/${s.attachments_valid+s.attachments_invalid}`);
+  console.log(' FINAL DECISION |',row.status_guess);
   for(const reason of row.reasons||[])console.log('   -',reason);
   if(row.conversions)console.log('   entity refs converted:',row.conversions);
 }
@@ -96,7 +98,9 @@ if(failure){
   console.log('Freeform status: FAILED');
 }else{
   console.log(' model',result._model,'| finishReason',result._finish_reason,'| response chars',result._response_chars);
-  console.log(' moments',result.moments.length,'/',result.moments_received,'| games',result.games.length,'/',result.games_received,'| profile_review',result.profile_review_valid?'OK':'MISSING');
+  console.log(' CORE CONTRACT | opening',result.opening_valid?'valid':'invalid','| username_before_archetype',result.validation_summary.username_before_archetype?'yes':'no','| archetype',result.opening?.archetype_phrase||'-','| games required',result.required_games,'| games valid',result.games.length,'| profile review',result.profile_review_valid?'valid':'invalid');
+  console.log(' EDITORIAL | moments',result.moments.length);
+  console.log(' FINAL DECISION |',result.generation_status);
   console.log(' refs converted',(result._conversions||[]).length,'| repairs',JSON.stringify(result._repairs||[]));
   console.log('Freeform status:',String(result.generation_status||'complete').toUpperCase());
 }

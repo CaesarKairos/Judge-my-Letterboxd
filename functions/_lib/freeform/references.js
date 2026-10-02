@@ -99,6 +99,10 @@ export function buildFreeformRegistry(archive = {}) {
     list_ids: Object.values(lists).slice(0, listLimit).map(list => `${list.list_id} | ${clean(list.name)}`),
     tag_ids: Object.values(tags).slice(0, tagLimit).map(tag => `${tag.tag_id} | ${clean(tag.name)}`),
     session_refs: Object.values(sessions).slice(0, sessionLimit).map(session => `${session.session_ref} | ${clean(session.title)} | ${clean(session.date)}`),
+    game_films: Object.values(films).filter(film=>Number.isFinite(Number(film.current_rating))).slice(0,filmLimit).map(film=>{
+      const review_count=Object.values(reviews).filter(review=>review.film_id===film.film_id).length,rewatch_count=Object.values(sessions).filter(session=>session.film_id===film.film_id&&session.rewatch).length,list_count=Object.values(lists).filter(list=>(list.film_ids||[]).includes(film.film_id)).length;
+      return `${film.film_id} | ${clean(film.title)} | ${clean(film.year)} | rating ${film.current_rating} | reviews ${review_count} | rewatches ${rewatch_count} | lists ${list_count}`;
+    }),
     tables: (archive.files || []).map(file => clean(file.ref)).filter(ref => ref.endsWith('#table') || ref.endsWith('#text'))
   });
 
