@@ -2,6 +2,6 @@
   "name":"judge-my-letterboxd-web",
   "private":true,
   "type":"module",
-  "scripts":{"test:web":"node --test web-tests/*.test.js","test:browser":"node web-tests/smoke.mjs && node web-tests/games-smoke.mjs","test:edge":"node web-tests/edge-cases.mjs"},
+  "scripts":{"sync":"python scripts/sync-mode.py && python scripts/sync-prompts.py","check:sync":"python scripts/sync-mode.py --check && python scripts/sync-prompts.py --check","build":"npm run sync && python scripts/prepare-web.py","test:web":"npm run check:sync && node --test web-tests/*.test.js","test:browser":"node web-tests/smoke.mjs && node web-tests/games-smoke.mjs","test:edge":"node web-tests/edge-cases.mjs"},
   "devDependencies":{"@playwright/test":"^1.58.0"}
 }

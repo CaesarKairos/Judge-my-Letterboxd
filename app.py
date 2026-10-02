@@ -20,6 +20,7 @@ from src.generation import generate, save
 from src.parser import read_export
 from src.raw_export import read_raw_export
 from src.run_storage import archive_run, no_judgment
+from src.freeform import run_freeform
 
 ROOT = Path(__file__).resolve().parent
 console = Console(markup=False, highlight=False)
@@ -117,6 +118,22 @@ def run() -> int:
     path = choose_zip(Path.cwd())
     if path is None:
         return 0
+    # Old embedded/test harnesses may not stage the new root file; their established behavior is
+    # Curated. A real project checkout always has judge-mode.json and it remains authoritative.
+    mode_path = ROOT / 'judge-mode.json'
+    mode_data = json.loads(mode_path.read_text(encoding='utf-8')) if mode_path.exists() else {'pipeline': 'curated'}
+    mode = mode_data.get('pipeline')
+    if mode not in {'curated', 'freeform'}:
+        raise ValueError('judge-mode.json: pipeline deve ser curated ou freeform')
+    console.print(f'Modo: {mode.upper()}', style='bold cyan')
+    if mode == 'freeform':
+        presentation, failed = run_freeform(path, ROOT, config, os.getenv('GEMINI_API_KEY', '').strip(),
+                                             args.dry_run, lambda text: console.print(Text(text)))
+        if args.show_events:
+            console.print(Text(json.dumps(presentation, ensure_ascii=False, indent=2)))
+        console.print(f"Chamadas de IA: {presentation['ai'].get('calls', 0)}", style='green')
+        console.print('Arquivos de auditoria salvos em output/freeform/', style='green')
+        return 1 if failed else 0
     output = ROOT / 'output'
     output.mkdir(exist_ok=True)
     previous = archive_run(output, GENERATED)

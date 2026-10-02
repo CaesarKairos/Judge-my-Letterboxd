@@ -796,3 +796,19 @@ interrompe o laço e todos falhando o Analyst vira FAILED sem chamar o Writer.
 `npm run test:browser` cobre layouts, demo, harness, os dois cartões compartilháveis
 (PNG 1080×1350, download como fallback), o card da Profile Review, "Entenda como este
 output foi gerado" e o fluxo `AI_FAILED` com a análise local como escolha.
+## Modos de pipeline
+
+`judge-mode.json` na raiz é a única fonte de verdade do modo ativo:
+
+- `"curated"`: pipeline existente — análise determinística, Analyst, Script Engine e Writer.
+- `"freeform"`: ZIP completo → JSON lossless/AI → uma chamada editorial Freeform Judge → Presentation.
+
+Depois de trocar o valor, execute `python scripts/sync-mode.py` antes de rodar ou fazer deploy.
+`python scripts/sync-mode.py --check` falha quando o artefato Cloudflare está divergente; `npm run build`
+faz a sincronização automaticamente. Não configure o modo no dashboard da Cloudflare.
+
+O modo Freeform é experimental e envia ao Gemini todo o conteúdo textual e celular do export, incluindo
+reviews, comments, likes, listas, arquivos em `deleted/` e `orphaned/` e arquivos desconhecidos. Binários
+grandes permanecem no JSON lossless local, enquanto o modelo recebe seus metadados, tamanho e SHA-256.
+Se o contexto não couber, a execução falha explicitamente com `freeform_context_too_large`; não há corte
+silencioso nem fallback automático para Curated.
