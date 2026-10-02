@@ -96,6 +96,7 @@ export function buildFreeformRegistry(archive = {}) {
   const compact = ({filmLimit = 250, reviewLimit = 120, listLimit = 60, tagLimit = 120, sessionLimit = 60} = {}) => ({
     film_ids: Object.values(films).slice(0, filmLimit).map(film => `${film.film_id} | ${clean(film.title)} | ${clean(film.year)}`),
     review_refs: Object.values(reviews).slice(0, reviewLimit).map(review => `${review.review_ref} | ${clean(review.title)}`),
+    review_samples: Object.values(reviews).filter(review=>clean(review.text)).slice(0,5).map(review=>`${review.review_ref} | ${clean(review.text).slice(0,400)}`),
     list_ids: Object.values(lists).slice(0, listLimit).map(list => `${list.list_id} | ${clean(list.name)}`),
     tag_ids: Object.values(tags).slice(0, tagLimit).map(tag => `${tag.tag_id} | ${clean(tag.name)}`),
     session_refs: Object.values(sessions).slice(0, sessionLimit).map(session => `${session.session_ref} | ${clean(session.title)} | ${clean(session.date)}`),

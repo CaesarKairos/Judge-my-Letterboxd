@@ -89,10 +89,13 @@ for(const row of traffic.filter(item=>item.kind==='editorial')){
   if(row.conversions)console.log('   entity refs converted:',row.conversions);
 }
 console.log('--- Repair calls ---');
-for(const row of traffic.filter(item=>item.kind==='repair'))console.log(' ',row.status||'-','| finishReason',row.finishReason||'-','|',row.ms+'ms');
+for(const row of traffic.filter(item=>item.kind==='repair'))console.log(' ',row.status||'-','| finishReason',row.finishReason||'-','| provider',row.provider_error?.status||row.provider_error?.code||'ok','|',row.ms+'ms');
 console.log('--- Freeform result ---');
 if(failure){
   console.log(' AI_FAILED | stage',failure.details?.stage||'-','| reason',failure.details?.reason||failure.message);
+  console.log(' best core:',JSON.stringify(failure.details?.best_core||null));
+  console.log(' repair attempts:',JSON.stringify(failure.details?.repair_attempts||[]));
+  console.log(' FINAL CORE RESCUE:',JSON.stringify(failure.details?.core_rescue||{executed:false}));
   if(failure.details?.validation_summary)console.log(' best validation:',JSON.stringify(failure.details.validation_summary));
   for(const row of failure.details?.attempts||[])console.log('  ',JSON.stringify(row));
   console.log('Freeform status: FAILED');
@@ -106,6 +109,7 @@ if(failure){
   console.log(' EDITORIAL | moments',result.moments.length);
   console.log(' FINAL DECISION |',result.generation_status);
   console.log(' FINAL: core_contract_complete',result.core_contract_complete,'| generation_status',result.generation_status,'| model',result._model);
+  console.log(' FINAL CORE RESCUE:',JSON.stringify(result._core_rescue||{executed:false,result:'not_needed'}));
   console.log(' refs converted',(result._conversions||[]).length,'| repairs',JSON.stringify(result._repairs||[]));
   console.log('Freeform status:',String(result.generation_status||'complete').toUpperCase());
 }
