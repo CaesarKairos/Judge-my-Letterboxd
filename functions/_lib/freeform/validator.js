@@ -2,7 +2,7 @@ import {buildFreeformRegistry} from './references.js';
 const clean=value=>String(value||'').replace(/\s+/g,' ').trim(),refsOf=value=>(Array.isArray(value)?value:[]).map(clean).filter(Boolean),linesOf=value=>(Array.isArray(value)?value:[]).map(clean).filter(Boolean).slice(0,5);
 const ATTACHMENTS=new Set(['film','film_pair','film_group','review_quote','tag','list','phrase','stat','rewatch','relationship','custom']);
 const profileData=archive=>{const file=(archive.files||[]).find(row=>row.path.toLowerCase()==='profile.csv'),headers=file?.headers||[],row=file?.rows?.[1]?.cells||[];return Object.fromEntries(headers.map((key,index)=>[key,row[index]??'']));};
-export function validArchetype(value,{handle='',titles=[]}={}){const phrase=clean(value),words=phrase.split(/\s+/).filter(Boolean),lower=phrase.toLowerCase();return Boolean(phrase)&&words.length>=3&&words.length<=12&&phrase.length<=100&&(!handle||!lower.includes(clean(handle).toLowerCase()))&&titles.filter(title=>title&&lower.includes(clean(title).toLowerCase())).length<3&&!/^(cinéfilo|cinefilo|amante de cinema|film bro)$/i.test(phrase);}
+export function validArchetype(value,{handle='',titles=[]}={}){const phrase=clean(value),words=phrase.split(/\s+/).filter(Boolean),lower=phrase.toLowerCase(),scene=/\b(com|de|do|da|dos|das|em|no|na|num|numa|que|e|entre|contra|por|para|sem|virando|fugindo|matando|procurando|and|with|in|on|who)\b/i.test(phrase);return Boolean(phrase)&&words.length>=3&&words.length<=12&&phrase.length<=100&&scene&&(!handle||!lower.includes(clean(handle).toLowerCase()))&&titles.filter(title=>title&&lower.includes(clean(title).toLowerCase())).length<3&&!/^(cinéfilo|cinefilo|amante de cinema|film bro|pessoa que gosta de filmes)$/i.test(phrase)&&!/\b(bio|perfil|letterboxd|usuário|usuario)\b/i.test(phrase);}
 // Turns one attachment into the shape the materializer accepts, or null when it cannot be shown.
 // An unresolved attachment is dropped on its own; it never takes the moment down with it.
 function materialAttachment(row,registry){
@@ -32,7 +32,7 @@ export function validateFreeformResponse(payload,archive,{registry=buildFreeform
     moments.push({id:clean(row.id)||`moment_${String(index+1).padStart(2,'0')}`,type:clean(row.type)||'custom',label:clean(row.label).slice(0,60),attachments:kept,lines:linesOf(row.lines),evidence_refs:evidence.refs});
     if(evidence.invalid.length){refs_dropped+=evidence.invalid.length;invalid.push({kind:'moment',index,id:clean(row.id)||null,reason:'dropped_invalid_refs',invalid_refs:evidence.invalid});}
   }
-  const games=[],games_invalid=[];
+  const ratedFilms=Object.values(registry.films).filter(film=>Number.isFinite(Number(film.current_rating))),required_games=ratedFilms.length>=6?2:0,games=[],games_invalid=[];
   let games_received=0;
   for(const [index,row] of (Array.isArray(payload?.games)?payload.games:[]).slice(0,2).entries()){
     games_received++;
@@ -48,10 +48,12 @@ export function validateFreeformResponse(payload,archive,{registry=buildFreeform
     if(evidence.invalid.length){refs_dropped+=evidence.invalid.length;invalid.push({kind:'game',index,id:clean(row.id)||null,reason:'dropped_invalid_refs',invalid_refs:evidence.invalid});}
   }
   if(games.length===2&&clean(games[0].copy.intro).toLowerCase()===clean(games[1].copy.intro).toLowerCase()){invalid.push({kind:'game',index:1,id:games[1].id,reason:'duplicate_intro'});games.pop();}
-  const info=profileData(archive),favoriteRefs=String(info['Favorite Films']||'').split(',').map(v=>v.trim().replace(/\/$/,'')).filter(Boolean).slice(0,4),favoriteTitles=favoriteRefs.map(ref=>Object.values(registry.films).find(film=>String(film.uri||'').replace(/\/$/,'')===ref)?.title||ref),opening=payload?.opening&&typeof payload.opening==='object'?payload.opening:{},taste=opening.taste_bit||{},opening_problems=[];
+  const info=profileData(archive),handle=clean(info.Username),favoriteRefs=String(info['Favorite Films']||'').split(',').map(v=>v.trim().replace(/\/$/,'')).filter(Boolean).slice(0,4),favoriteTitles=favoriteRefs.map(ref=>Object.values(registry.films).find(film=>String(film.uri||'').replace(/\/$/,'')===ref)?.title||ref),opening=payload?.opening&&typeof payload.opening==='object'?payload.opening:{},taste=opening.taste_bit||{},opening_problems=[];
   if(favoriteRefs.length===4){
     if(!(opening.greeting||[]).length)opening_problems.push('greeting');
+    if(handle&&(opening.greeting||[]).some(line=>clean(line).toLowerCase().includes(handle.toLowerCase())))opening_problems.push('username_before_archetype');
     if(!clean(opening.archetype_lead))opening_problems.push('archetype_lead');
+    if(handle&&clean(opening.archetype_lead).toLowerCase().includes(handle.toLowerCase()))opening_problems.push('username_before_archetype');
     if(!validArchetype(opening.archetype_phrase,{handle:info.Username,titles:favoriteTitles}))opening_problems.push('archetype_phrase');
     if(!(opening.archetype_after||[]).length)opening_problems.push('archetype_after');
     if(!clean(opening.username_line))opening_problems.push('username_line');
@@ -64,11 +66,12 @@ export function validateFreeformResponse(payload,archive,{registry=buildFreeform
   // "Usable" is the failure bar, never "perfectly valid": an opening with at least the arrival beat
   // still renders a real session, so a 95%-good answer is not discarded over one missing field.
   const opening_usable=Boolean((opening.greeting||[]).length||clean(opening.archetype_lead)||clean(opening.username_line));
-  const prText=clean(payload?.profile_review?.text),prRefs=registry.normalizeRefs(refsOf(payload?.profile_review?.evidence_refs)),profile_review=prText?{text:prText,evidence_refs:prRefs.refs}:null,profile_review_valid=Boolean(prText)&&prRefs.refs.length>0;
+  const prText=clean(payload?.profile_review?.text),prRefs=registry.normalizeRefs(refsOf(payload?.profile_review?.evidence_refs)),profile_review_ai_like=/^(é incrível como|este perfil|esse perfil|este usuário|esse usuário|fica claro|uma mistura de)\b/i.test(prText),profile_review=prText?{text:prText,evidence_refs:prRefs.refs}:null,profile_review_valid=Boolean(prText)&&prRefs.refs.length>0&&!profile_review_ai_like;
   if(payload?.profile_review&&!profile_review_valid)invalid.push({kind:'profile_review',reason:prText?'invalid_refs':'missing_text'});
-  const core_usable=opening_usable&&moments.length>0&&profile_review_valid;
-  const clean_run=opening_valid&&!moments_invalid.length&&!attachments_invalid.length&&!games_invalid.length&&!refs_dropped&&moments_received===moments.length;
-  const generation_status=!core_usable?'invalid':(clean_run?'complete':'partial');
-  const validation_summary={opening:opening_valid,opening_usable,opening_problems,moments_received,moments_valid:moments.length,moments_invalid:moments_invalid.length,attachments_valid,attachments_invalid:attachments_invalid.length,refs_dropped,games_received,games_valid:games.length,games_invalid:games_invalid.length,profile_review:profile_review_valid};
-  return {opening,opening_valid,opening_usable,opening_problems,moments,moments_received,moments_invalid,games,games_received,games_invalid,profile_review,profile_review_valid,closer:linesOf(payload?.closer),ending:{title:clean(payload?.ending?.title).split(/\s+/).slice(0,6).join(' ')},attachments_valid,attachments_invalid,invalid,validation_summary,generation_status,valid:generation_status!=='invalid'};
+  const games_missing=Math.max(0,required_games-games.length);if(games_missing)invalid.push({kind:'games',reason:`missing_games:${games_missing}`});
+  const core_contract_complete=opening_valid&&moments.length>0&&profile_review_valid&&games_missing===0;
+  const clean_run=core_contract_complete&&!moments_invalid.length&&!attachments_invalid.length&&!games_invalid.length&&!refs_dropped&&moments_received===moments.length;
+  const generation_status=!core_contract_complete?'core_incomplete':(clean_run?'complete':'optional_partial'),partial_visible=core_contract_complete&&moments_invalid.length>0;
+  const validation_summary={core_contract_complete,opening:opening_valid,opening_usable,username_before_archetype:opening_problems.includes('username_before_archetype'),opening_problems,required_games,games_received,games_valid:games.length,games_missing,profile_review:profile_review_valid,profile_review_ai_like,moments_received,moments_valid:moments.length,moments_invalid:moments_invalid.length,attachments_valid,attachments_invalid:attachments_invalid.length,refs_dropped,partial_visible};
+  return {opening,opening_valid,opening_usable,opening_problems,moments,moments_received,moments_invalid,games,games_received,games_invalid,required_games,games_missing,profile_review,profile_review_valid,profile_review_ai_like,core_contract_complete,partial_visible,closer:linesOf(payload?.closer),ending:{title:clean(payload?.ending?.title).split(/\s+/).slice(0,6).join(' ')},attachments_valid,attachments_invalid,invalid,validation_summary,generation_status,valid:core_contract_complete};
 }

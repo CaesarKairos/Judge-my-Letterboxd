@@ -8,11 +8,15 @@ const REPAIR_INSTRUCTION = 'You repair JSON references and structure only. The d
 
 async function callRepair({env, model, deadline, request}) {
   try {
+    const send=async thinking=>{
     const body = {system_instruction: {parts: [{text: REPAIR_INSTRUCTION}]}, contents: [{role: 'user', parts: [{text: request}]}],
-      generationConfig: {temperature: 0, maxOutputTokens: 4096, responseMimeType: 'application/json'}};
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      generationConfig: {temperature: 0, maxOutputTokens: 8192, responseMimeType: 'application/json',...(thinking?{thinkingConfig:{thinkingBudget:0}}:{})}};
+    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       {method: 'POST', headers: {'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY}, body: JSON.stringify(body), signal: AbortSignal.timeout(Math.max(1000, deadline - Date.now()))});
-    const result = await response.json(), raw = responseText(result);
+    };
+    let response=await send(true),result=await response.json();
+    if(response.status===400&&/thinking|invalid argument/i.test(JSON.stringify(result))){response=await send(false);result=await response.json();}
+    const raw = responseText(result);
     return {status: response.status, finishReason: result?.candidates?.[0]?.finishReason||null, raw, parsed: salvageJson(raw)};
   } catch (error) { return {status: 0, error: error.name, parsed: null}; }
 }
@@ -30,9 +34,18 @@ export function repairOpening({env, model, deadline, compact, opening, problems}
   const request = `Fix ONLY the "opening" object of this Letterboxd judging session. Return {"opening":{...}} as strict JSON.
 Keep every field that is already valid; correct or complete only: ${problems.join(', ')}.
 archetype_phrase is a 3-12 word grammatical micro-scene built from the Top 4 titles; never the username, never a list of titles, never a paragraph.
+OPENING INSPIRATION — DO NOT COPY: the Judge sees four films, invents one impossibly specific nickname/micro-scene, notices it went too far, then falls back to the username. Do not write profile analysis here. This is a nickname beat. It must complete "You must be the..." naturally.
 ${registryBlock(compact)}
 CURRENT_OPENING:\n${JSON.stringify(opening)}`;
   return callRepair({env, model, deadline, request});
+}
+export function repairMissingGames({env,model,deadline,compact,current=[],missing=0}){
+  const request=`Create ONLY ${missing} missing game(s) for an existing Letterboxd session. Return {"games":[...]} as strict JSON. Preserve the existing games by not repeating them.
+Use distinct types when possible. Every game needs id, type, three distinct film_ids, evidence_refs and copy.intro. forced_triage also needs three roles and specific reaction_hints.
+For forced_triage/blind_rank prefer historically close ratings (ideally spread <= 0.5; <= 1.0 only with other affinity signals). This is mechanical completion, not a new editorial analysis.
+RATED FILMS (id | title | year | current rating | signals):\n${compact.game_films.join('\n')}
+EXISTING_GAMES:\n${JSON.stringify(current)}`;
+  return callRepair({env,model,deadline,request});
 }
 
 export function repairMoment({env, model, deadline, compact, index, moment}) {
@@ -57,6 +70,12 @@ ${registryBlock(compact)}
 PROFILE_REVIEW_TEXT:\n${text}`;
   return callRepair({env, model, deadline, request});
 }
+export function repairProfileReviewText({env,model,deadline,compact,review}){
+  const request=`Rewrite ONLY profile_review.text so it sounds like a real Letterboxd review written in the account's voice, not an outside analysis. Do not start with "É incrível como", "Este perfil", "Esse usuário", "Fica claro" or "Uma mistura de". Preserve its grounded subject and evidence_refs. Return {"profile_review":{"text":"...","evidence_refs":[...]}} as strict JSON.
+${registryBlock(compact)}
+CURRENT_PROFILE_REVIEW:\n${JSON.stringify(review)}`;
+  return callRepair({env,model,deadline,request});
+}
 
 // Runs the smallest set of repairs that can rescue the session and patches the payload in place.
 // A repair is best-effort: a failed call never removes what was already valid.
@@ -77,6 +96,10 @@ export async function repairFreeform({payload, validated, registry, env, model, 
     calls++; attempts.push({model, repair: 'opening', status: result.status, finishReason: result.finishReason});
     if (apply(result, 'opening')) repairs.push('opening');
   }
+  if(validated.games_missing>0&&canCall()){
+    const result=await repairMissingGames({env,model,deadline,compact,current:payload.games||[],missing:validated.games_missing});calls++;attempts.push({model,repair:'missing_games',status:result.status,finishReason:result.finishReason});
+    if(Array.isArray(result.parsed?.games)){payload.games=[...(payload.games||[]),...result.parsed.games].slice(0,validated.required_games);repairs.push('missing_games');}
+  }
   const targets = new Map();
   const target = index => { if (!targets.has(index)) targets.set(index, new Set()); return targets.get(index); };
   for (const item of validated.moments_invalid) target(item.index).add('moment');
@@ -94,9 +117,9 @@ export async function repairFreeform({payload, validated, registry, env, model, 
     if (apply(result, 'games', item.index)) repairs.push(`game_${item.index}`);
   }
   if (validated.profile_review?.text && !validated.profile_review_valid && canCall()) {
-    const result = await repairProfileReview({env, model, deadline, compact, text: validated.profile_review.text});
+    const result = validated.profile_review_ai_like?await repairProfileReviewText({env,model,deadline,compact,review:payload.profile_review}):await repairProfileReview({env, model, deadline, compact, text: validated.profile_review.text});
     calls++; attempts.push({model, repair: 'profile_review', status: result.status, finishReason: result.finishReason});
-    if (Array.isArray(result.parsed?.evidence_refs)) { payload.profile_review = {...(payload.profile_review||{}), evidence_refs: result.parsed.evidence_refs}; repairs.push('profile_review'); }
+    if(result.parsed?.profile_review)payload.profile_review={...(payload.profile_review||{}),...result.parsed.profile_review};else if(Array.isArray(result.parsed?.evidence_refs))payload.profile_review={...(payload.profile_review||{}),evidence_refs:result.parsed.evidence_refs};if(result.parsed)repairs.push('profile_review');
   }
   return {payload, repairs, attempts, calls};
 }
