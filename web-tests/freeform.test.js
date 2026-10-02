@@ -239,6 +239,29 @@ test('one missing game is completed without replacing the valid first game',asyn
   const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});assert.deepEqual(result.games.map(game=>game.id),['g1','g2']);
 });
 
+test('two invalid games are discarded before valid repaired games fill both slots',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),invalid=[{id:'bad1',type:'blind_rank',film_ids:['ghost'],copy:{intro:'x'}},{id:'bad2',type:'unknown',film_ids:[],copy:{intro:'y'}}],payload={...fullResponse(),games:invalid};
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Create ONLY 2 missing game'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({games:twoGames()})}]}}]});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});
+  assert.deepEqual(result.games.map(game=>game.id),['g1','g2']);assert.equal(result.core_contract_complete,true);assert.notEqual(result.generation_status,'core_incomplete');
+});
+
+test('one valid and one invalid game preserves only the valid game and replaces the invalid slot',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),valid=twoGames()[0],payload={...fullResponse(),games:[valid,{id:'bad',type:'blind_rank',film_ids:['ghost'],copy:{intro:'x'}}]};
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Create ONLY 1 missing game'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({games:[twoGames()[1]]})}]}}]});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});
+  assert.deepEqual(result.games.map(game=>game.id),['g1','g2']);assert.equal(result.core_contract_complete,true);
+});
+
+test('Profile Review repair runs before optional broken attachments exhaust repair budget',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:2']}};
+  payload.moments=Array.from({length:5},(_,index)=>({id:`m${index}`,type:'film',evidence_refs:['reviews.csv#row:2'],attachments:[{type:'film',film_id:'film:ghost|1900'}],lines:['Ok.']}));
+  const order=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Rewrite ONLY profile_review.text')){order.push('profile_review');return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({profile_review:{text:'Escolhas que defendem o melodrama sem pedir desculpas.',evidence_refs:['reviews.csv#row:2']}})}]}}]});}if(prompt.includes('Fix ONLY the moment')){order.push('moment');return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'{}'}]}}]});}return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});
+  assert.equal(order[0],'profile_review');assert.equal(result.profile_review_valid,true);assert.equal(result.core_contract_complete,true);assert.ok(result.attachments_invalid.length>0);
+});
+
 test('optional attachment loss publishes quietly when core is complete',async()=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames()};payload.moments[0].attachments.push({type:'film',film_id:'film:ghost|1900'});const result=validateFreeformResponse(payload,ai);
   assert.equal(result.generation_status,'optional_partial');assert.equal(result.core_contract_complete,true);assert.equal(result.partial_visible,false);const script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}});assert.equal(script.render.ai_generation,'complete');assert.equal(script.opening.top_four_archetype.valid,true);
