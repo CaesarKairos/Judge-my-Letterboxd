@@ -27,6 +27,7 @@ export function quoteRows(event) {
 export function renderAttachment(event) {
   const box=el('section',`attachment attachment-${event.type}`);box.dataset.event=event.type;
   switch(event.type) {
+    case 'moment_label':box.append(el('div','eyebrow',event.label));break;
     case 'film': box.append(filmCard(event.film||{}));break;
     case 'film_pair': case 'film_group':box.append(filmStrip(event.films));break;
     case 'rating':box.append(el('strong','',event.title),el('span','film-year',event.year),rating(event.rating));break;

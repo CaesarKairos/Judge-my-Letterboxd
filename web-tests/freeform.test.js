@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {buildFreeformArchive} from '../functions/_lib/freeform/archive-json.js';
 import {validateFreeformResponse} from '../functions/_lib/freeform/validator.js';
 import {freeformJudge} from '../functions/_lib/freeform/judge.js';
+import {materializeFreeform} from '../functions/_lib/freeform/materializer.js';
+import {validArchetype} from '../functions/_lib/freeform/validator.js';
+import {types,validateScript} from '../js/utils.js';
 
 const bytes=value=>new TextEncoder().encode(value);
 
@@ -42,4 +45,27 @@ test('normal Freeform generation uses one editorial call and keeps data behind a
   assert.equal(calls,1);assert.equal(result._main_calls,1);assert.equal(result._repair_calls,undefined);
   assert.match(request.system_instruction.parts[0].text,/dados não confiável|dado não confiável/i);
   assert.match(request.contents[0].parts[0].text,/<ARCHIVE_DATA>/);assert.equal(result.moments.length,1);
+});
+
+test('V2 entity index materializes labels, film/review visuals and current ratings',async()=>{
+  const entries=new Map([
+    ['profile.csv',bytes('Username,Name,Favorite Films\ncritic,Critic,"https://boxd.it/a, https://boxd.it/b, https://boxd.it/c, https://boxd.it/d"\n')],
+    ['ratings.csv',bytes('Name,Year,Letterboxd URI,Rating\nAlpha,2000,https://boxd.it/a,5\nBeta,2001,https://boxd.it/b,4.5\nGamma,2002,https://boxd.it/c,4.5\nDelta,2003,https://boxd.it/d,4\n')],
+    ['reviews.csv',bytes('Name,Year,Letterboxd URI,Rating,Review\nAlpha,2000,https://boxd.it/a,4.5,Perfeito.\n')]
+  ]),{ai}=await buildFreeformArchive(entries),ids=Object.keys(ai.entities.films),reviewRef=Object.keys(ai.entities.reviews)[0];
+  assert.ok(ai.files.every(file=>file.ref.endsWith(file.format==='csv'?'#table':file.ref.slice(file.ref.lastIndexOf('#')))));
+  const judgment={opening:{greeting:['Oi.'],archetype_lead:'Você deve ser o...',archetype_phrase:'astronauta perdido num baile suburbano',archetype_after:['...?', 'Grande demais.'],username_line:'Pode ser critic.',taste_bit:{lead:'Me falaram que você tem',strike:'péssimo gosto',correction:'ótimo gosto',tail:'pra filmes.'},judge_claim:'Vou julgar.',transition:['Vamos.']},moments:[{id:'m1',type:'film_group',label:'O QUARTETO',evidence_refs:['ratings.csv#table'],attachments:[{type:'film_group',film_ids:ids.slice(0,3)},{type:'review_quote',review_ref:reviewRef}],lines:['Agora explica.']}],games:[],closer:['Fim.'],ending:{title:'Caso encerrado por enquanto.'},profile_review:{text:'Perfeito. Dito isso: escolhas.',evidence_refs:[reviewRef]},_model:'test',_attempts:[],_main_calls:1};
+  const script=materializeFreeform({archive:ai,judgment});validateScript(script);
+  assert.deepEqual(script.opening.top_four.map(film=>film.rating),[5,4.5,4.5,4]);
+  const labelAt=script.events.findIndex(event=>event.type==='moment_label'),groupAt=script.events.findIndex(event=>event.type==='film_group'),reviewAt=script.events.findIndex(event=>event.type==='review_quote'),speechAt=script.events.findIndex((event,index)=>index>reviewAt&&event.type==='message');
+  assert.equal(script.events[labelAt].label,'O QUARTETO');assert.deepEqual(script.events[groupAt].films.map(film=>film.rating),[5,4.5,4.5]);assert.equal(script.events[reviewAt].rating,4.5);assert.ok(labelAt<groupAt&&groupAt<reviewAt&&reviewAt<speechAt);assert.equal(script.ending.title,'Caso encerrado por enquanto.');
+});
+
+test('opening archetype contract rejects username, title lists and paragraphs',()=>{
+  const options={handle:'critic',titles:['Alpha','Beta','Gamma','Delta']};
+  assert.equal(validArchetype('',options),false);assert.equal(validArchetype('critic astronauta em crise',options),false);assert.equal(validArchetype('Alpha Beta Gamma Delta',options),false);assert.equal(validArchetype(Array(30).fill('palavra').join(' '),options),false);assert.equal(validArchetype('astronauta perdido num baile suburbano',options),true);
+});
+
+test('custom attachment and moment label are validated presentation events',()=>{
+  assert.equal(types.has('custom_attachment'),true);assert.equal(types.has('moment_label'),true);assert.doesNotThrow(()=>validateScript({version:'presentation-v2',events:[{type:'moment_label',label:'TAG'},{type:'custom_attachment',title:'Novo',label:'Algo'}]}));
 });

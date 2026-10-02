@@ -99,6 +99,8 @@ def run_freeform(path: Path, root: Path, config, api_key: str, dry_run: bool, re
     raw, response = write_final(api_key, request, report)
     (out / 'model-response.json').write_text(json.dumps({'raw': raw, 'metadata': response}, ensure_ascii=False, indent=2), encoding='utf-8')
     result = json.loads(raw)
+    if not isinstance(result.get('moments'), list) or not isinstance(result.get('profile_review'), dict):
+        raise RuntimeError('Resposta Freeform fora do contrato V2; nenhum julgamento foi materializado.')
     refs = {row['ref'] for file in ai['files'] for row in file.get('rows', [])} | {file['ref'] for file in ai['files'] if file.get('ref')}
     moments = [m for m in result.get('moments', []) if m.get('evidence_refs') and set(m['evidence_refs']) <= refs][:20]
     events=[]

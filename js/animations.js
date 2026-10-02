@@ -4,7 +4,7 @@ export const timing = Object.freeze({instant:0, short:520, medium:1100, long:190
 export const readWait = (text, base = timing.evidence) => Math.min(timing.readMax, base + String(text ?? '').replace(/\s+/g, ' ').trim().length * timing.read);
 export class Playback {
   constructor() { this.speed=1; this.paused=false; this.skipped=false; this.stopped=false; this.motion=matchMedia('(prefers-reduced-motion: reduce)'); }
-  get instant() {return this.skipped || this.motion.matches;}
+  get instant() {return this.skipped || this.motion.matches || (typeof document!=='undefined'&&document.hidden);}
   stop(){this.stopped=true;}
   skip(){this.skipped=true;this.paused=false;}
   async wait(ms) {
