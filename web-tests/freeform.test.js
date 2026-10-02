@@ -270,3 +270,44 @@ test('optional attachment loss publishes quietly when core is complete',async()=
 test('AI-like Profile Review opener is core incomplete and requests textual repair',async()=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:2']}};const result=validateFreeformResponse(payload,ai);assert.equal(result.profile_review_ai_like,true);assert.equal(result.core_contract_complete,false);
 });
+
+test('main 200 plus quota-limited core repairs reports quota_exceeded',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.message==='AI_FAILED'&&error.details.reason==='quota_exceeded'&&error.details.repair_attempts.some(row=>row.reason==='quota_exceeded'));
+});
+
+test('main 200 plus unavailable core repairs reports provider_error',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};let mains=0;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'UNAVAILABLE',message:'busy'}},{status:503});if(mains++)throw new TypeError('later network failure');return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.details.reason==='provider_error');
+});
+
+test('missing Profile Review is created by a core repair',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames()};delete payload.profile_review;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Create ONLY the missing profile_review'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({profile_review:{text:'Escolhas precisas, melodrama sem desculpas.',evidence_refs:['reviews.csv#row:2']}})}]}}]});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});assert.equal(result.profile_review_valid,true);assert.ok(result._repairs.includes('profile_review'));
+});
+
+test('a specific archetype without a preposition does not invalidate the core',async()=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),opening:{...fullOpening(),archetype_phrase:'astronauta suburbano dramaticamente perdido'}};
+  assert.equal(validateFreeformResponse(payload,ai).core_contract_complete,true);
+});
+
+test('best incomplete response receives one final core rescue and completes',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),best={...fullResponse(),games:[]};let mains=0,rescues=0;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Repair ONLY the incomplete core')){rescues++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({games:twoGames()})}]}}]});}if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'{}'}]}}]});mains++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(mains===1?best:{opening:{},moments:[],games:[]})}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});assert.equal(rescues,1);assert.equal(result.core_contract_complete,true);assert.equal(result.generation_status,'complete');
+});
+
+test('optional attachment repair never runs while core remains incomplete',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};payload.moments[0].attachments=[{type:'film',film_id:'ghost'}];let momentRepairs=0;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Fix ONLY the moment'))momentRepairs++;if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'UNAVAILABLE'}},{status:503});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}));assert.equal(momentRepairs,0);
+});
+
+test('an irrecoverable core becomes AI_FAILED only after the single final rescue',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),opening:{},games:[]};let rescues=0;
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Repair ONLY the incomplete core'))rescues++;if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'{}'}]}}]});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.message==='AI_FAILED'&&error.details.core_rescue.executed&&error.details.best_core.moments_valid>0);assert.equal(rescues,1);
+});
