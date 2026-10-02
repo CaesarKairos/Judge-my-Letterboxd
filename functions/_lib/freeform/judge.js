@@ -75,7 +75,14 @@ export async function freeformJudge({archive,locale,env}){
         // rejected responseSchema. The second retries in plain JSON mode so the local validator still runs.
         if(response.status===400&&thinking){thinking=false;attempt--;continue;}
         if(useSchema&&schemaRejected(response.status,result)){useSchema=false;record.schema_rejected=true;lastReason='schema_rejected';attempt--;continue;}
-        lastReason=response.status===429?'quota_exceeded':'provider_error';continue;
+        if(response.status===429){
+          const detail=JSON.stringify(result||{});
+          lastReason=/quota|billing|resource_exhausted/i.test(detail)?'quota_exceeded':'rate_limited';
+          // Retrying the same model immediately cannot change an account/model rate limit.
+          // Continue with the next fallback instead of spending all three attempts on one 429.
+          break;
+        }
+        lastReason='provider_error';continue;
       }
       const raw=responseText(result),reply=await evaluateReply({raw,archive,registry,env,model,deadline,attempts,repairBudget:6});
       const decorated=reply?{...reply,_model:model,_response_chars:raw.length,_finish_reason:record.finishReason}:null;
