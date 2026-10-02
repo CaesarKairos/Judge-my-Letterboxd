@@ -73,19 +73,19 @@ test('Pages Function falls back across models and returns Presentation without P
  const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe específico de ${moment.id}.`]}))};
  let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/generativelanguage\.googleapis\.com/);assert.equal(options.headers['x-goog-api-key'],'secret');if(calls<3)return Response.json({error:{message:'busy'}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(writing)}]}}]});});
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',GEMINI_FALLBACK_MODELS:'backup-model',__TEST_SKIP_ANALYST:true}});
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',GEMINI_FALLBACK_MODELS:'backup-model',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'}});
  assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'backup-model');assert.equal(script.render.ai_generation,'complete');assert.equal(script.render.model_quality,'fallback');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
 });
 
 test('Pages Function reports missing secret and malformed exports clearly',async()=>{
  let form=new FormData();form.set('export',new File([storedZip(fixture)],'letterboxd.zip'));
- let result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{}});assert.equal(result.status,503);assert.equal((await result.json()).error,'missing_gemini_key');
+ let result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{__TEST_PIPELINE_MODE:'curated'}});assert.equal(result.status,503);assert.equal((await result.json()).error,'missing_gemini_key');
  form=new FormData();form.set('export',new File([storedZip({'other.csv':'A\nB\n'})],'letterboxd.zip'));
- result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'x'}});assert.equal(result.status,422);
+ result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'x',__TEST_PIPELINE_MODE:'curated'}});assert.equal(result.status,422);
 });
 
 test('a 429 in one request never poisons a later request in the same worker isolate',async t=>{
- const sharedEnv={GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_FALLBACK_MODELS:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true};let calls=0;
+ const sharedEnv={GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_FALLBACK_MODELS:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'};let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;if(calls===1)return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});
   const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
   return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe de ${moment.id}.`]}))})}]}}]});});
@@ -103,7 +103,7 @@ test('Pages Function stops after Analyst failure and never calls Writer',async t
   return Response.json({error:{message:'unavailable'}},{status:503});
  });
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_ANALYST_MODEL:'analyst-only',GEMINI_MODEL_DISCOVERY:'0'}});
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_ANALYST_MODEL:'analyst-only',GEMINI_MODEL_DISCOVERY:'0',__TEST_PIPELINE_MODE:'curated'}});
  const body=await result.json();
  assert.equal(result.status,503);assert.equal(body.error,'analyst_unavailable');assert.equal(body.stage,'analyst');assert.equal(body.generation_meta.analyst.status,'failed');
  assert.equal(body.deterministic_analysis_available,true);assert.equal(writerCalled,false);
@@ -131,7 +131,7 @@ test('judge lines become quote segments and AI durations reach the queue',async(
  assert.deepEqual(script.beats[0].lines.map(line=>line.effect),['none','quote','none','none']);
 });
 
-const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',__TEST_SKIP_ANALYST:true,...extra}});};
+const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated',...extra}});};
 const readExport=async()=>{const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files);return {profile,analysis:analyzeExport(profile,'pt-BR')};};
 
 test('a cut model answer is salvaged and then repaired instead of failing',async t=>{

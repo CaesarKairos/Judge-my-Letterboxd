@@ -52,6 +52,13 @@ export function renderAttachment(event) {
     case 'list':{
       box.append(el('h3','',event.name));if(event.description){const detail=el('details');detail.append(el('summary','',t('more')),el('p','description',event.description));box.append(detail);}box.append(filmStrip(event.films),stats(event.stats));if(event.count!=null)box.append(el('span','',event.count));break;
     }
+    case 'custom_attachment':{
+      if(event.title)box.append(el('div','eyebrow',event.title));
+      if(event.label)box.append(el('p','phrase',event.label));
+      if(Array.isArray(event.values)&&event.values.length)box.append(stats(event.values));
+      if(Array.isArray(event.films)&&event.films.length)box.append(filmStrip(event.films));
+      break;
+    }
     case 'tag_list_relationship':{
       const pair=el('div','relationship-pair');pair.append(el('div','relationship-entity',`TAG\n${event.tag?.name||''}`),el('span','tag-cross','×'),el('div','relationship-entity',`LISTA\n${event.list?.name||''}`));box.append(pair);
       if(event.list?.description)box.append(el('p','description',event.list.description));
