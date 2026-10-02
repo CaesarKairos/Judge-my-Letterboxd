@@ -46,7 +46,10 @@ function renderTechnicalDetails(reason,payload){
     attempts=Array.isArray(payload?.attempts)?payload.attempts:[],visible=developerMode()&&Boolean(payload)&&Boolean(stage||attempts.length);
   box.hidden=!visible;copy.textContent='';
   if(!visible)return;
-  copy.textContent=[`${t('technicalStage')}: ${stage||'unknown'}`,`${t('technicalAttempts')}: ${attempts.length}`,`${t('technicalReason')}: ${payload.reason||payload.error||reason}`].join(' · ');
+  const lines=[`${t('technicalStage')}: ${stage||'unknown'}`,`${t('technicalAttempts')}: ${attempts.length}`,`${t('technicalReason')}: ${payload.reason||payload.error||reason}`];
+  const summary=payload.validation_summary;
+  if(summary&&Number.isFinite(summary.moments_received))lines.push(`${t('technicalMoments')}: ${summary.moments_valid||0}/${summary.moments_received}`);
+  copy.textContent=lines.join(' · ');
 }
 async function renderEnding(){
   $('#ending h2').textContent=script.ending?.title||t('done');

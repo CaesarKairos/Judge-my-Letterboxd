@@ -99,18 +99,23 @@ def run_freeform(path: Path, root: Path, config, api_key: str, dry_run: bool, re
     raw, response = write_final(api_key, request, report)
     (out / 'model-response.json').write_text(json.dumps({'raw': raw, 'metadata': response}, ensure_ascii=False, indent=2), encoding='utf-8')
     result = json.loads(raw)
-    if not isinstance(result.get('moments'), list) or not isinstance(result.get('profile_review'), dict):
-        raise RuntimeError('Resposta Freeform fora do contrato V2; nenhum julgamento foi materializado.')
+    # The web pipeline is authoritative; this local prototype must not be stricter than it. A
+    # response is only unusable when it has neither a moment nor a profile review — never because a
+    # single reference used the wrong namespace.
+    if not isinstance(result.get('moments'), list) and not isinstance(result.get('profile_review'), dict):
+        raise RuntimeError('Resposta Freeform sem moments nem profile review; nada foi materializado.')
     refs = {row['ref'] for file in ai['files'] for row in file.get('rows', [])} | {file['ref'] for file in ai['files'] if file.get('ref')}
-    moments = [m for m in result.get('moments', []) if m.get('evidence_refs') and set(m['evidence_refs']) <= refs][:20]
+    received = result.get('moments', []) if isinstance(result.get('moments'), list) else []
+    moments = [m for m in received if m.get('evidence_refs') and set(m['evidence_refs']) <= refs][:20]
+    generation_status = 'complete' if len(moments) == len(received) else 'partial'
     events=[]
     for moment in moments:
         events.append({'type':'custom_attachment','title':moment.get('title') or moment.get('type','custom'),
                        'label':moment.get('display_text',''),'evidence_refs':moment['evidence_refs']})
         events += [{'type':'message','segments':[{'text':str(line),'effect':'none'}]} for line in moment.get('lines',[])[:5]]
     presentation={'version':'presentation-v2','pipeline_mode':'freeform','events':events,'profile_review':result.get('profile_review'),
-                  'generation_meta':{'pipeline':'freeform','freeform_judge':{'model':response.get('served_model'),'main_calls':1}},
-                  'render':{'ai_generation':'complete','model':'gemini','served_model':response.get('served_model')},
+                  'generation_meta':{'pipeline':'freeform','freeform_judge':{'model':response.get('served_model'),'status':generation_status,'main_calls':1}},
+                  'render':{'ai_generation':generation_status,'model':'gemini','served_model':response.get('served_model')},
                   'ai':{'origin':'api','calls':1},'beats':moments,'explainability':{'mode':'freeform','archive':diagnostics}}
     (out / 'presentation.json').write_text(json.dumps(presentation, ensure_ascii=False, indent=2), encoding='utf-8')
     return presentation, False
