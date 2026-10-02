@@ -3,7 +3,7 @@ export async function judgeExport(file, locale, signal) {
   const form = new FormData(); form.append('export', file); form.append('locale', locale);
   const controller = new AbortController();
   const abort = () => controller.abort(); signal?.addEventListener('abort', abort, {once:true});
-  const timer = setTimeout(abort, 120000);
+  const timer = setTimeout(abort, 210000);
   try {
     const response = await fetch('/api/judge', {method:'POST', body:form, signal:controller.signal});
     if (!response.ok) {

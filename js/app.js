@@ -49,6 +49,7 @@ function renderTechnicalDetails(reason,payload){
   copy.textContent=[`${t('technicalStage')}: ${stage||'unknown'}`,`${t('technicalAttempts')}: ${attempts.length}`,`${t('technicalReason')}: ${payload.reason||payload.error||reason}`].join(' · ');
 }
 async function renderEnding(){
+  $('#ending h2').textContent=script.ending?.title||t('done');
   const review=$('#profile-review'),profile=script.profile_review;
   const fullReview=profile?.text;review.replaceChildren();review.hidden=!fullReview;
   if(fullReview){const leadText=profile.lead||'',card=document.createElement('article');card.className='profile-review-card';const title=document.createElement('h3');title.textContent=t('profileReview');const body=document.createElement('p');body.textContent=fullReview;if(leadText&&leadText.toLocaleLowerCase()!==t('profileReview').toLocaleLowerCase()){const lead=document.createElement('p');lead.className='eyebrow';lead.textContent=leadText;review.append(lead);}card.append(title,body);review.append(card);}
@@ -72,7 +73,7 @@ async function start(demo=false){
   stop();lastDemo=demo;const current=sequence;request=new AbortController();show('analyzing');
   $('#loading-dots').replaceChildren(typingDots());const copy=t('loading').split('|');let i=0;$('#loading-copy').textContent=copy[0];
   loadingTimer=setInterval(()=>{$('#loading-copy').textContent=copy[Math.min(++i,copy.length-1)];},2400);
-  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);await play();}
+  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);try{sessionStorage.setItem('judge.presentation',JSON.stringify(script));}catch{}await play();}
   catch(error){if(current!==sequence)return;clearInterval(loadingTimer);lastFailure=error.payload||null;$('#local-analysis').hidden=!(['aiUnavailable','analystUnavailable','writerUnavailable'].includes(error.message)&&lastFailure?.deterministic_analysis_available);const copy=t(error.message);$('#error-message').textContent=copy===error.message?t('invalid'):copy;renderTechnicalDetails(error.message,lastFailure);show('error');}
 }
 $('#upload-form').addEventListener('submit',e=>{e.preventDefault();start();});

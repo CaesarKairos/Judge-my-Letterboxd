@@ -3,12 +3,13 @@ import {salvageJson} from '../json-repair.js';
 import {FREEFORM_JUDGE_PROMPT,JUDGE_VOICE_PROMPT} from '../generated-prompts.js';
 import {validateFreeformResponse} from './validator.js';
 
-const schema={type:'OBJECT',required:['opening','moments','closer','profile_review'],properties:{
-  opening:{type:'OBJECT',properties:{greeting:{type:'ARRAY',items:{type:'STRING'}},archetype_lead:{type:'STRING'},archetype_phrase:{type:'STRING'},archetype_after:{type:'ARRAY',items:{type:'STRING'}},username_line:{type:'STRING'},taste_bit:{type:'OBJECT',properties:{lead:{type:'STRING'},strike:{type:'STRING'},correction:{type:'STRING'},tail:{type:'STRING'}}},judge_claim:{type:'STRING'},transition:{type:'ARRAY',items:{type:'STRING'}}}},
-  moments:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','evidence_refs','lines'],properties:{id:{type:'STRING'},type:{type:'STRING'},title:{type:'STRING'},display_text:{type:'STRING'},display:{type:'OBJECT',properties:{kind:{type:'STRING'},label:{type:'STRING'},values:{type:'ARRAY',items:{type:'OBJECT',properties:{label:{type:'STRING'},value:{type:'STRING'}}}},films:{type:'ARRAY',items:{type:'OBJECT',properties:{title:{type:'STRING'},year:{type:'STRING'}}}}}},evidence_refs:{type:'ARRAY',items:{type:'STRING'}},lines:{type:'ARRAY',items:{type:'STRING'}}}}},
-  games:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','films','evidence_refs'],properties:{id:{type:'STRING'},type:{type:'STRING'},films:{type:'ARRAY',items:{type:'OBJECT',properties:{title:{type:'STRING'},year:{type:'STRING'},film_key:{type:'STRING'}}}},evidence_refs:{type:'ARRAY',items:{type:'STRING'}},difficulty:{type:'STRING'},why_difficult:{type:'STRING'},copy:{type:'OBJECT',properties:{intro:{type:'STRING'},instructions:{type:'STRING'},question:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'}}}}}},
-  closer:{type:'ARRAY',items:{type:'STRING'}},
-  profile_review:{type:'OBJECT',required:['text','evidence_refs'],properties:{text:{type:'STRING'},evidence_refs:{type:'ARRAY',items:{type:'STRING'}}}}
+const strings={type:'ARRAY',items:{type:'STRING'}},filmIds={type:'ARRAY',items:{type:'STRING'}},attachment={type:'OBJECT',required:['type'],properties:{type:{type:'STRING'},film_id:{type:'STRING'},film_ids:filmIds,review_ref:{type:'STRING'},list_id:{type:'STRING'},list_ref:{type:'STRING'},tag_id:{type:'STRING'},tag:{type:'STRING'},session_refs:filmIds,phrase:{type:'STRING'},title:{type:'STRING'},display_text:{type:'STRING'},values:{type:'ARRAY',items:{type:'OBJECT',properties:{label:{type:'STRING'},value:{type:'STRING'}}}}}};
+const role={type:'OBJECT',properties:{id:{type:'STRING'},label:{type:'STRING'},rank:{type:'NUMBER'}}},hint={type:'OBJECT',properties:{film_id:{type:'STRING'},film_key:{type:'STRING'},role_id:{type:'STRING'},text:{type:'STRING'}}},choice={type:'OBJECT',properties:{id:{type:'STRING'},label:{type:'STRING'},reaction:{type:'STRING'}}};
+const schema={type:'OBJECT',required:['opening','moments','closer','ending','profile_review'],properties:{
+  opening:{type:'OBJECT',properties:{greeting:strings,archetype_lead:{type:'STRING'},archetype_phrase:{type:'STRING'},archetype_after:strings,username_line:{type:'STRING'},taste_bit:{type:'OBJECT',properties:{lead:{type:'STRING'},strike:{type:'STRING'},correction:{type:'STRING'},tail:{type:'STRING'}}},judge_claim:{type:'STRING'},transition:strings}},
+  moments:{type:'ARRAY',items:{type:'OBJECT',required:['id','label','evidence_refs','attachments','lines'],properties:{id:{type:'STRING'},type:{type:'STRING'},label:{type:'STRING'},evidence_refs:strings,attachments:{type:'ARRAY',items:attachment},lines:strings}}},
+  games:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','film_ids','evidence_refs','copy'],properties:{id:{type:'STRING'},type:{type:'STRING'},film_ids:filmIds,evidence_refs:strings,difficulty:{type:'STRING'},why_difficult:{type:'STRING'},copy:{type:'OBJECT',required:['intro'],properties:{intro:{type:'STRING'},instructions:{type:'STRING'},question:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},roles:{type:'ARRAY',items:role},reaction_hints:{type:'ARRAY',items:hint},choices:{type:'ARRAY',items:choice},result_reactions:{type:'OBJECT',properties:{match:{type:'STRING'},near_match:{type:'STRING'},chaotic_mismatch:{type:'STRING'}}}}}}}},
+  closer:strings,ending:{type:'OBJECT',properties:{title:{type:'STRING'}}},profile_review:{type:'OBJECT',required:['text','evidence_refs'],properties:{text:{type:'STRING'},evidence_refs:strings}}
 }};
 
 const responseText=body=>(body?.candidates?.[0]?.content?.parts||[]).map(part=>part.text||'').join('');
@@ -21,7 +22,7 @@ export async function freeformJudge({archive,locale,env}){
   const systemInstruction=`${JUDGE_VOICE_PROMPT}\n\n${FREEFORM_JUDGE_PROMPT}`;
   const dataPrompt=`Language: ${locale==='en-US'?'English':'Brazilian Portuguese'}. acid_level=0.8.\n<ARCHIVE_DATA>\n${archiveJson}\n</ARCHIVE_DATA>`;
   const discovered=await discoverTextModels(env),configured=[env.GEMINI_FREEFORM_MODEL||env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_FREEFORM_FALLBACK_MODELS||env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(v=>v.trim()).filter(Boolean)],models=mergeModels(configured,discovered);
-  const attempts=[],deadline=Date.now()+80000;let lastReason='no_usable_model_response';
+  const attempts=[],deadline=Date.now()+190000;let lastReason='no_usable_model_response';
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
     let thinking=true;
