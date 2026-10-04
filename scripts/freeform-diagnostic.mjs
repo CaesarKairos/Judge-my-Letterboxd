@@ -11,7 +11,9 @@ import {buildFreeformArchive} from '../functions/_lib/freeform/archive-json.js';
 import {buildFreeformRegistry,normalizeFreeformReferences} from '../functions/_lib/freeform/references.js';
 import {validateFreeformResponse} from '../functions/_lib/freeform/validator.js';
 import {freeformJudge} from '../functions/_lib/freeform/judge.js';
+import {materializeFreeform} from '../functions/_lib/freeform/materializer.js';
 import {discoverTextModels,mergeModels} from '../functions/_lib/models.js';
+import {validateScript} from '../js/utils.js';
 
 process.loadEnvFile('.env');
 const pick=name=>(process.env[name]||'').trim();
@@ -112,5 +114,11 @@ if(failure){
   console.log(' FINAL CORE RESCUE:',JSON.stringify(result._core_rescue||{executed:false,result:'not_needed'}));
   console.log(' refs converted',(result._conversions||[]).length,'| repairs',JSON.stringify(result._repairs||[]));
   console.log('Freeform status:',String(result.generation_status||'complete').toUpperCase());
+  try{
+    const presentation=materializeFreeform({archive:ai,judgment:result,locale:'pt-BR',diagnostics:{...diagnostics,lossless_available_during_request:true}});
+    validateScript(presentation);
+    console.log('MATERIALIZE: valid Presentation | events',presentation.events.length,'| ai_generation',presentation.render?.ai_generation||'-');
+    console.log('API ELIGIBLE: HTTP 200');
+  }catch(error){console.log('MATERIALIZE: FAILED |',error.message);}
 }
 console.log('elapsed ms',Date.now()-started);

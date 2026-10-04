@@ -8,9 +8,9 @@ import {repairCore,repairFreeform} from './repair.js';
 const strings={type:'ARRAY',items:{type:'STRING'}},filmIds={type:'ARRAY',items:{type:'STRING'}},attachment={type:'OBJECT',required:['type'],properties:{type:{type:'STRING'},film_id:{type:'STRING'},film_ids:filmIds,review_ref:{type:'STRING'},list_id:{type:'STRING'},list_ref:{type:'STRING'},tag_id:{type:'STRING'},tag:{type:'STRING'},session_refs:filmIds,phrase:{type:'STRING'},title:{type:'STRING'},display_text:{type:'STRING'},values:{type:'ARRAY',items:{type:'OBJECT',properties:{label:{type:'STRING'},value:{type:'STRING'}}}}}};
 const role={type:'OBJECT',properties:{id:{type:'STRING'},label:{type:'STRING'},rank:{type:'NUMBER'}}},hint={type:'OBJECT',properties:{film_id:{type:'STRING'},film_key:{type:'STRING'},role_id:{type:'STRING'},text:{type:'STRING'}}},choice={type:'OBJECT',properties:{id:{type:'STRING'},label:{type:'STRING'},reaction:{type:'STRING'}}};
 const schema={type:'OBJECT',required:['opening','moments','games','closer','ending','profile_review'],properties:{
-  opening:{type:'OBJECT',properties:{greeting:strings,archetype_lead:{type:'STRING'},archetype_phrase:{type:'STRING'},archetype_after:strings,username_line:{type:'STRING'},taste_bit:{type:'OBJECT',properties:{lead:{type:'STRING'},strike:{type:'STRING'},correction:{type:'STRING'},tail:{type:'STRING'}}},judge_claim:{type:'STRING'},transition:strings}},
+  opening:{type:'OBJECT',required:['greeting','archetype_lead','archetype_phrase','archetype_after','username_line','taste_bit','judge_claim','transition'],properties:{greeting:strings,archetype_lead:{type:'STRING'},archetype_phrase:{type:'STRING'},archetype_after:strings,username_line:{type:'STRING'},taste_bit:{type:'OBJECT',required:['lead','strike','correction','tail'],properties:{lead:{type:'STRING'},strike:{type:'STRING'},correction:{type:'STRING'},tail:{type:'STRING'}}},judge_claim:{type:'STRING'},transition:strings}},
   moments:{type:'ARRAY',items:{type:'OBJECT',required:['id','label','evidence_refs','attachments','lines'],properties:{id:{type:'STRING'},type:{type:'STRING'},label:{type:'STRING'},evidence_refs:strings,attachments:{type:'ARRAY',items:attachment},lines:strings}}},
-  games:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','film_ids','evidence_refs','copy'],properties:{id:{type:'STRING'},type:{type:'STRING'},film_ids:filmIds,evidence_refs:strings,difficulty:{type:'STRING'},why_difficult:{type:'STRING'},copy:{type:'OBJECT',required:['intro'],properties:{intro:{type:'STRING'},instructions:{type:'STRING'},question:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},roles:{type:'ARRAY',items:role},reaction_hints:{type:'ARRAY',items:hint},choices:{type:'ARRAY',items:choice},result_reactions:{type:'OBJECT',properties:{match:{type:'STRING'},near_match:{type:'STRING'},chaotic_mismatch:{type:'STRING'}}}}}}}},
+  games:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','film_ids','evidence_refs','copy'],properties:{id:{type:'STRING'},type:{type:'STRING'},film_ids:filmIds,evidence_refs:strings,difficulty:{type:'STRING'},why_difficult:{type:'STRING'},copy:{type:'OBJECT',required:['intro','roles','reaction_hints'],properties:{intro:{type:'STRING'},instructions:{type:'STRING'},question:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},roles:{type:'ARRAY',items:role},reaction_hints:{type:'ARRAY',items:hint},choices:{type:'ARRAY',items:choice},result_reactions:{type:'OBJECT',properties:{match:{type:'STRING'},near_match:{type:'STRING'},chaotic_mismatch:{type:'STRING'}}}}}}}},
   closer:strings,ending:{type:'OBJECT',properties:{title:{type:'STRING'}}},profile_review:{type:'OBJECT',required:['text','evidence_refs'],properties:{text:{type:'STRING'},evidence_refs:strings}}
 }};
 
@@ -65,11 +65,11 @@ export async function freeformJudge({archive,locale,env}){
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
     let thinking=true,useSchema=true;
-    for(let attempt=0;attempt<3&&Date.now()<deadline;attempt++){
+    for(let attempt=0;attempt<2&&Date.now()<deadline;attempt++){
       const generationConfig={temperature:.8,maxOutputTokens:16384,responseMimeType:'application/json',...(useSchema?{responseSchema:schema}:{}),...(thinking?{thinkingConfig:{thinkingBudget:0}}:{})};
       const body={system_instruction:{parts:[{text:systemInstruction}]},contents:[{role:'user',parts:[{text:dataPrompt}]}],generationConfig};
       let response,result;
-      try{response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1000,deadline-Date.now()))});result=await response.json();}
+      try{response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1000,Math.min(65000,deadline-Date.now())))});result=await response.json();}
       catch(error){attempts.push({model,status:0,error:error.name});keepReason('network_error');continue;}
       const record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,schema:useSchema};
       attempts.push(record);
@@ -87,6 +87,7 @@ export async function freeformJudge({archive,locale,env}){
           // Continue with the next fallback instead of spending all three attempts on one 429.
           break;
         }
+        if(response.status===404)break;
         keepReason('provider_error');continue;
       }
       const raw=responseText(result),reply=await evaluateReply({raw,archive,registry,env,model,deadline,attempts,repairBudget:6});

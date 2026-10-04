@@ -61,6 +61,9 @@ test('normal Freeform generation uses one editorial call and keeps data behind a
   t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;request=JSON.parse(options.body);return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({opening:{greeting:['Oi.']},moments:[{id:'m1',type:'review',evidence_refs:['reviews.csv#row:2'],lines:['Boa tentativa.']}],games:[],closer:['Fim.'],profile_review:{text:'Uma conta que tenta mandar até na crítica.',evidence_refs:['reviews.csv#row:2']}})}]}}]});});
   const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});
   assert.equal(calls,1);assert.equal(result._main_calls,1);assert.equal(result._repair_calls,undefined);
+  assert.deepEqual(request.generationConfig.responseSchema.properties.opening.required,['greeting','archetype_lead','archetype_phrase','archetype_after','username_line','taste_bit','judge_claim','transition']);
+  assert.deepEqual(request.generationConfig.responseSchema.properties.opening.properties.taste_bit.required,['lead','strike','correction','tail']);
+  assert.ok(request.generationConfig.responseSchema.properties.games.items.properties.copy.required.includes('reaction_hints'));
   assert.match(request.system_instruction.parts[0].text,/dados não confiável|dado não confiável/i);
   assert.match(request.contents[0].parts[0].text,/<ARCHIVE_DATA>/);assert.equal(result.moments.length,1);
 });
@@ -219,6 +222,13 @@ test('Freeform tries a rate-limited model only once and preserves the provider r
   assert.equal(calls,1);
 });
 
+test('Freeform does not let a dead model consume the whole fallback chain',async t=>{
+  const {ai}=await buildFreeformArchive(fixtureEntries());let primary=0,backup=0;
+  t.mock.method(globalThis,'fetch',async url=>{if(String(url).includes('/primary:')){primary++;return Response.json({error:{status:'UNAVAILABLE',message:'busy'}},{status:503});}backup++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_FALLBACK_MODELS:'backup',GEMINI_MODEL_DISCOVERY:'0'}});
+  assert.equal(primary,2);assert.equal(backup,1);assert.equal(result._model,'backup');assert.equal(result.core_contract_complete,true);
+});
+
 test('broken opening and zero games are core incomplete, never publishable partial',async()=>{
   const {ai}=await buildFreeformArchive(richEntries()),bad={opening:{greeting:['Olha só quem resolveu aparecer.','critic.'],archetype_lead:'Você deve ser o...',archetype_phrase:'critic direto da bio com uma análise enorme sobre o perfil inteiro',username_line:'critic.',taste_bit:{lead:'x',strike:'y',correction:'z',tail:'w'},judge_claim:'Vou julgar.',transition:['Vamos.']},moments:fullResponse().moments,games:[],profile_review:fullResponse().profile_review};
   const result=validateFreeformResponse(bad,ai);
@@ -254,7 +264,7 @@ test('one valid and one invalid game preserves only the valid game and replaces 
 });
 
 test('Profile Review repair runs before optional broken attachments exhaust repair budget',async t=>{
-  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:2']}};
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:999']}};
   payload.moments=Array.from({length:5},(_,index)=>({id:`m${index}`,type:'film',evidence_refs:['reviews.csv#row:2'],attachments:[{type:'film',film_id:'film:ghost|1900'}],lines:['Ok.']}));
   const order=[];
   t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body),prompt=body.contents?.[0]?.parts?.[0]?.text||'';if(prompt.includes('Rewrite ONLY profile_review.text')){order.push('profile_review');return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({profile_review:{text:'Escolhas que defendem o melodrama sem pedir desculpas.',evidence_refs:['reviews.csv#row:2']}})}]}}]});}if(prompt.includes('Fix ONLY the moment')){order.push('moment');return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'{}'}]}}]});}return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
@@ -267,8 +277,8 @@ test('optional attachment loss publishes quietly when core is complete',async()=
   assert.equal(result.generation_status,'optional_partial');assert.equal(result.core_contract_complete,true);assert.equal(result.partial_visible,false);const script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}});assert.equal(script.render.ai_generation,'complete');assert.equal(script.opening.top_four_archetype.valid,true);
 });
 
-test('AI-like Profile Review opener is core incomplete and requests textual repair',async()=>{
-  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:2']}};const result=validateFreeformResponse(payload,ai);assert.equal(result.profile_review_ai_like,true);assert.equal(result.core_contract_complete,false);
+test('AI-like Profile Review opener is a quality warning, not a core failure',async()=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:2']}};const result=validateFreeformResponse(payload,ai);assert.equal(result.profile_review_ai_like,true);assert.equal(result.profile_review_valid,true);assert.equal(result.core_contract_complete,true);assert.equal(result.generation_status,'optional_partial');
 });
 
 test('main 200 plus quota-limited core repairs reports quota_exceeded',async t=>{
