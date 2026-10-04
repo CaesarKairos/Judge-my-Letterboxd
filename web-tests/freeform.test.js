@@ -281,6 +281,14 @@ test('AI-like Profile Review opener is a quality warning, not a core failure',as
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames(),profile_review:{text:'É incrível como este perfil transita entre tudo.',evidence_refs:['reviews.csv#row:2']}};const result=validateFreeformResponse(payload,ai);assert.equal(result.profile_review_ai_like,true);assert.equal(result.profile_review_valid,true);assert.equal(result.core_contract_complete,true);assert.equal(result.generation_status,'optional_partial');
 });
 
+test('Freeform rich runs survive validation and materialization without HTML',async()=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames()};
+  payload.moments[0]={...payload.moments[0],lines:[{kind:'text',runs:[{text:'Você deu ',effect:'normal'},{text:'cinco estrelas',effect:'green'},{text:'.',effect:'normal'},{text:' <script>não</script>',effect:'unknown'}]}]};
+  payload.profile_review={text:{kind:'blockquote',runs:[{text:'Uma citação segura.',effect:'quote'}]},evidence_refs:['reviews.csv#row:2']};
+  const result=validateFreeformResponse(payload,ai),script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}}),message=script.events.find(event=>event.type==='message'&&event.segments?.some(run=>run.effect==='green'));
+  assert.deepEqual(message.segments.map(run=>run.effect),['normal','green','normal','normal']);assert.equal(result.profile_review.text.kind,'blockquote');assert.equal(JSON.stringify(script).includes('<script>'),true,'markup remains inert data until the safe frontend parser strips it');
+});
+
 test('main 200 plus quota-limited core repairs reports quota_exceeded',async t=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};
   t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});

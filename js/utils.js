@@ -47,6 +47,18 @@ export function parseMarkup(value) {
     .filter(part => part.text.trim());
 }
 export const plainText = value => parseMarkup(value).map(part => part.text).join(' ').replace(/\s+/g, ' ').trim();
+export const richEffects=new Set(['normal','none','italic','bold','strike','correction','quote','blockquote','wave','shake','muted','green','blue','orange']);
+export function richRuns(value){
+  const source=Array.isArray(value?.runs)?value.runs:(Array.isArray(value)?value:[{text:typeof value==='object'?value?.text:value,effect:value?.kind}]);
+  return source.flatMap(run=>parseMarkup(run?.text??'').map(part=>({text:part.text,effect:part.type==='strong'?'bold':part.type==='em'?'italic':part.type==='blockquote'?'quote':richEffects.has(run?.effect)?run.effect:'normal'}))).filter(run=>run.text);
+}
+export function richPlainText(value){return richRuns(value).map(run=>run.text).join('').replace(/[ \t]*\n[ \t]*/g,'\n').trim();}
+export function appendRich(container,value,{profile=false}={}){
+  const runs=richRuns(value);let paragraph=null;
+  const addParagraph=()=>{paragraph=el('p',profile?'profile-review-paragraph':'judge-message');container.append(paragraph);};
+  for(const run of runs){const quote=['quote','blockquote'].includes(run.effect);if(quote){const node=el('blockquote',profile?'profile-review-quote':'judge-quote',run.text);container.append(node);paragraph=null;continue;}if(!paragraph)addParagraph();const tag=run.effect==='bold'?'strong':run.effect==='italic'?'em':run.effect==='strike'?'del':'span',node=el(tag,`judge-run judge-run-${run.effect}`,run.text);paragraph.append(node);}
+  return runs;
+}
 export const $ = selector => document.querySelector(selector);
 export const types = new Set('typing pause message correction strike profile_stats film film_pair film_group review_quote tag list tag_list_relationship tag_tag_relationship list_list_relationship rating rewatch phrase stat custom_attachment moment_label game_intro game_forced_triage game_blind_rank game_defend_take game_result'.split(' '));
 export function validateScript(data) {

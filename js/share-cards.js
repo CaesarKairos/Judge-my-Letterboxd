@@ -1,3 +1,4 @@
+import {richPlainText} from './utils.js';
 const SIZES={post:{width:1080,height:1350},story:{width:1080,height:1920}};
 const wrap=(ctx,value,width)=>{const lines=[];let line='';for(const word of String(value||'').split(/\s+/)){const next=(line+' '+word).trim();if(line&&ctx.measureText(next).width>width){lines.push(line);line=word;}else line=next;}if(line)lines.push(line);return lines;};
 const text=(ctx,value,x,y,width,lineHeight,max)=>{let row=y;for(const line of wrap(ctx,value,width).slice(0,max)){ctx.fillText(line,x,row);row+=lineHeight;}return row;};
@@ -12,7 +13,7 @@ export async function makeShareCards(script,{posterUrls=[],format='post'}={}){
  films.slice(0,4).forEach((film,index)=>{const x=72+index*gap,y=posterY;archetype.ctx.fillStyle=['#354749','#6c513c','#4f5f3f','#485675'][index];archetype.ctx.fillRect(x,y,posterWidth,posterHeight);if(posters[index])archetype.ctx.drawImage(posters[index],x,y,posterWidth,posterHeight);else{archetype.ctx.fillStyle='#eef3ed';archetype.ctx.font='bold 22px Georgia';text(archetype.ctx,film.title,x+14,y+posterHeight-75,posterWidth-28,27,3);}});
  archetype.ctx.fillStyle='#9fa9a4';archetype.ctx.font='22px Arial';archetype.ctx.fillText('Pode ser só @'+(script.profile?.handle||'você')+'.',72,story?1745:1235);
  }
- const review=common(format,script.profile?.handle),profile=script.profile_review||{};review.ctx.fillStyle='#9fa9a4';review.ctx.font='28px Arial';review.ctx.fillText('SE EU FOSSE FALAR DE VOCÊ COMO VOCÊ FALA DOS FILMES...',72,story?330:255);review.ctx.fillStyle='#eef3ed';fittedText(review.ctx,profile.text||'O julgamento acabou antes desta review.',{x:72,y:story?470:350,width:900,maxHeight:story?1180:850,maximum:story?56:48,minimum:story?34:30});
+ const review=common(format,script.profile?.handle),profile=script.profile_review||{},reviewText=richPlainText(profile.text)||'O julgamento acabou antes desta review.';review.ctx.fillStyle='#9fa9a4';review.ctx.font='28px Arial';review.ctx.fillText('SE EU FOSSE FALAR DE VOCÊ COMO VOCÊ FALA DOS FILMES...',72,story?330:255);review.ctx.fillStyle='#eef3ed';fittedText(review.ctx,reviewText,{x:72,y:story?470:350,width:900,maxHeight:story?1180:850,maximum:story?56:48,minimum:story?34:30});
  return {...(archetype?{archetype:archetype.canvas}:{}),profile_review:review.canvas};
 }
 export const cardBlob=canvas=>new Promise(resolve=>canvas.toBlob(resolve,'image/png'));

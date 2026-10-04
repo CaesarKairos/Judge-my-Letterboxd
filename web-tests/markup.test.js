@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {plainText,parseMarkup} from '../js/utils.js';
+import {plainText,parseMarkup,richRuns,richPlainText} from '../js/utils.js';
 import {readWait,timing} from '../js/animations.js';
 import {structuredReview} from '../functions/_lib/letterboxd.js';
 
@@ -38,4 +38,11 @@ test('evidence waits grow with the text and stay capped',()=>{
  assert.equal(readWait('abcde'),timing.evidence+5*timing.read);
  assert.ok(readWait('x'.repeat(400),timing.review)>readWait('x',timing.review));
  assert.equal(readWait('x'.repeat(10000)),timing.readMax);
+});
+
+test('structured Judge rich text keeps safe effects and degrades unknown ones',()=>{
+ const value={kind:'text',runs:[{text:'normal ',effect:'normal'},{text:'itálico',effect:'italic'},{text:' forte',effect:'bold'},{text:' verde',effect:'green'},{text:' azul',effect:'blue'},{text:' laranja',effect:'orange'},{text:' onda',effect:'wave'},{text:' choque',effect:'shake'},{text:' desconhecido',effect:'rainbow'}]};
+ assert.deepEqual(richRuns(value).map(run=>run.effect),['normal','italic','bold','green','blue','orange','wave','shake','normal']);
+ assert.equal(richPlainText(value),'normal itálico forte verde azul laranja onda choque desconhecido');
+ assert.equal(richPlainText({kind:'blockquote',runs:[{text:'<script>alert(1)</script><blockquote>citação</blockquote>',effect:'quote'}]}).includes('<'),false);
 });

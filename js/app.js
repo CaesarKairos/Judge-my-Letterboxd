@@ -1,4 +1,4 @@
-import {$,plainText} from './utils.js';
+import {$,plainText,appendRich,richPlainText} from './utils.js';
 import {locale,setLocale,t} from './i18n.js';
 import {setupUpload} from './upload.js';
 import {judgeExport} from './api.js';
@@ -54,12 +54,12 @@ function renderTechnicalDetails(reason,payload){
 async function renderEnding(){
   $('#ending h2').textContent=script.ending?.title||t('done');
   const review=$('#profile-review'),profile=script.profile_review;
-  const fullReview=profile?.text;review.replaceChildren();review.hidden=!fullReview;
-  if(fullReview){const leadText=profile.lead||'',card=document.createElement('article');card.className='profile-review-card';const title=document.createElement('h3');title.textContent=t('profileReview');const body=document.createElement('p');body.textContent=fullReview;if(leadText&&leadText.toLocaleLowerCase()!==t('profileReview').toLocaleLowerCase()){const lead=document.createElement('p');lead.className='eyebrow';lead.textContent=leadText;review.append(lead);}card.append(title,body);review.append(card);}
+  const fullReview=profile?.text,reviewText=richPlainText(fullReview);review.replaceChildren();review.hidden=!reviewText;
+  if(reviewText){const leadText=profile.lead||'',card=document.createElement('article');card.className='profile-review-card';const title=document.createElement('h3');title.textContent=t('profileReview');const body=document.createElement('div');body.className='profile-review-body';appendRich(body,fullReview,{profile:true});if(leadText&&leadText.toLocaleLowerCase()!==t('profileReview').toLocaleLowerCase()){const lead=document.createElement('p');lead.className='eyebrow';lead.textContent=leadText;review.append(lead);}card.append(title,body);review.append(card);}
   const explain=$('#explainability'),details=script.explainability;
   explain.hidden=!details;if(details){const lines=[details.summary,...(details.findings||[])].filter(Boolean);$('#explainability-copy').textContent=lines.join('\n\n');}
-  const cards=$('#share-cards'),previews=$('#share-card-previews');previews.replaceChildren();cards.hidden=!fullReview;
-  if(fullReview){const posterUrls=await Promise.all((script.opening?.top_four||[]).map(resolvePoster)),rendered=await makeShareCards(script,{posterUrls,format:shareFormat});for(const [name,canvas] of Object.entries(rendered)){const item=document.createElement('div');item.className='share-preview';item.append(canvas);const download=document.createElement('button');download.textContent=t('downloadCard');download.addEventListener('click',()=>downloadCard(canvas,`judge-${name}-${shareFormat}`));const share=document.createElement('button');share.textContent=t('shareCard');share.addEventListener('click',async()=>{canvas.toBlob(async blob=>{const file=new File([blob],`judge-${name}-${shareFormat}.png`,{type:'image/png'});if(navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:t('shareTitle')});else downloadCard(canvas,`judge-${name}-${shareFormat}`);},'image/png');});item.append(download,share);previews.append(item);}}
+  const cards=$('#share-cards'),previews=$('#share-card-previews');previews.replaceChildren();cards.hidden=!reviewText;
+  if(reviewText){const posterUrls=await Promise.all((script.opening?.top_four||[]).map(resolvePoster)),rendered=await makeShareCards(script,{posterUrls,format:shareFormat});for(const [name,canvas] of Object.entries(rendered)){const item=document.createElement('div');item.className='share-preview';item.append(canvas);const download=document.createElement('button');download.textContent=t('downloadCard');download.addEventListener('click',()=>downloadCard(canvas,`judge-${name}-${shareFormat}`));const share=document.createElement('button');share.textContent=t('shareCard');share.addEventListener('click',async()=>{canvas.toBlob(async blob=>{const file=new File([blob],`judge-${name}-${shareFormat}.png`,{type:'image/png'});if(navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:t('shareTitle')});else downloadCard(canvas,`judge-${name}-${shareFormat}`);},'image/png');});item.append(download,share);previews.append(item);}}
 }
 function home(){stop();show('landing');(upload.file?$('#judge'):$('#export')).focus();}
 async function play(all=false){
