@@ -1,5 +1,5 @@
 import {unzipText} from './zip.js';
-import {csvObjects} from '../functions/_lib/csv.js';
+import {csvObjects} from './csv.js';
 
 const shuffle=list=>{const copy=[...list];for(let i=copy.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[copy[i],copy[j]]=[copy[j],copy[i]];}return copy;};
 export async function filmsFromExport(file){
