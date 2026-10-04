@@ -1,12 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="url(#letterboxdGradient)" stroke="#14181C" stroke-width="0.22" stroke-linejoin="round" paint-order="stroke fill" class="bi bi-camera-reels-fill" viewBox="0 0 16 16">
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="16"
+     height="16"
+     class="bi bi-camera-fill"
+     viewBox="0 0 16 16">
+
   <defs>
-    <linearGradient id="letterboxdGradient" x1="0" y1="8" x2="16" y2="8" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#00E054"/>
-      <stop offset="50%" stop-color="#40BCF4"/>
-      <stop offset="100%" stop-color="#FF8000"/>
+    <linearGradient
+      id="letterboxd-gradient"
+      gradientUnits="userSpaceOnUse"
+      x1="0"
+      y1="0"
+      x2="16"
+      y2="16"
+    >
+      <stop offset="0%" stop-color="#FF8000"/>
+      <stop offset="28%" stop-color="#FF8000"/>
+
+      <stop offset="45%" stop-color="#00E054"/>
+      <stop offset="55%" stop-color="#00E054"/>
+
+      <stop offset="72%" stop-color="#40BCF4"/>
+      <stop offset="100%" stop-color="#40BCF4"/>
     </linearGradient>
   </defs>
-  <path d="M6 3a3 3 0 1 1-6 0 3 3 0 0 1 6 0"/>
-  <path d="M9 6a3 3 0 1 1 0-6 3 3 0 0 1 0 6"/>
-  <path d="M9 6h.5a2 2 0 0 1 1.983 1.738l3.11-1.382A1 1 0 0 1 16 7.269v7.462a1 1 0 0 1-1.406.913l-3.111-1.382A2 2 0 0 1 9.5 16H2a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>
+
+  <path
+    fill="url(#letterboxd-gradient)"
+    d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0"
+  />
+
+  <path
+    fill="url(#letterboxd-gradient)"
+    d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0"
+  />
+
 </svg>
