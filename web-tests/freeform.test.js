@@ -283,10 +283,27 @@ test('AI-like Profile Review opener is a quality warning, not a core failure',as
 
 test('Freeform rich runs survive validation and materialization without HTML',async()=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames()};
-  payload.moments[0]={...payload.moments[0],lines:[{kind:'text',runs:[{text:'Você deu ',effect:'normal'},{text:'cinco estrelas',effect:'green'},{text:'.',effect:'normal'},{text:' <script>não</script>',effect:'unknown'}]}]};
+  payload.moments[0]={...payload.moments[0],lines:[{kind:'text',runs:[{text:'Você deu ',effect:'normal'},{kind:'rating',film_id:'film:alpha|2000'},{text:' para isso.',effect:'normal'},{text:' <script>não</script>',effect:'unknown'}]}]};
   payload.profile_review={text:{kind:'blockquote',runs:[{text:'Uma citação segura.',effect:'quote'}]},evidence_refs:['reviews.csv#row:2']};
-  const result=validateFreeformResponse(payload,ai),script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}}),message=script.events.find(event=>event.type==='message'&&event.segments?.some(run=>run.effect==='green'));
-  assert.deepEqual(message.segments.map(run=>run.effect),['normal','green','normal','normal']);assert.equal(result.profile_review.text.kind,'blockquote');assert.equal(JSON.stringify(script).includes('<script>'),true,'markup remains inert data until the safe frontend parser strips it');
+  const result=validateFreeformResponse(payload,ai),script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}}),message=script.events.find(event=>event.type==='message'&&event.segments?.some(run=>run.kind==='rating'));
+  assert.deepEqual(message.segments.map(run=>run.kind||run.effect),['normal','rating','normal','normal']);assert.equal(message.segments[1].rating,5);assert.equal(message.segments[1].title,'Alpha');assert.equal(result.profile_review.text.kind,'blockquote');assert.equal(JSON.stringify(script).includes('<script>'),true,'markup remains inert data until the safe frontend parser strips it');
+});
+
+test('rich inline runs preserve exact sibling spacing and remove quote placeholders',async()=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:twoGames()};
+  payload.moments[0]={...payload.moments[0],lines:[
+    {runs:[{text:'fechar com ',effect:'normal'},{text:'Dito isso:',effect:'bold'},{text:' como se...',effect:'normal'}]},
+    {runs:[{text:'pedra mágica colorida',effect:'italic'},{text:' faz total sentido',effect:'normal'}]},
+    {runs:[{text:'você escalou ',effect:'normal'},{text:'Internet - O Filme',effect:'bold'},{text:'. Isso é...',effect:'normal'}]},
+    {runs:[{text:'[citação em blockquote]',effect:'quote'}]}
+  ],attachments:[...payload.moments[0].attachments,{type:'phrase',phrase:'Dito isso: [conteúdo que fica aqui]'}]};
+  const result=validateFreeformResponse(payload,ai),script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}}),messages=script.events.filter(event=>event.type==='message').map(event=>event.segments?.map(run=>run.text||'').join(''));
+  assert.ok(messages.includes('fechar com Dito isso: como se...'));assert.ok(messages.includes('pedra mágica colorida faz total sentido'));assert.ok(messages.includes('você escalou Internet - O Filme. Isso é...'));assert.equal(JSON.stringify(script).includes('[citação em blockquote]'),false);assert.equal(JSON.stringify(script).includes('[conteúdo que fica aqui]'),false);
+});
+
+test('blind rank pre-reveal copy rejects title, year and rating leaks',async()=>{
+  const {ai}=await buildFreeformArchive(richEntries());
+  for(const leak of ['Gamma','2002','4.5★']){const games=twoGames();games[1].copy.intro=`Sem olhar: ${leak}`;const result=validateFreeformResponse({...fullResponse(),games},ai);assert.equal(result.games.some(game=>game.id==='g2'),false,leak);assert.equal(result.games_invalid.some(game=>game.reason==='blind_rank_leak'),true,leak);}
 });
 
 test('main 200 plus quota-limited core repairs reports quota_exceeded',async t=>{

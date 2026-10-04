@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
 const base=process.env.WEB_BASE_URL||'http://127.0.0.1:8080';
+const u16=value=>Buffer.from([value&255,value>>>8&255]),u32=value=>Buffer.from([value&255,value>>>8&255,value>>>16&255,value>>>24&255]),storedZip=files=>{const locals=[],centrals=[];let offset=0;for(const [name,text] of Object.entries(files)){const n=Buffer.from(name),data=Buffer.from(text),local=Buffer.concat([u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),u32(0),u32(data.length),u32(data.length),u16(n.length),u16(0),n,data]);locals.push(local);centrals.push(Buffer.concat([u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(0),u32(data.length),u32(data.length),u16(n.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),n]));offset+=local.length;}const central=Buffer.concat(centrals);return Buffer.concat([...locals,central,u32(0x06054b50),u16(0),u16(0),u16(centrals.length),u16(centrals.length),u32(central.length),u32(offset),u16(0)]);};
 await mkdir('web-tests/artifacts',{recursive:true});
 const browser=await chromium.launch();const page=await browser.newPage({locale:'pt-BR'});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -50,6 +51,7 @@ assert.equal(await page.locator('.review img').count(),0);assert.ok(await page.l
 // Quoted reviews are rendered as real blockquotes, never as literal markup.
 assert.ok(await page.locator('.judge-quote').count()>0);assert.ok(await page.locator('.review blockquote').count()>0);
 assert.equal((await page.locator('#chat').textContent()).includes('<blockquote'),false);
+assert.ok((await page.locator('#chat').textContent()).includes('fechar com Dito isso: como se...'));assert.equal(await page.locator('.inline-rating').count(),1);assert.equal((await page.locator('.inline-rating').textContent()).includes('★'),false);
 // A list member and a tag card show the film's current rating: those rows carry no rating column,
 // so a rated film must never be printed as "Sem nota" there.
 const listRatings=await page.locator('.attachment-list .film-card .rating').allTextContents();
@@ -87,9 +89,9 @@ await page.unroute('**/api/poster?*');
 await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false}}));
 
 await page.goto(base);await page.locator('#export').setInputFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from('x')});await page.locator('#upload-error').filter({hasText:'ZIP'}).waitFor();
-await page.route('**/api/judge',route=>route.fulfill({status:501,json:{error:'not_connected'}}));
-await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:Buffer.from([80,75,3,4,0,0])});
-await page.locator('#selected').waitFor();await page.locator('#judge').click();await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);await page.emulateMedia({reducedMotion:'no-preference'});
+await page.route('**/api/judge',async route=>{await new Promise(resolve=>setTimeout(resolve,700));await route.fulfill({status:501,json:{error:'not_connected'}});});
+const previewZip=storedZip({'watched.csv':'Date,Name,Year\n2026-01-01,Loading Fixture One,2001\n2026-01-02,Loading Fixture Two,2002\n2026-01-03,Loading Fixture Three,2003\n'});await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:previewZip});
+await page.locator('#selected').waitFor();await page.locator('#judge').click();await page.locator('.loading-film-track').waitFor();assert.match(await page.locator('#loading-films').textContent(),/Loading Fixture/);assert.equal(await page.locator('#analyzing .typing').count(),0);assert.equal(await page.locator('#analyzing .indeterminate').count(),0);assert.equal(await page.locator('#loading-films').evaluate(node=>getComputedStyle(node).pointerEvents),'none');await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);await page.emulateMedia({reducedMotion:'no-preference'});
 await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#chat .typing').waitFor();
 await page.goto(base);
 // No playback controls remain: the language menu is the header's only custom control.

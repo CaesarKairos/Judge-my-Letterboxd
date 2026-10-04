@@ -28,6 +28,10 @@ correction, quote, wave, shake, muted, green, blue ou orange. Efeitos são pontu
 marcante por beat, aplicado a uma palavra ou frase curta. italic é aside/ironia; bold é ênfase factual;
 green/blue/orange marcam intenção na paleta do produto; wave é deboche/alongamento; shake é choque curto;
 muted é segunda voz; quote é citação real. Nunca envie HTML, CSS ou tags. Não transforme a sessão em carnaval.
+Quando a nota dada a um filme for elemento visual importante da piada, prefira um run
+{"kind":"rating","film_id":"id existente"} em vez de escrever 5★ ou 4.5★. O backend resolve a nota real.
+Nunca escreva placeholders como [citação em blockquote], [quote], [blockquote] ou [citação aqui]. Citação real
+do export usa attachment review_quote; fala citada do Judge usa kind blockquote com o texto verdadeiro.
 
 ATTACHMENTS
 film: film_id. film_pair/film_group: film_ids. review_quote: review_ref. tag: tag_id. list: list_id.
@@ -64,8 +68,12 @@ Para forced_triage e blind_rank, escolha três filmes valorizados de forma PAREC
 rating <= 0.5; até ~1.0 só com outros sinais fortes (favorito, like, rewatch, review positiva, lista relevante).
 Nunca escolha 5★ vs 3★ vs 1.5★: o jogo testa uma escolha difícil, não memória óbvia.
 forced_triage inclui três roles distintos (id, label, rank), confirm_label e reaction_hints específicos para
-filme × papel — idealmente as nove combinações. blind_rank inclui instructions, reveal_copy e result_reactions.
+filme × papel — idealmente as nove combinações. blind_rank inclui instructions, reveal_copy e result_reactions;
+historically_tied reage sem inventar ordem quando duas ou mais notas históricas forem iguais.
 defend_your_take inclui question e choices; pergunte sobre motivação, nunca a afirme.
+No blind_rank, intro e instructions comentam somente a mecânica. Antes de os três filmes aparecerem, não revele
+títulos, notas, anos, gêneros, temas, tags, listas, descrições, reviews, favoritos ou qualquer pista do conjunto.
+Pergunte silenciosamente: alguém poderia usar meu intro para adivinhar um filme ainda escondido? Se sim, reescreva.
 
 PROFILE REVIEW
 Gere um único profile_review.text, usado literalmente na página e no share card. Pode ser rich text com
@@ -82,6 +90,7 @@ Antes de responder, revise silenciosamente:
 - OPENING: existe apelido real, curto, sem username, antes de username_line?
 - VOICE: alguma fala serviria para milhares de contas? Remova ou torne específica.
 - GAMES: a conta é elegível? Então existem exatamente dois, difíceis e estruturados.
+- BLIND RANK: intro/instructions não dão nenhuma pista sobre os filmes ainda ocultos?
 - VISUAL: todo objeto central possui attachment correspondente?
 - PROFILE REVIEW: parece review da própria conta ou análise externa de usuário?
 - GROUNDING: afirmou motivação, consenso ou estatística sem evidência?

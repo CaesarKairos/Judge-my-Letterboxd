@@ -8,9 +8,9 @@ export function stats(rows=[]) {
     const item=el('div');item.append(el('dt','',row.label||row.key),el('dd','',percentages.has(row.key)&&typeof row.value==='number'?`${(row.value*100).toFixed(1)}%`:row.value));list.append(item);
   }return list;
 }
-export function filmStrip(films=[],top=false) {
+export function filmStrip(films=[],top=false,options={}) {
   const strip=el('div',`film-strip ${top?'top-four':''} count-${Math.min(films.length,4)}`);
-  films.slice(0,4).forEach(f=>strip.append(filmCard(f,{eager:top})));return strip;
+  films.slice(0,4).forEach(f=>strip.append(filmCard(f,{eager:top,...options})));return strip;
 }
 export function quoteRows(event) {
   // A review may arrive already segmented (Letterboxd markup) or as one plain string.

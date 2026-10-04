@@ -3,10 +3,11 @@ import {locale,setLocale,t} from './i18n.js';
 import {setupUpload} from './upload.js';
 import {judgeExport} from './api.js';
 import {loadDemo} from './demo.js';
-import {ChatPlayer,typingDots} from './chat-renderer.js';
+import {ChatPlayer} from './chat-renderer.js';
 import {resolvePoster} from './poster-service.js';
 import {makeShareCards,downloadCard} from './share-cards.js';
-let player,script,request,sequence=0,loadingTimer,lastDemo=false,lastFailure=null,shareFormat='post';
+import {startLoadingPreview} from './loading-preview.js';
+let player,script,request,sequence=0,loadingTimer,stopLoadingPreview,lastDemo=false,lastFailure=null,shareFormat='post';
 const upload=setupUpload();
 setLocale(locale);
 const languageMenu=$('#language-menu'),languageSummary=languageMenu.querySelector('summary'),languageOptions=[...languageMenu.querySelectorAll('[data-locale]')];
@@ -36,7 +37,7 @@ function show(id){
   $('#bottom').hidden=true;document.body.dataset.screen=id;window.scrollTo(0,0);
   document.querySelector(`#${id} h2`)?.focus({preventScroll:true});
 }
-function stop(){sequence++;request?.abort();clearInterval(loadingTimer);player?.stop();player=null;}
+function stop(){sequence++;request?.abort();clearInterval(loadingTimer);stopLoadingPreview?.();stopLoadingPreview=null;player?.stop();player=null;}
 // Local and development runs may show which stage failed; production keeps the screen clean.
 // Only curated fields travel here: never a key, a prompt or a stack trace.
 const developerMode=()=>['localhost','127.0.0.1',''].includes(location.hostname)||new URLSearchParams(location.search).get('debug')==='1';
@@ -74,10 +75,10 @@ async function play(all=false){
 async function start(demo=false){
   if(!demo&&!upload.file)return;
   stop();lastDemo=demo;const current=sequence;request=new AbortController();show('analyzing');
-  $('#loading-dots').replaceChildren(typingDots());const copy=t('loading').split('|');let i=0;$('#loading-copy').textContent=copy[0];
+  const copy=t('loading').split('|');let i=0;$('#loading-copy').textContent=copy[0];if(!demo)stopLoadingPreview=startLoadingPreview(upload.file,$('#loading-films'));
   loadingTimer=setInterval(()=>{$('#loading-copy').textContent=copy[Math.min(++i,copy.length-1)];},2400);
-  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);try{sessionStorage.setItem('judge.presentation',JSON.stringify(script));}catch{}await play();}
-  catch(error){if(current!==sequence)return;clearInterval(loadingTimer);lastFailure=error.payload||null;$('#local-analysis').hidden=!(['aiUnavailable','analystUnavailable','writerUnavailable'].includes(error.message)&&lastFailure?.deterministic_analysis_available);const copy=t(error.message);$('#error-message').textContent=copy===error.message?t('invalid'):copy;renderTechnicalDetails(error.message,lastFailure);show('error');}
+  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);stopLoadingPreview?.();stopLoadingPreview=null;try{sessionStorage.setItem('judge.presentation',JSON.stringify(script));}catch{}await play();}
+  catch(error){if(current!==sequence)return;clearInterval(loadingTimer);stopLoadingPreview?.();stopLoadingPreview=null;lastFailure=error.payload||null;$('#local-analysis').hidden=!(['aiUnavailable','analystUnavailable','writerUnavailable'].includes(error.message)&&lastFailure?.deterministic_analysis_available);const copy=t(error.message);$('#error-message').textContent=copy===error.message?t('invalid'):copy;renderTechnicalDetails(error.message,lastFailure);show('error');}
 }
 $('#upload-form').addEventListener('submit',e=>{e.preventDefault();start();});
 for(const id of ['demo','error-demo'])$('#'+id).addEventListener('click',()=>start(true));

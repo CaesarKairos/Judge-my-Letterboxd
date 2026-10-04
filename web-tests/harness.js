@@ -9,6 +9,8 @@ const script={version:'presentation-v1',opening:{top_four:[film,film,film,film]}
  {type:'message',cue:'top_four_reveal',segments:[{text:'Hello, cinema.'}]},
  {type:'message',role:'archetype_phrase',segments:[{text:'A very long archetype stays alongside four favorite films.'}]},
  {type:'message',segments:[{text:'Questionable',effect:'strike'},{text:'Excellent',effect:'correction'}]},
+ {type:'message',segments:[{text:'fechar com ',effect:'normal'},{text:'Dito isso:',effect:'bold'},{text:' como se...',effect:'normal'}]},
+ {type:'message',segments:[{text:'Você deu ',effect:'normal'},{kind:'rating',film_id:'film:a|2000',rating:5,title:'Film A'},{text:' para isso.',effect:'normal'}]},
  {type:'message',segments:[{text:'Antes. '},{text:'"Jack, I swear..." — Ennis Del Mar',effect:'quote'},{text:' Depois.'}]},
  {type:'message',text:'Cru: <blockquote>"Nunca mais."</blockquote> fim.'},
  {type:'strike',text:'Wrong'},{type:'correction',original:'Wrong',replacement:'Right'},

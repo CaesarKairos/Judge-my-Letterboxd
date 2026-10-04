@@ -69,6 +69,7 @@ test('game results use the actual assignment and historical ranking',()=>{
  assert.equal(blindRankOutcome([1,2,3],films),'match');assert.equal(blindRankOutcome([2,1,3],films),'near_match');assert.equal(blindRankOutcome([3,2,1],films),'chaotic_mismatch');
  const hints=[{film_key:films[2].film_key,role_id:'retire',text:'Film C foi aposentado.'}];
  assert.equal(forcedTriageReaction([{film_key:films[2].film_key,role_id:'retire',rank:1}],hints),'Film C foi aposentado.');
+ assert.equal(blindRankOutcome([3,1,2],[film('A',5),film('B',5),film('C',5)]),'historically_tied');
 });
 
 test('Profile Review has one canonical text for site and share',()=>{

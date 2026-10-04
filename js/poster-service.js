@@ -34,8 +34,9 @@ export function poster(film,{eager=false}={}) {
   return box;
 }
 export function rating(value){return el('span','rating',value==null?t('noRating'):`★ ${value} / 5`);}
-export function filmCard(film,options={}) {
+export function inlineRating(value,title=''){const badge=el('span','inline-rating');badge.setAttribute('role','img');badge.setAttribute('aria-label',`${title?`${title}: `:''}${value} de 5`);badge.append(el('b','',Number(value).toFixed(1)),el('span','inline-rating-scale','/ 5'));const pips=el('span','inline-rating-pips');for(let step=1;step<=10;step++)pips.append(el('i',step<=Math.round(Number(value)*2)?'filled':''));badge.append(pips);return badge;}
+export function filmCard(film,{showRating=true,...options}={}) {
   const card=el('figure','film-card');card.append(poster(film,options));
-  const caption=el('figcaption');caption.append(el('strong','film-title',film.title),el('span','film-year',film.year),rating(film.rating));card.append(caption);return card;
+  const caption=el('figcaption');caption.append(el('strong','film-title',film.title),el('span','film-year',film.year));if(showRating)caption.append(rating(film.rating));card.append(caption);return card;
 }
 export function disconnectPosters(){observer.disconnect();}

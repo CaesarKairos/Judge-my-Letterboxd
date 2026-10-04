@@ -66,7 +66,7 @@ export function validateScript(data) {
   if (!Array.isArray(data.events) || !data.events.length || data.events.some(e => !e || typeof e.type !== 'string')) throw new Error('invalid');
   for (const e of data.events) {
     if (!types.has(e.type)) { console.warn('Skipped unknown presentation event:', e.type); continue; }
-    if (e.type === 'message' && (!Array.isArray(e.segments) || e.segments.some(s => typeof s?.text !== 'string'))) throw new Error('invalid');
+    if (e.type === 'message' && (!Array.isArray(e.segments) || e.segments.some(s => s?.kind==='rating'?typeof s.rating!=='number':typeof s?.text !== 'string'))) throw new Error('invalid');
     if (e.type === 'custom_attachment' && (e.title != null && typeof e.title !== 'string' || e.label != null && typeof e.label !== 'string')) throw new Error('invalid');
     if (e.type === 'moment_label' && typeof e.label !== 'string') throw new Error('invalid');
     for (const key of ['films', 'stats', 'sessions', 'segments']) if (e[key] != null && !Array.isArray(e[key])) throw new Error('invalid');
