@@ -87,14 +87,25 @@ filmes e trechos reais de reviews: revise seu conteúdo antes de publicar.
 
 ### Cloudflare Pages
 
-Use o repositório, branch `main`, root directory `/`, build command
-`python scripts/prepare-web.py` e output directory `dist`. Esse comando só copia
-uma lista permitida de assets; não transpila nem empacota JavaScript. **Não publique
-a raiz do repositório**, pois contém exports e outputs locais. Não coloque arquivos
-privados em `dist/`. `functions/` fica na raiz, como esperado pelo Pages.
+Este projeto usa a configuração do **dashboard do Pages** como fonte de verdade; não
+há `wrangler.toml` versionado porque o ID do D1 pertence à conta Cloudflare. Na Git
+integration configure exatamente:
+
+- Framework preset: `None`;
+- Build command: `npm run build`;
+- Build output directory: `dist`;
+- Root directory: deixe vazio (raiz do repositório).
+
+O build executa a sincronização dos artefatos e depois `scripts/prepare-web.py`, que
+copia somente a allowlist pública para `dist`. **Não publique a raiz do repositório**,
+pois ela pode conter exports e outputs locais. `functions/` permanece na raiz para o
+empacotamento automático das Pages Functions. As dependências de runtime do renderer
+OG estão em `dependencies`; Wrangler `3.114.17`, a mesma versão usada na validação do
+deploy, está fixado em `devDependencies`.
 
 ```powershell
-python scripts/prepare-web.py
+npm ci
+npm run check:cloudflare
 npx wrangler pages dev dist
 # Depois de criar/configurar seu projeto Pages:
 npx wrangler pages deploy dist --project-name judge-my-letterboxd
@@ -102,7 +113,18 @@ npx wrangler pages deploy dist --project-name judge-my-letterboxd
 
 O `_routes.json` envia `/api/*` e as páginas públicas `/@*` às Functions. Resultados
 compartilháveis usam D1: crie o banco, aplique `migrations/0001_public_results.sql` e
-associe-o ao Pages com o binding `RESULTS_DB` (veja `wrangler.example.toml`). A chave
+associe-o ao Pages com o binding `RESULTS_DB`. `wrangler.example.toml` é apenas uma
+referência local e não deve ser renomeado com um ID placeholder. Com Wrangler autenticado:
+
+```powershell
+npx wrangler d1 create judge-my-letterboxd-results
+npx wrangler d1 migrations apply judge-my-letterboxd-results --remote
+```
+
+No dashboard, abra Workers & Pages → este projeto → Settings → Bindings → Add → D1
+database binding; use Variable name `RESULTS_DB` e selecione
+`judge-my-letterboxd-results`, em Production e Preview quando ambos forem usados.
+Depois faça um novo deploy. A chave
 única `(profile_key, judge_number)` evita numeração duplicada sob concorrência. As
 páginas individuais usam `noindex,follow`: continuam compartilháveis, mas não entram
 no sitemap nem transformam perfis pessoais em índice público pesquisável.

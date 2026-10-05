@@ -6,12 +6,14 @@
     "sync": "python scripts/sync-mode.py && python scripts/sync-prompts.py",
     "check:sync": "python scripts/sync-mode.py --check && python scripts/sync-prompts.py --check",
     "build": "npm run sync && python scripts/prepare-web.py",
+    "check:cloudflare": "node scripts/check-cloudflare.mjs",
     "test:web": "npm run check:sync && node --test web-tests/*.test.js",
     "test:browser": "node web-tests/smoke.mjs && node web-tests/games-smoke.mjs",
     "test:edge": "node web-tests/edge-cases.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.0"
+    "@playwright/test": "^1.58.0",
+    "wrangler": "3.114.17"
   },
   "dependencies": {
     "@cloudflare/pages-plugin-vercel-og": "^0.1.2",
