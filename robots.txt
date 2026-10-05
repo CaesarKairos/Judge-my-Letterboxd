@@ -1,3 +1,4 @@
 User-agent: *
 Allow: /
+Sitemap: https://judgemyletterboxd.com/sitemap.xml
 Disallow: /api/

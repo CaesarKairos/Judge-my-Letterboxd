@@ -306,6 +306,19 @@ test('blind rank pre-reveal copy rejects title, year and rating leaks',async()=>
   for(const leak of ['Gamma','2002','4.5★']){const games=twoGames();games[1].copy.intro=`Sem olhar: ${leak}`;const result=validateFreeformResponse({...fullResponse(),games},ai);assert.equal(result.games.some(game=>game.id==='g2'),false,leak);assert.equal(result.games_invalid.some(game=>game.reason==='blind_rank_leak'),true,leak);}
 });
 
+test('Freeform rhythm and explicit game placement survive materialization',async()=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),moments:[
+    {...fullResponse().moments[0],id:'setup',pause_before:'long',pause_after:'none',lines:[{runs:[{text:'Rápido.',effect:'normal'}],delivery:'none',pause_after:'none'}]},
+    {...fullResponse().moments[0],id:'after',label:'DEPOIS',lines:[{runs:[{text:'Só depois.',effect:'normal'}],pause_before:'short',delivery:'long'}]}
+  ],games:twoGames().map((game,index)=>({...game,after_moment_id:index?'after':'setup',pause_before:index?'short':'medium',delivery:'none'}))};
+  const result=validateFreeformResponse(payload,ai),script=materializeFreeform({archive:ai,judgment:{...result,_model:'test',_attempts:[],_main_calls:1}}),events=script.events;
+  const setupLine=events.findIndex(event=>event.type==='message'&&event.segments?.some(run=>run.text==='Rápido.')),firstGame=events.findIndex(event=>event.type==='game_forced_triage'),afterLabel=events.findIndex(event=>event.type==='moment_label'&&event.label==='DEPOIS'),secondGame=events.findIndex(event=>event.type==='game_blind_rank');
+  assert.ok(setupLine<firstGame&&firstGame<afterLabel&&afterLabel<secondGame,'games follow their declared moments instead of fixed indexes');
+  assert.equal(events[setupLine-1]?.type==='typing',false,'delivery none does not invent typing dots');
+  assert.ok(events.slice(setupLine-4,setupLine).some(event=>event.type==='pause'&&event.duration==='long'));
+  assert.equal(events[firstGame-2].type,'pause');assert.equal(events[firstGame-2].duration,'medium');assert.equal(events[firstGame-1].type,'game_intro');
+});
+
 test('main 200 plus quota-limited core repairs reports quota_exceeded',async t=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};
   t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});

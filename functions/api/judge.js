@@ -2,6 +2,7 @@ import {unzip} from '../_lib/zip.js';
 import {JUDGE_PIPELINE_MODE} from '../_lib/generated-mode.js';
 import {runCurated} from '../_pipelines/curated.js';
 import {runFreeform} from '../_pipelines/freeform.js';
+import {savePublicResult} from '../_lib/public-results.js';
 
 const MAX_UPLOAD=50*1024*1024;
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -19,6 +20,7 @@ export async function onRequestPost({request,env}){
     // no runtime override: generated-mode.js, synchronized from judge-mode.json, is authoritative.
     const mode=env?.__TEST_PIPELINE_MODE||JUDGE_PIPELINE_MODE;
     const result=mode==='freeform'?await runFreeform({entries,filename:file.name,locale,env:runEnv}):await runCurated({entries:textEntries(entries),locale,env:runEnv});
+    const published=await savePublicResult(env,result);if(published)result.public_result=published;
     return response(result);
   }catch(error){console.error('Judge pipeline failed',error.message);return response({error:error.message||'internal_error',...(error.details||{})},statusFor(error));}
 }

@@ -1,0 +1,17 @@
+const cleanText=(value,max=1000)=>String(value??'').replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,max);
+const plain=value=>typeof value==='string'?value:(value?.runs||[]).map(run=>run?.text||'').join('');
+export const handleKey=value=>cleanText(value,80).normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}._-]+/gu,'-').replace(/^-|-$/g,'')||'anonymous';
+const clone=(value,depth=0)=>{if(depth>9)return null;if(Array.isArray(value))return value.slice(0,500).map(item=>clone(item,depth+1));if(value&&typeof value==='object'){const out={};for(const [key,item] of Object.entries(value)){if(['ai','explainability','generation_meta','archive','raw_export','lossless','evidence_refs'].includes(key))continue;out[key]=clone(item,depth+1);}return out;}return typeof value==='string'?cleanText(value,6000):value;};
+export function publicPresentation(result){return clone({version:result.version,template:result.template,pipeline_mode:result.pipeline_mode,locale:result.locale,profile:result.profile,stats:result.stats,opening:result.opening,ending:result.ending,profile_review:result.profile_review,render:{ai_generation:result.render?.ai_generation},events:result.events});}
+export function resultDescription(result){const archetype=cleanText(result.opening?.archetype_text||result.opening?.top_four_archetype?.phrase,160),review=cleanText(plain(result.profile_review?.text),160);return archetype||review||'Um perfil cinematográfico entrou em julgamento.';}
+async function posterFor(film,env){if(!env?.TMDB_API_KEY||film?.poster_url)return film;try{const url=new URL('https://api.themoviedb.org/3/search/movie');url.search=new URLSearchParams({api_key:env.TMDB_API_KEY,query:film.title||'',include_adult:'false',...(film.year?{year:String(film.year)}:{})});const response=await fetch(url,{signal:AbortSignal.timeout(4500)}),data=response.ok?await response.json():{};const found=(data.results||[]).find(item=>item.poster_path);return found?{...film,poster_url:`https://image.tmdb.org/t/p/w500${found.poster_path}`} : film;}catch{return film;}}
+export async function savePublicResult(env,result){
+  const db=env?.RESULTS_DB;if(!db)return null;const presentation=publicPresentation(result);if(presentation.opening?.top_four)presentation.opening.top_four=await Promise.all(presentation.opening.top_four.map(film=>posterFor(film,env)));const display=cleanText(result.profile?.handle||result.profile?.name,80)||'anonymous',key=handleKey(display),now=new Date().toISOString();
+  for(let attempt=0;attempt<8;attempt++){
+    const row=await db.prepare('SELECT COALESCE(MAX(judge_number),0)+1 AS number FROM public_results WHERE profile_key=?').bind(key).first(),number=Number(row?.number||1),slug=`@${encodeURIComponent(display)}/Judge-${String(number).padStart(2,'0')}`;
+    try{await db.prepare('INSERT INTO public_results (profile_key,profile_display,judge_number,slug,locale,description,presentation_json,created_at) VALUES (?,?,?,?,?,?,?,?)').bind(key,display,number,slug,result.locale||'pt-BR',resultDescription(result),JSON.stringify(presentation),now).run();return {slug:`/${slug}`,number,profile:display};}
+    catch(error){if(!/unique|constraint/i.test(String(error?.message)))throw error;}
+  }
+  throw new Error('result_number_conflict');
+}
+export async function getPublicResult(db,display,number){if(!db)return null;return db.prepare('SELECT * FROM public_results WHERE profile_key=? AND judge_number=?').bind(handleKey(display),Number(number)).first();}

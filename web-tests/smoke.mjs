@@ -12,7 +12,7 @@ for(const [width,height] of [[360,800],[390,844],[768,1024],[1366,768],[1920,108
  assert.equal(await page.locator('#landing').isVisible(),true);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.screenshot({path:`web-tests/artifacts/landing-${width}.png`,fullPage:true});
- await page.emulateMedia({reducedMotion:'reduce'});await page.goto(base+'/?demo=1');await page.locator('#ending').waitFor();
+ await page.emulateMedia({reducedMotion:'reduce'});await page.goto(base+'/?demo=1');await page.locator('#start-judgment').waitFor();assert.equal(await page.locator('#chat').textContent(),'');await page.locator('#start-judgment').click();await page.locator('#ending').waitFor();
  assert.equal(await page.locator('.top-four .film-card').count(),4);
  assert.equal(await page.locator('.attachment-film_pair .film-card').count(),2);
  assert.ok(await page.locator('.review').count()>0);assert.equal(await page.locator('.rewatch-timeline li').count(),3);
@@ -27,7 +27,7 @@ await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:true,pos
 await page.route('**/image.tmdb.org/**',route=>route.fulfill({contentType:'image/png',body:PIXEL}));
 await page.route('**/api/image-proxy?*',route=>route.fulfill({contentType:'image/png',body:PIXEL}));
 await page.evaluate(()=>localStorage.clear());
-await page.emulateMedia({reducedMotion:'reduce'});await page.goto(base+'/?demo=1');await page.locator('#ending').waitFor();
+await page.emulateMedia({reducedMotion:'reduce'});await page.goto(base+'/?demo=1');await page.locator('#start-judgment').waitFor();assert.equal(await page.locator('#chat').textContent(),'');await page.locator('#start-judgment').click();await page.locator('#ending').waitFor();
 assert.equal(await page.locator('.profile-review-card h3').isVisible(),true);
 assert.ok((await page.locator('.profile-review-card p').textContent()).trim().length>80);
 assert.ok((await page.locator('#profile-review .eyebrow').textContent()).trim().length>0);
@@ -89,10 +89,10 @@ await page.unroute('**/api/poster?*');
 await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false}}));
 
 await page.goto(base);await page.locator('#export').setInputFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from('x')});await page.locator('#upload-error').filter({hasText:'ZIP'}).waitFor();
-await page.route('**/api/judge',async route=>{await new Promise(resolve=>setTimeout(resolve,700));await route.fulfill({status:501,json:{error:'not_connected'}});});
-const previewZip=storedZip({'watched.csv':'Date,Name,Year\n2026-01-01,Loading Fixture One,2001\n2026-01-02,Loading Fixture Two,2002\n2026-01-03,Loading Fixture Three,2003\n'});await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:previewZip});
-await page.locator('#selected').waitFor();await page.locator('#judge').click();await page.locator('.loading-film-track').waitFor();assert.match(await page.locator('#loading-films').textContent(),/Loading Fixture/);assert.equal(await page.locator('#analyzing .typing').count(),0);assert.equal(await page.locator('#analyzing .indeterminate').count(),0);assert.equal(await page.locator('#loading-films').evaluate(node=>getComputedStyle(node).pointerEvents),'none');await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);await page.emulateMedia({reducedMotion:'no-preference'});
-await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#chat .typing').waitFor();
+await page.route('**/api/judge',async route=>{await new Promise(resolve=>setTimeout(resolve,6000));await route.fulfill({status:501,json:{error:'not_connected'}});});
+const previewRows=Array.from({length:12},(_,index)=>`2026-01-01,Loading Fixture ${index+1},${2001+index}`).join('\n'),previewZip=storedZip({'watched.csv':`Date,Name,Year\n${previewRows}\n`});await page.locator('#export').setInputFiles({name:'export.zip',mimeType:'application/zip',buffer:previewZip});
+await page.locator('#selected').waitFor();await page.locator('#judge').click();await page.locator('.loading-film-track').waitFor();const before=await page.locator('.loading-film-track .film-card').evaluateAll(nodes=>nodes.map(node=>node.dataset.film));assert.match(await page.locator('#loading-films').textContent(),/Loading Fixture/);assert.equal(await page.locator('#analyzing .typing').count(),0);assert.equal(await page.locator('#analyzing .indeterminate').count(),0);assert.equal(await page.locator('#loading-films').evaluate(node=>getComputedStyle(node).pointerEvents),'none');await page.screenshot({path:'web-tests/artifacts/loading-desktop.png',fullPage:true});await page.waitForFunction(first=>document.querySelector('.loading-film-track .film-card')?.dataset.film!==first,before[0]);const after=await page.locator('.loading-film-track .film-card').evaluateAll(nodes=>nodes.map(node=>node.dataset.film));assert.deepEqual(after.slice(0,-1),before.slice(1),'the belt advances exactly one card');assert.notEqual(after.at(-1),before.at(-1));await page.locator('#error').waitFor();assert.match(await page.locator('#error-message').textContent(),/não está disponível/);await page.emulateMedia({reducedMotion:'no-preference'});
+await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#start-judgment').waitFor();assert.equal(await page.locator('#chat').textContent(),'');await page.locator('#start-judgment').click();await page.locator('#chat .typing').waitFor();
 await page.goto(base);
 // No playback controls remain: the language menu is the header's only custom control.
 assert.equal(await page.locator('#controls').count(),0);
@@ -105,7 +105,7 @@ assert.equal(await page.locator('#landing h1 span').first().textContent(),'Every
 await page.locator('#language-menu summary').click();
 await page.locator('#language-menu [data-locale="pt-BR"]').click();
 assert.equal(await page.locator('#language-label').textContent(),'PT');
-await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#chat .typing').waitFor();
+await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(base+'/?demo=1');await page.locator('#start-judgment').waitFor();assert.equal(await page.locator('#chat').textContent(),'');await page.locator('#start-judgment').click();await page.locator('#chat .typing').waitFor();
 const early=(await page.locator('#chat').textContent()).length;await page.waitForTimeout(1500);const paced=(await page.locator('#chat').textContent()).length;
 assert.ok(paced>early,'the judgment is paced over time, not printed at once');
 // The queue is automatic: no pause, speed or skip control exists anymore.
@@ -120,7 +120,7 @@ catch{await page.mouse.wheel(0,-300);await page.locator('#bottom').waitFor({stat
 await page.locator('#bottom').click();await page.waitForTimeout(200);
 assert.deepEqual(errors,[]);await browser.close();
 for(const engine of (process.env.ALL_BROWSERS==='1'?[firefox,webkit]:[])){
- const b=await engine.launch();const p=await b.newPage({reducedMotion:'reduce'});await p.route('**/api/poster?*',r=>r.fulfill({json:{resolved:false}}));await p.goto(base+'/?demo=1');await p.locator('#ending').waitFor();assert.equal(await p.locator('.top-four .film-card').count(),4);await b.close();
+ const b=await engine.launch();const p=await b.newPage({reducedMotion:'reduce'});await p.route('**/api/poster?*',r=>r.fulfill({json:{resolved:false}}));await p.goto(base+'/?demo=1');await p.locator('#start-judgment').waitFor();assert.equal(await p.locator('#chat').textContent(),'');await p.locator('#start-judgment').click();await p.locator('#ending').waitFor();assert.equal(await p.locator('.top-four .film-card').count(),4);await b.close();
 }
 console.log('PASS: five viewports, real demo, every event, XSS text, real blockquotes, upload, API boundary, custom language menu, AI pacing, Top 4, scroll, reduced motion; Chromium'+(process.env.ALL_BROWSERS==='1'?'/Firefox/WebKit':'')+'.');
 

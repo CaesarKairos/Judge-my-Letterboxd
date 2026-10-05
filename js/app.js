@@ -1,10 +1,10 @@
-import {$,plainText,appendRich,richPlainText} from './utils.js';
+import {$,plainText,appendRich,richPlainText,validateScript} from './utils.js';
 import {locale,setLocale,t} from './i18n.js';
 import {setupUpload} from './upload.js';
 import {judgeExport} from './api.js';
 import {loadDemo} from './demo.js';
 import {ChatPlayer} from './chat-renderer.js';
-import {resolvePoster} from './poster-service.js';
+import {resolvePoster,filmCard} from './poster-service.js';
 import {makeShareCards,downloadCard} from './share-cards.js';
 import {startLoadingPreview} from './loading-preview.js';
 let player,script,request,sequence=0,loadingTimer,stopLoadingPreview,lastDemo=false,lastFailure=null,shareFormat='post';
@@ -63,6 +63,14 @@ async function renderEnding(){
   if(reviewText){const posterUrls=await Promise.all((script.opening?.top_four||[]).map(resolvePoster)),rendered=await makeShareCards(script,{posterUrls,format:shareFormat});for(const [name,canvas] of Object.entries(rendered)){const item=document.createElement('div');item.className='share-preview';item.append(canvas);const download=document.createElement('button');download.textContent=t('downloadCard');download.addEventListener('click',()=>downloadCard(canvas,`judge-${name}-${shareFormat}`));const share=document.createElement('button');share.textContent=t('shareCard');share.addEventListener('click',async()=>{canvas.toBlob(async blob=>{const file=new File([blob],`judge-${name}-${shareFormat}.png`,{type:'image/png'});if(navigator.canShare?.({files:[file]}))await navigator.share({files:[file],title:t('shareTitle')});else downloadCard(canvas,`judge-${name}-${shareFormat}`);},'image/png');});item.append(download,share);previews.append(item);}}
 }
 function home(){stop();show('landing');(upload.file?$('#judge'):$('#export')).focus();}
+function ready({direct=false}={}){
+  clearInterval(loadingTimer);stopLoadingPreview?.finish?.();const analyzing=$('#analyzing');analyzing.dataset.ready='true';
+  $('#analyzing-title').textContent=locale==='pt-BR'?'Seu julgamento está pronto.':'Your judgment is ready.';$('#loading-copy').textContent=direct?`@${script.profile?.handle||script.profile?.name||''} · Judge #${String(script.public_result?.number||'').padStart(2,'0')}`:(locale==='pt-BR'?'O Judge terminou. Entre quando estiver pronto.':'The Judge is done. Enter when you are ready.');
+  const summary=$('#ready-summary'),archetype=script.opening?.archetype_text||script.opening?.top_four_archetype?.phrase||'';summary.textContent=direct?archetype:'';summary.hidden=!direct||!archetype;
+  const button=$('#start-judgment');button.textContent=direct?(locale==='pt-BR'?'VER JULGAMENTO':'VIEW JUDGMENT'):(locale==='pt-BR'?'IR PARA O JULGAMENTO':'GO TO THE JUDGMENT');button.hidden=false;
+  if(direct){const host=$('#loading-films');host.replaceChildren();const track=document.createElement('div');track.className='loading-film-track settling';for(const film of script.opening?.top_four||[])track.append(filmCard(film,{showRating:false,eager:true}));host.append(track);}
+  button.focus({preventScroll:true});
+}
 async function play(all=false){
   document.body.classList.toggle('skip-motion',all);
   player?.stop();$('#chat').replaceChildren();$('#ending').hidden=true;
@@ -74,10 +82,10 @@ async function play(all=false){
 }
 async function start(demo=false){
   if(!demo&&!upload.file)return;
-  stop();lastDemo=demo;const current=sequence;request=new AbortController();show('analyzing');
+  stop();delete $('#analyzing').dataset.ready;$('#start-judgment').hidden=true;$('#ready-summary').hidden=true;$('#analyzing-title').textContent=t('analyzing');lastDemo=demo;const current=sequence;request=new AbortController();show('analyzing');
   const copy=t('loading').split('|');let i=0;$('#loading-copy').textContent=copy[0];if(!demo)stopLoadingPreview=startLoadingPreview(upload.file,$('#loading-films'));
   loadingTimer=setInterval(()=>{$('#loading-copy').textContent=copy[Math.min(++i,copy.length-1)];},2400);
-  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;clearInterval(loadingTimer);stopLoadingPreview?.();stopLoadingPreview=null;try{sessionStorage.setItem('judge.presentation',JSON.stringify(script));}catch{}await play();}
+  try{script=await(demo?loadDemo(request.signal):judgeExport(upload.file,locale,request.signal));if(current!==sequence)return;lastFailure=null;$('#local-analysis').hidden=true;try{sessionStorage.setItem('judge.presentation',JSON.stringify(script));}catch{}if(script.public_result?.slug)history.replaceState({publicResult:true},'',script.public_result.slug);ready();}
   catch(error){if(current!==sequence)return;clearInterval(loadingTimer);stopLoadingPreview?.();stopLoadingPreview=null;lastFailure=error.payload||null;$('#local-analysis').hidden=!(['aiUnavailable','analystUnavailable','writerUnavailable'].includes(error.message)&&lastFailure?.deterministic_analysis_available);const copy=t(error.message);$('#error-message').textContent=copy===error.message?t('invalid'):copy;renderTechnicalDetails(error.message,lastFailure);show('error');}
 }
 $('#upload-form').addEventListener('submit',e=>{e.preventDefault();start();});
@@ -91,12 +99,14 @@ $('#local-analysis').addEventListener('click',async()=>{
   await play();
 });
 $('#replay').addEventListener('click',()=>play());
+$('#start-judgment').addEventListener('click',()=>{stopLoadingPreview?.();stopLoadingPreview=null;delete $('#analyzing').dataset.ready;$('#start-judgment').hidden=true;play();});
 $('#show-all').addEventListener('click',()=>play(true));
 $('#share').addEventListener('click',async()=>{
+  if(script.public_result?.slug){const url=new URL(script.public_result.slug,location.origin).href,title=t('shareTitle'),text=script.opening?.archetype_text||title;try{if(navigator.share)await navigator.share({title,text,url});else{await navigator.clipboard.writeText(url);$('#share-status').textContent=t('shared');}}catch(error){if(error.name!=='AbortError')$('#share-status').textContent=url;}return;}
   const canvases=[...document.querySelectorAll('#share-card-previews canvas')];if(!canvases.length)return;
   const files=await Promise.all(canvases.map((canvas,index)=>new Promise(resolve=>canvas.toBlob(blob=>resolve(new File([blob],`judge-${index+1}.png`,{type:'image/png'})),'image/png'))));
   try{if(navigator.canShare?.({files}))await navigator.share({title:t('shareTitle'),files});else{canvases.forEach((canvas,index)=>downloadCard(canvas,`judge-${index+1}`));$('#share-status').textContent=t('download');}}
   catch(error){if(error.name!=='AbortError'){$('#share-status').textContent=t('download');canvases.forEach((canvas,index)=>downloadCard(canvas,`judge-${index+1}`));}}
 });
 document.querySelectorAll('[data-share-format]').forEach(button=>button.addEventListener('click',async()=>{shareFormat=button.dataset.shareFormat;document.querySelectorAll('[data-share-format]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));await renderEnding();}));
-if(new URLSearchParams(location.search).get('demo')==='1')start(true);
+const embedded=$('#public-result');if(embedded){try{script=validateScript(JSON.parse(embedded.textContent));if(script.locale){setLocale(script.locale);chooseLocale(script.locale);}const match=location.pathname.match(/Judge-(\d+)/i);script.public_result={slug:location.pathname,number:Number(match?.[1]||0),profile:script.profile?.handle};show('analyzing');ready({direct:true});}catch{show('error');$('#error-message').textContent=t('invalid');}}else if(new URLSearchParams(location.search).get('demo')==='1')start(true);

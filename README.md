@@ -100,7 +100,14 @@ npx wrangler pages dev dist
 npx wrangler pages deploy dist --project-name judge-my-letterboxd
 ```
 
-O `_routes.json` envia somente `/api/*` às Functions. Configure `TMDB_API_KEY`
+O `_routes.json` envia `/api/*` e as páginas públicas `/@*` às Functions. Resultados
+compartilháveis usam D1: crie o banco, aplique `migrations/0001_public_results.sql` e
+associe-o ao Pages com o binding `RESULTS_DB` (veja `wrangler.example.toml`). A chave
+única `(profile_key, judge_number)` evita numeração duplicada sob concorrência. As
+páginas individuais usam `noindex,follow`: continuam compartilháveis, mas não entram
+no sitemap nem transformam perfis pessoais em índice público pesquisável.
+
+Configure `TMDB_API_KEY`
 e `GEMINI_API_KEY` como secrets nas configurações do Pages. `GEMINI_MODEL` e
 `GEMINI_FALLBACK_MODELS` são variáveis opcionais; os padrões formam uma cadeia entre
 `gemini-flash-latest`, `gemini-3.8-flash` e `gemini-3.5-flash-lite`. Configure os secrets nos

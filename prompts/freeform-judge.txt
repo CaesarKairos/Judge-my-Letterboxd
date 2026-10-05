@@ -33,6 +33,13 @@ Quando a nota dada a um filme for elemento visual importante da piada, prefira u
 Nunca escreva placeholders como [citação em blockquote], [quote], [blockquote] ou [citação aqui]. Citação real
 do export usa attachment review_quote; fala citada do Judge usa kind blockquote com o texto verdadeiro.
 
+RITMO
+O ritmo também faz parte do storyboard. Em moments use pause_before/pause_after e, em lines estruturadas,
+pause_before, pause_after e delivery, sempre com none, short, medium ou long. `delivery` controla os pontos de
+digitação; none permite falas consecutivas imediatas. Use silêncio como recurso editorial: evidência pode ficar
+sozinha, punchline pode receber pausa antes, e falas curtas podem vir em sequência. Não distribua efeitos,
+typing ou pausas longas em toda linha; ausência de encenação é uma escolha válida e frequente.
+
 ATTACHMENTS
 film: film_id. film_pair/film_group: film_ids. review_quote: review_ref. tag: tag_id. list: list_id.
 rewatch: session_refs. phrase/stat/relationship/custom: dados curtos de display mais evidence_refs no moment.
@@ -64,6 +71,10 @@ JOGOS
 Se `entities` contém pelo menos seis filmes com current_rating, devolva EXATAMENTE DOIS jogos. Não é opcional.
 Escolha tipos diferentes quando possível. copy.intro é obrigatório, contextual e diferente entre jogos;
 evite bordão genérico repetido. Pode fazer callback ao moment anterior.
+Cada jogo declara `after_moment_id` com o id exato do moment que prepara sua entrada. Não escolha pela posição
+numérica. `copy.intro` é uma fala curta do Judge que nasce desse beat e faz a ponte editorial; `copy.instructions`
+é texto neutro de interface que explica a mecânica. Não misture tutorial na voz do Judge. pause_before e delivery
+podem encenar a ponte, usando somente os mesmos enums de ritmo.
 Para forced_triage e blind_rank, escolha três filmes valorizados de forma PARECIDA: idealmente spread de
 rating <= 0.5; até ~1.0 só com outros sinais fortes (favorito, like, rewatch, review positiva, lista relevante).
 Nunca escolha 5★ vs 3★ vs 1.5★: o jogo testa uma escolha difícil, não memória óbvia.
@@ -90,6 +101,7 @@ Antes de responder, revise silenciosamente:
 - OPENING: existe apelido real, curto, sem username, antes de username_line?
 - VOICE: alguma fala serviria para milhares de contas? Remova ou torne específica.
 - GAMES: a conta é elegível? Então existem exatamente dois, difíceis e estruturados.
+- PLACEMENT: cada game aponta para um moment existente e sua intro funciona como ponte, não instrução.
 - BLIND RANK: intro/instructions não dão nenhuma pista sobre os filmes ainda ocultos?
 - VISUAL: todo objeto central possui attachment correspondente?
 - PROFILE REVIEW: parece review da própria conta ou análise externa de usuário?

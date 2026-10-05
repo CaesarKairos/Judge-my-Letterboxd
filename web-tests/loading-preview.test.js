@@ -9,3 +9,8 @@ test('loading preview reads unique watched films locally from the selected ZIP',
  const zip=storedZip({'watched.csv':'Date,Name,Year\n2026-01-01,Fixture Film,2001\n2026-01-02,Second Fixture,2002\n','ratings.csv':'Date,Name,Year,Rating\n2026-01-03,Fixture Film,2001,5\n2026-01-04,Third Fixture,2003,4.5\n'}),file=new Blob([zip]);
  const films=await filmsFromExport(file);assert.deepEqual(new Set(films.map(film=>film.title)),new Set(['Fixture Film','Second Fixture','Third Fixture']));assert.equal(films.length,3);
 });
+
+test('loading preview keeps the complete 106-film deduplicated pool',async()=>{
+ const rows=Array.from({length:106},(_,index)=>`2026-01-01,Film ${index+1},${1900+index}`).join('\n'),duplicates='Date,Name,Year,Rating\n2026-01-01,Film 1,1900,5\n2026-01-01,Film 106,2005,4\n',file=new Blob([storedZip({'watched.csv':`Date,Name,Year\n${rows}\n`,'ratings.csv':duplicates,'diary.csv':'Date,Name,Year\n2026-01-01,Film 50,1949\n'})]);
+ const films=await filmsFromExport(file);assert.equal(films.length,106);assert.equal(new Set(films.map(film=>`${film.title}|${film.year}`)).size,106);
+});
