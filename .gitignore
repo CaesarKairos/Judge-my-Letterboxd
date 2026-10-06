@@ -12,3 +12,4 @@ dist/
 .dev.vars*
 !.dev.vars.example
 web-tests/artifacts/
+wrangler.local.toml
