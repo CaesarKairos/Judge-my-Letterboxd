@@ -20,6 +20,9 @@ export const modelScore=(name,explicit=false)=>modelTier(name)*10000+generation(
 export const DISCOVERY_LIMIT=20;
 // Safety ceiling only, for a runaway loop; a stage is limited by its deadline, not by a count.
 export const MODEL_SAFETY_CEILING=24;
+// Freeform requests carry the complete archive. Keep this chain deliberately small: discovery
+// ranks candidates, but does not make twenty expensive probes appropriate for one session.
+export const FREEFORM_MODEL_LIMIT=4;
 export async function discoverTextModels(env){
   if(!env.GEMINI_API_KEY||env.GEMINI_MODEL_DISCOVERY==='0')return [];
   try{

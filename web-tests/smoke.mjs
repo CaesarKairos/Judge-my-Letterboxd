@@ -86,7 +86,7 @@ await page.waitForFunction(()=>document.querySelector('.poster-fallback .film-sy
 assert.ok(await page.locator('.poster-fallback .film-symbol').first().evaluate(node=>node.naturalWidth>0),'o ícone do cartaz abstrato precisa carregar');
 await page.evaluate(()=>localStorage.clear());
 await page.unroute('**/api/poster?*');
-await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:false}}));
+await page.route('**/api/poster?*',route=>route.fulfill({json:{resolved:true,poster_url:'https://image.tmdb.org/t/p/w342/loading-fixture.png'}}));
 
 await page.goto(base);await page.locator('#export').setInputFiles({name:'bad.txt',mimeType:'text/plain',buffer:Buffer.from('x')});await page.locator('#upload-error').filter({hasText:'ZIP'}).waitFor();
 await page.route('**/api/judge',async route=>{await new Promise(resolve=>setTimeout(resolve,20000));await route.fulfill({status:501,json:{error:'not_connected'}});});

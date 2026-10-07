@@ -1,4 +1,4 @@
-import {discoverTextModels,mergeModels,modelUnavailable,noteModelFailure} from '../models.js';
+import {discoverTextModels,mergeModels,modelUnavailable,noteModelFailure,FREEFORM_MODEL_LIMIT} from '../models.js';
 import {salvageJson} from '../json-repair.js';
 import {FREEFORM_JUDGE_PROMPT,JUDGE_VOICE_PROMPT} from '../generated-prompts.js';
 import {validateFreeformResponse} from './validator.js';
@@ -16,8 +16,19 @@ const schema={type:'OBJECT',required:['opening','moments','games','closer','endi
 
 const responseText=body=>(body?.candidates?.[0]?.content?.parts||[]).map(part=>part.text||'').join('');
 const contextFailure=(status,body)=>status===413||status===400&&/context|token|too (large|long)|input size/i.test(JSON.stringify(body));
-// A 400 that names the response schema is a provider incompatibility, never a content problem.
-const schemaRejected=(status,body)=>status===400&&/responseschema|response_schema|response.?mime|schema/i.test(JSON.stringify(body||{}));
+const providerText=body=>String(body?.error?.message||'');
+const safeProviderError=(status,body)=>({code:body?.error?.code??status,status:String(body?.error?.status||''),message_category:status===400?categorizeBadRequest(body):status===404?'model_unavailable':status===429?'capacity_limit':status===503?'provider_unavailable':'provider_error'});
+export const categorizeBadRequest=body=>{
+  const message=providerText(body);
+  if(/thinkingConfig|thinking[_ ]?config|thinkingBudget/i.test(message))return 'unsupported_thinking_config';
+  if(/responseSchema|response_schema|schema/i.test(message))return 'unsupported_response_schema';
+  if(/responseMimeType|response_mime|mime.?type/i.test(message))return 'unsupported_response_mime';
+  if(/generationConfig|generation_config/i.test(message))return 'invalid_generation_config';
+  if(/unknown (field|name)|unrecognized|invalid (field|argument|value)/i.test(message))return 'invalid_request';
+  return 'unknown_400';
+};
+const compatibilityFlags=body=>{const message=providerText(body);return {mentions_thinking:/thinkingConfig|thinking[_ ]?config|thinkingBudget/i.test(message),mentions_schema:/responseSchema|response_schema|schema/i.test(message),mentions_mime:/responseMimeType|response_mime|mime.?type/i.test(message),mentions_invalid_field:/unknown (field|name)|unrecognized|invalid (field|argument|value)/i.test(message)};};
+const capacityReason=body=>{const error=body?.error||{},text=`${error.status||''} ${error.message||''}`;return /quota|billing|daily limit|per day/i.test(text)?'quota_exceeded':'rate_limited';};
 
 // One model reply → normalize references → validate → repair the specific broken components.
 // Normalization runs first on purpose: an evidence_ref written as an entity id becomes the real
@@ -58,11 +69,14 @@ export const classifyFinalReason=({attempts,best,fallback='no_usable_model_respo
     if(best)return 'core_incomplete';
     return successful.some(row=>row.finishReason&&row.finishReason!=='STOP')?'truncated_output':'invalid_response';
   }
-  const attempted=main.filter(row=>row.status!==404),limited=attempted.filter(row=>row.status===429);
+  const attempted=main.filter(row=>row.status>0),limited=attempted.filter(row=>row.status===429),unavailable=attempted.filter(row=>row.status===503);
   if(attempted.length&&limited.length/attempted.length>=.8){
     const quota=limited.filter(row=>row.reason==='quota_exceeded').length;
     return quota===limited.length?'quota_exceeded':'rate_limited';
   }
+  if(attempted.length&&unavailable.length/attempted.length>.5)return 'provider_unavailable';
+  // No transport class dominates: this is precisely a mixed failure before usable output.
+  if(attempted.length)return 'no_usable_model_response';
   return strongestReason(attempts.map(row=>row.reason).filter(Boolean))||fallback;
 };
 
@@ -72,37 +86,37 @@ export async function freeformJudge({archive,locale,env}){
   if(archiveJson.length>limit){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
   const systemInstruction=`${JUDGE_VOICE_PROMPT}\n\n${FREEFORM_JUDGE_PROMPT}`;
   const dataPrompt=`Language: ${locale==='en-US'?'English':'Brazilian Portuguese'}. acid_level=0.8.\n<ARCHIVE_DATA>\n${archiveJson}\n</ARCHIVE_DATA>`;
-  const discovered=await discoverTextModels(env),configured=[env.GEMINI_FREEFORM_MODEL||env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_FREEFORM_FALLBACK_MODELS||env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(v=>v.trim()).filter(Boolean)],models=mergeModels(configured,discovered);
+  const discovered=await discoverTextModels(env),configured=[env.GEMINI_FREEFORM_MODEL||env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_FREEFORM_FALLBACK_MODELS||env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(v=>v.trim()).filter(Boolean)],models=mergeModels(configured,discovered,FREEFORM_MODEL_LIMIT);
   const registry=buildFreeformRegistry(archive);
   const attempts=[],deadline=Date.now()+190000;let lastReason='no_usable_model_response',best=null;
   const keepReason=reason=>{lastReason=strongestReason([lastReason,reason].filter(Boolean))||reason;};
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
-    let thinking=true,useSchema=true;
-    for(let attempt=0;attempt<2&&Date.now()<deadline;attempt++){
-      const generationConfig={temperature:.8,maxOutputTokens:16384,responseMimeType:'application/json',...(useSchema?{responseSchema:schema}:{}),...(thinking?{thinkingConfig:{thinkingBudget:0}}:{})};
+    const capabilities={thinking:true,schema:true,mime:true};
+    for(let compatibilityAttempt=0;compatibilityAttempt<4&&Date.now()<deadline;compatibilityAttempt++){
+      const generationConfig={temperature:.8,maxOutputTokens:16384,...(capabilities.mime?{responseMimeType:'application/json'}:{}),...(capabilities.schema?{responseSchema:schema}:{}),...(capabilities.thinking?{thinkingConfig:{thinkingBudget:0}}:{})};
       const body={system_instruction:{parts:[{text:systemInstruction}]},contents:[{role:'user',parts:[{text:dataPrompt}]}],generationConfig};
       let response,result;
       try{response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1000,Math.min(65000,deadline-Date.now())))});result=await response.json();}
-      catch(error){attempts.push({model,status:0,finishReason:null,schema:useSchema,error:error.name,reason:'network_error'});keepReason('network_error');continue;}
-      const record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,schema:useSchema};
+      catch(error){attempts.push({model,status:0,finishReason:null,schema:capabilities.schema,mime:capabilities.mime,thinking:capabilities.thinking,error:error.name,reason:'network_error',action:'next_model'});keepReason('network_error');break;}
+      const record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,schema:capabilities.schema,mime:capabilities.mime,thinking:capabilities.thinking};
       attempts.push(record);
       if(contextFailure(response.status,result)){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
       if(!response.ok){
-        noteModelFailure(env,model,response.status);
-        // Two provider incompatibilities, never content problems: a rejected thinkingConfig, then a
-        // rejected responseSchema. The second retries in plain JSON mode so the local validator still runs.
-        if(response.status===400&&thinking){thinking=false;attempt--;continue;}
-        if(useSchema&&schemaRejected(response.status,result)){useSchema=false;record.schema_rejected=true;keepReason('schema_rejected');attempt--;continue;}
-        if(response.status===429){
-          const detail=JSON.stringify(result||{});
-          record.reason=/quota|billing/i.test(detail)?'quota_exceeded':'rate_limited';keepReason(record.reason);
-          // Retrying the same model immediately cannot change an account/model rate limit.
-          // Continue with the next fallback instead of spending all three attempts on one 429.
-          break;
+        record.provider_error=safeProviderError(response.status,result);
+        if(response.status===400){
+          record.reason=categorizeBadRequest(result);Object.assign(record,compatibilityFlags(result));
+          if(record.reason==='unsupported_thinking_config'&&capabilities.thinking){capabilities.thinking=false;record.retry_action='thinking_disabled';continue;}
+          if(record.reason==='unsupported_response_schema'&&capabilities.schema){capabilities.schema=false;record.retry_action='schema_disabled';continue;}
+          if(record.reason==='unsupported_response_mime'&&capabilities.mime){capabilities.mime=false;capabilities.schema=false;record.retry_action='mime_and_schema_disabled';continue;}
+          record.action='model_incompatible';keepReason('provider_error');break;
         }
-        if(response.status===404)break;
-        record.reason='provider_error';keepReason('provider_error');continue;
+        if(response.status===429){
+          record.reason=capacityReason(result);record.action='model_skipped';noteModelFailure(env,model,response.status);keepReason(record.reason);break;
+        }
+        if(response.status===404){record.reason='model_unavailable';record.action='model_skipped';noteModelFailure(env,model,response.status);break;}
+        if(response.status===503){record.reason='provider_unavailable';record.action='next_model';keepReason(record.reason);break;}
+        record.reason='provider_error';record.action='next_model';keepReason('provider_error');break;
       }
       const raw=responseText(result),reply=await evaluateReply({raw,archive,registry,env,model,deadline,attempts,repairBudget:6});
       const decorated=reply?{...reply,_model:model,_response_chars:raw.length,_finish_reason:record.finishReason}:null;

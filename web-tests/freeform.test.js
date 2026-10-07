@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildFreeformArchive} from '../functions/_lib/freeform/archive-json.js';
 import {validateFreeformResponse} from '../functions/_lib/freeform/validator.js';
-import {freeformJudge} from '../functions/_lib/freeform/judge.js';
+import {freeformJudge,classifyFinalReason,categorizeBadRequest} from '../functions/_lib/freeform/judge.js';
 import {materializeFreeform} from '../functions/_lib/freeform/materializer.js';
 import {validArchetype} from '../functions/_lib/freeform/validator.js';
 import {buildFreeformRegistry,normalizeFreeformReferences} from '../functions/_lib/freeform/references.js';
@@ -200,7 +200,7 @@ test('a provider that rejects responseSchema is retried in plain JSON mode inste
   assert.equal(sawSchema,true);
   assert.ok(plain>=1);
   assert.equal(result.generation_status,'complete');
-  assert.equal(result._attempts.some(row=>row.schema_rejected),true);
+  assert.equal(result._attempts.some(row=>row.reason==='unsupported_response_schema'&&row.retry_action==='schema_disabled'),true);
 });
 
 test('AI_FAILED carries the stage, reason and validation summary without private content',async t=>{
@@ -226,7 +226,37 @@ test('Freeform does not let a dead model consume the whole fallback chain',async
   const {ai}=await buildFreeformArchive(fixtureEntries());let primary=0,backup=0;
   t.mock.method(globalThis,'fetch',async url=>{if(String(url).includes('/primary:')){primary++;return Response.json({error:{status:'UNAVAILABLE',message:'busy'}},{status:503});}backup++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
   const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_FALLBACK_MODELS:'backup',GEMINI_MODEL_DISCOVERY:'0'}});
-  assert.equal(primary,2);assert.equal(backup,1);assert.equal(result._model,'backup');assert.equal(result.core_contract_complete,true);
+  assert.equal(primary,1);assert.equal(backup,1);assert.equal(result._model,'backup');assert.equal(result.core_contract_complete,true);
+});
+
+test('Freeform removes only the incompatible request capability named by each 400',async t=>{
+  const {ai}=await buildFreeformArchive(fixtureEntries()),configs=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const config=JSON.parse(options.body).generationConfig;configs.push(config);if(config.thinkingConfig)return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'Unknown field thinkingConfig'}},{status:400});if(config.responseSchema)return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'responseSchema is not supported'}},{status:400});if(config.responseMimeType)return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'responseMimeType is unsupported'}},{status:400});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});
+  assert.equal(configs.length,4);assert.ok(configs[0].thinkingConfig&&configs[0].responseSchema);assert.equal(configs[1].thinkingConfig,undefined);assert.ok(configs[1].responseSchema);assert.equal(configs[2].responseSchema,undefined);assert.equal(configs[2].responseMimeType,'application/json');assert.equal(configs[3].responseMimeType,undefined);assert.equal(result.core_contract_complete,true);
+});
+
+test('a second unknown 400 abandons the model instead of probing it again',async t=>{
+  const {ai}=await buildFreeformArchive(fixtureEntries());let bad=0,good=0;
+  t.mock.method(globalThis,'fetch',async url=>{if(String(url).includes('/bad:')){bad++;return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'Request rejected'}} ,{status:400});}good++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'bad',GEMINI_FALLBACK_MODELS:'good',GEMINI_MODEL_DISCOVERY:'0'}});assert.equal(bad,1);assert.equal(good,1);assert.equal(result._model,'good');
+});
+
+test('404, 429 and 503 each skip a model immediately and preserve a useful action',async t=>{
+  const {ai}=await buildFreeformArchive(fixtureEntries()),statuses=[404,429,503],seen=[];
+  t.mock.method(globalThis,'fetch',async url=>{const model=decodeURIComponent(String(url).match(/models\/([^:]+)/)?.[1]||'');if(model.endsWith('-good'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});const status=statuses[seen.length];seen.push(status);return Response.json({error:{code:status,status:status===429?'RESOURCE_EXHAUSTED':status===503?'UNAVAILABLE':'NOT_FOUND',message:status===429?'temporary request rate limit':'unavailable'}},{status});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'gone',GEMINI_FALLBACK_MODELS:'gemini-4-flash-limited,gemini-3-flash-busy,gemini-2-flash-good',GEMINI_MODEL_DISCOVERY:'0'}});
+  assert.deepEqual(seen,[404,429,503]);assert.equal(result._attempts.find(row=>row.status===404).action,'model_skipped');assert.equal(result._attempts.find(row=>row.status===429).action,'model_skipped');assert.equal(result._attempts.find(row=>row.status===503).action,'next_model');assert.equal(result._model,'gemini-2-flash-good');
+});
+
+test('provider 400 diagnostics are categorical and never preserve its full message',()=>{
+  assert.equal(categorizeBadRequest({error:{message:'Invalid responseMimeType on this endpoint'}}),'unsupported_response_mime');
+});
+
+test('the production-shaped 12/7/9/3 transport mix is not mislabeled as quota',()=>{
+  const rows=(status,count,reason)=>Array.from({length:count},()=>({status,reason}));
+  const attempts=[...rows(429,12,'quota_exceeded'),...rows(503,7,'provider_unavailable'),...rows(400,9,'unknown_400'),...rows(404,3,'model_unavailable')];
+  assert.equal(classifyFinalReason({attempts,best:null}),'no_usable_model_response');
 });
 
 test('broken opening and zero games are core incomplete, never publishable partial',async()=>{
