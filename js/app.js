@@ -50,7 +50,7 @@ function renderTechnicalDetails(reason,payload){
   const lines=[`${t('technicalStage')}: ${stage||'unknown'}`,`${t('technicalAttempts')}: ${attempts.length}`,`${t('technicalReason')}: ${payload.reason||payload.error||reason}`];
   const summary=payload.validation_summary;
   if(summary&&Number.isFinite(summary.moments_received))lines.push(`${t('technicalMoments')}: ${summary.moments_valid||0}/${summary.moments_received}`);
-  for(const row of attempts)lines.push(`${row.repair?'repair':'main'} ${row.model||'unknown'}: HTTP ${row.status??0}, finish ${row.finishReason||'-'}, schema ${row.schema===true?'yes':row.schema===false?'no':'n/a'}${row.reason?`, reason ${row.reason}`:''}${row.retry_action?`, retry ${row.retry_action}`:''}${row.action?`, action ${row.action}`:''}${row.provider_error?.status?`, provider ${row.provider_error.status}`:''}${row.provider_error?.message_category?`, category ${row.provider_error.message_category}`:''}`);
+  for(const row of attempts)lines.push(`${row.repair?'repair':'main'} ${row.model||'unknown'}: HTTP ${row.status??0}, finish ${row.finishReason||'-'}, thinking ${row.thinking===true?'yes':row.thinking===false?'no':'n/a'}, schema ${row.schema===true?'yes':row.schema===false?'no':'n/a'}, mime ${row.mime===true?'yes':row.mime===false?'no':'n/a'}${row.reason?`, reason ${row.reason}`:''}${row.retry_action?`, retry ${row.retry_action}`:''}${row.action?`, action ${row.action}`:''}${row.provider_error?.status?`, provider ${row.provider_error.status}`:''}${row.provider_error?.message_category?`, category ${row.provider_error.message_category}`:''}`);
   copy.textContent=lines.join('\n');
 }
 async function renderEnding(){

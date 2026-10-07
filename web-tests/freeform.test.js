@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildFreeformArchive} from '../functions/_lib/freeform/archive-json.js';
 import {validateFreeformResponse} from '../functions/_lib/freeform/validator.js';
-import {freeformJudge,classifyFinalReason,categorizeBadRequest} from '../functions/_lib/freeform/judge.js';
+import {freeformJudge,classifyFinalReason,categorizeBadRequest,thinkingConfigForModel} from '../functions/_lib/freeform/judge.js';
 import {materializeFreeform} from '../functions/_lib/freeform/materializer.js';
 import {validArchetype} from '../functions/_lib/freeform/validator.js';
 import {buildFreeformRegistry,normalizeFreeformReferences} from '../functions/_lib/freeform/references.js';
@@ -232,14 +232,21 @@ test('Freeform does not let a dead model consume the whole fallback chain',async
 test('Freeform removes only the incompatible request capability named by each 400',async t=>{
   const {ai}=await buildFreeformArchive(fixtureEntries()),configs=[];
   t.mock.method(globalThis,'fetch',async(url,options)=>{const config=JSON.parse(options.body).generationConfig;configs.push(config);if(config.thinkingConfig)return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'Unknown field thinkingConfig'}},{status:400});if(config.responseSchema)return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'responseSchema is not supported'}},{status:400});if(config.responseMimeType)return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'responseMimeType is unsupported'}},{status:400});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
-  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'gemini-2.5-flash-test',GEMINI_MODEL_DISCOVERY:'0'}});
   assert.equal(configs.length,4);assert.ok(configs[0].thinkingConfig&&configs[0].responseSchema);assert.equal(configs[1].thinkingConfig,undefined);assert.ok(configs[1].responseSchema);assert.equal(configs[2].responseSchema,undefined);assert.equal(configs[2].responseMimeType,'application/json');assert.equal(configs[3].responseMimeType,undefined);assert.equal(result.core_contract_complete,true);
 });
 
-test('a second unknown 400 abandons the model instead of probing it again',async t=>{
+test('four generic INVALID_ARGUMENT responses exhaust distinct capabilities before abandoning the model',async t=>{
   const {ai}=await buildFreeformArchive(fixtureEntries());let bad=0,good=0;
-  t.mock.method(globalThis,'fetch',async url=>{if(String(url).includes('/bad:')){bad++;return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'Request rejected'}} ,{status:400});}good++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
-  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'bad',GEMINI_FALLBACK_MODELS:'good',GEMINI_MODEL_DISCOVERY:'0'}});assert.equal(bad,1);assert.equal(good,1);assert.equal(result._model,'good');
+  t.mock.method(globalThis,'fetch',async(url,options)=>{if(String(url).includes('/gemini-2.5-flash-bad:')){bad++;return Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:'Invalid argument.'}} ,{status:400});}good++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(fullResponse())}]}}]});});
+  const result=await freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'gemini-2.5-flash-bad',GEMINI_FALLBACK_MODELS:'gemini-2.4-flash-good',GEMINI_MODEL_DISCOVERY:'0'}}),rows=result._attempts.filter(row=>row.model==='gemini-2.5-flash-bad');
+  assert.equal(bad,4);assert.equal(good,1);assert.deepEqual(rows.map(row=>row.retry_action),['thinking_disabled','schema_disabled','mime_disabled',undefined]);assert.deepEqual(rows.map(row=>row.capabilities_before),[{thinking:true,schema:true,mime:true},{thinking:false,schema:true,mime:true},{thinking:false,schema:false,mime:true},{thinking:false,schema:false,mime:false}]);assert.deepEqual(rows.slice(0,3).map(row=>row.capabilities_after),[{thinking:false,schema:true,mime:true},{thinking:false,schema:false,mime:true},{thinking:false,schema:false,mime:false}]);assert.equal(rows.at(-1).action,'model_incompatible');assert.equal(result._model,'gemini-2.4-flash-good');
+});
+
+test('thinking configuration follows the explicit model family and stays off for aliases',()=>{
+  assert.deepEqual(thinkingConfigForModel('gemini-3.8-flash'),{thinkingLevel:'low'});
+  assert.deepEqual(thinkingConfigForModel('gemini-2.5-flash'),{thinkingBudget:0});
+  assert.equal(thinkingConfigForModel('gemini-flash-latest'),null);
 });
 
 test('404, 429 and 503 each skip a model immediately and preserve a useful action',async t=>{

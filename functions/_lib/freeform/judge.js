@@ -13,6 +13,7 @@ const schema={type:'OBJECT',required:['opening','moments','games','closer','endi
   games:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','film_ids','evidence_refs','after_moment_id','copy'],properties:{id:{type:'STRING'},type:{type:'STRING'},after_moment_id:{type:'STRING'},pause_before:rhythm,delivery:rhythm,film_ids:filmIds,evidence_refs:strings,difficulty:{type:'STRING'},why_difficult:{type:'STRING'},copy:{type:'OBJECT',required:['intro','instructions','roles','reaction_hints'],properties:{intro:{type:'STRING'},instructions:{type:'STRING'},question:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},roles:{type:'ARRAY',items:role},reaction_hints:{type:'ARRAY',items:hint},choices:{type:'ARRAY',items:choice},result_reactions:{type:'OBJECT',properties:{match:{type:'STRING'},near_match:{type:'STRING'},chaotic_mismatch:{type:'STRING'},historically_tied:{type:'STRING'}}}}}}}},
   closer:strings,ending:{type:'OBJECT',properties:{title:{type:'STRING'}}},profile_review:{type:'OBJECT',required:['text','evidence_refs'],properties:{text:richValue,evidence_refs:{type:'ARRAY',items:{type:'STRING'}}}}
 }};
+export {schema as freeformResponseSchema};
 
 const responseText=body=>(body?.candidates?.[0]?.content?.parts||[]).map(part=>part.text||'').join('');
 const contextFailure=(status,body)=>status===413||status===400&&/context|token|too (large|long)|input size/i.test(JSON.stringify(body));
@@ -29,6 +30,14 @@ export const categorizeBadRequest=body=>{
 };
 const compatibilityFlags=body=>{const message=providerText(body);return {mentions_thinking:/thinkingConfig|thinking[_ ]?config|thinkingBudget/i.test(message),mentions_schema:/responseSchema|response_schema|schema/i.test(message),mentions_mime:/responseMimeType|response_mime|mime.?type/i.test(message),mentions_invalid_field:/unknown (field|name)|unrecognized|invalid (field|argument|value)/i.test(message)};};
 const capacityReason=body=>{const error=body?.error||{},text=`${error.status||''} ${error.message||''}`;return /quota|billing|daily limit|per day/i.test(text)?'quota_exceeded':'rate_limited';};
+export const thinkingConfigForModel=model=>{
+  const name=String(model||'').toLowerCase();
+  if(/^gemini-3(?:\.|-)/.test(name))return {thinkingLevel:'low'};
+  if(/^gemini-2\.5-flash(?:-|$)/.test(name))return {thinkingBudget:0};
+  // Aliases and unknown families are intentionally conservative: their server-side target can
+  // change without the name changing, so the provider default is safer than a guessed field.
+  return null;
+};
 
 // One model reply → normalize references → validate → repair the specific broken components.
 // Normalization runs first on purpose: an evidence_ref written as an entity id becomes the real
@@ -92,23 +101,29 @@ export async function freeformJudge({archive,locale,env}){
   const keepReason=reason=>{lastReason=strongestReason([lastReason,reason].filter(Boolean))||reason;};
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
-    const capabilities={thinking:true,schema:true,mime:true};
+    const modelThinking=thinkingConfigForModel(model),capabilities={thinking:Boolean(modelThinking),schema:true,mime:true};
     for(let compatibilityAttempt=0;compatibilityAttempt<4&&Date.now()<deadline;compatibilityAttempt++){
-      const generationConfig={temperature:.8,maxOutputTokens:16384,...(capabilities.mime?{responseMimeType:'application/json'}:{}),...(capabilities.schema?{responseSchema:schema}:{}),...(capabilities.thinking?{thinkingConfig:{thinkingBudget:0}}:{})};
+      const generationConfig={temperature:.8,maxOutputTokens:16384,...(capabilities.mime?{responseMimeType:'application/json'}:{}),...(capabilities.schema?{responseSchema:schema}:{}),...(capabilities.thinking?{thinkingConfig:modelThinking}:{})};
       const body={system_instruction:{parts:[{text:systemInstruction}]},contents:[{role:'user',parts:[{text:dataPrompt}]}],generationConfig};
       let response,result;
       try{response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1000,Math.min(65000,deadline-Date.now())))});result=await response.json();}
       catch(error){attempts.push({model,status:0,finishReason:null,schema:capabilities.schema,mime:capabilities.mime,thinking:capabilities.thinking,error:error.name,reason:'network_error',action:'next_model'});keepReason('network_error');break;}
-      const record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,schema:capabilities.schema,mime:capabilities.mime,thinking:capabilities.thinking};
+      const before={thinking:capabilities.thinking,schema:capabilities.schema,mime:capabilities.mime},record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,...before,capabilities_before:before};
       attempts.push(record);
       if(contextFailure(response.status,result)){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
       if(!response.ok){
         record.provider_error=safeProviderError(response.status,result);
         if(response.status===400){
           record.reason=categorizeBadRequest(result);Object.assign(record,compatibilityFlags(result));
-          if(record.reason==='unsupported_thinking_config'&&capabilities.thinking){capabilities.thinking=false;record.retry_action='thinking_disabled';continue;}
-          if(record.reason==='unsupported_response_schema'&&capabilities.schema){capabilities.schema=false;record.retry_action='schema_disabled';continue;}
-          if(record.reason==='unsupported_response_mime'&&capabilities.mime){capabilities.mime=false;capabilities.schema=false;record.retry_action='mime_and_schema_disabled';continue;}
+          const retry=action=>{record.retry_action=action;record.capabilities_after={thinking:capabilities.thinking,schema:capabilities.schema,mime:capabilities.mime};};
+          if(record.reason==='unsupported_thinking_config'&&capabilities.thinking){capabilities.thinking=false;retry('thinking_disabled');continue;}
+          if(record.reason==='unsupported_response_schema'&&capabilities.schema){capabilities.schema=false;retry('schema_disabled');continue;}
+          if(record.reason==='unsupported_response_mime'&&capabilities.mime){capabilities.mime=false;capabilities.schema=false;retry('mime_and_schema_disabled');continue;}
+          if(['invalid_request','unknown_400'].includes(record.reason)){
+            if(capabilities.thinking){capabilities.thinking=false;retry('thinking_disabled');continue;}
+            if(capabilities.schema){capabilities.schema=false;retry('schema_disabled');continue;}
+            if(capabilities.mime){capabilities.mime=false;retry('mime_disabled');continue;}
+          }
           record.action='model_incompatible';keepReason('provider_error');break;
         }
         if(response.status===429){
