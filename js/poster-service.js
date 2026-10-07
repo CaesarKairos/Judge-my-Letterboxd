@@ -19,6 +19,11 @@ export async function resolvePoster(film) {
   })();
   memory.set(key,pending);return pending;
 }
+export async function preloadPoster(film){
+  const url=await resolvePoster(film);if(!url)return film;
+  const loaded=await new Promise(resolve=>{const img=new Image();let done=false;const finish=value=>{if(done)return;done=true;clearTimeout(timer);resolve(value);},timer=setTimeout(()=>finish(false),8000);img.onload=()=>finish(true);img.onerror=()=>finish(false);img.src=url;if(img.complete)finish(img.naturalWidth>0);});
+  return loaded?{...film,poster_url:url,_poster_preloaded:true}:film;
+}
 const observer = new IntersectionObserver(entries=>entries.forEach(entry=>{
   if(entry.isIntersecting){observer.unobserve(entry.target);entry.target.dispatchEvent(new Event('resolveposter'));}
 }),{rootMargin:'240px'});
@@ -28,7 +33,7 @@ export function poster(film,{eager=false}={}) {
   const load=async()=>{
     const url=await resolvePoster(film);if(!url)return;
     const img=el('img','poster-image');img.alt=`${film.title}${film.year?` (${film.year})`:''}`;img.loading=eager?'eager':'lazy';img.decoding='async';
-    img.addEventListener('load',()=>fallback.hidden=true);img.addEventListener('error',()=>{img.remove();fallback.hidden=false;});img.src=url;box.append(img);
+    img.addEventListener('load',()=>fallback.hidden=true);img.addEventListener('error',()=>{img.remove();fallback.hidden=false;});if(film._poster_preloaded)fallback.hidden=true;img.src=url;box.append(img);
   };
   if(eager)load();else{box.addEventListener('resolveposter',load,{once:true});observer.observe(box);}
   return box;
