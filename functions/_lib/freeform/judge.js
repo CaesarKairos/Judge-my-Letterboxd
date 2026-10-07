@@ -51,6 +51,20 @@ async function evaluateReply({raw,archive,registry,env,model,deadline,attempts,r
 const score=value=>(value.core_contract_complete?1_000_000:0)+(value.opening_valid?100_000:0)+Math.min(value.games?.length||0,value.required_games||0)*10_000+(value.profile_review_valid?5_000:0)+(value.moments?.length||0)*50-(value.moments_invalid?.length||0)*20-(value.attachments_invalid?.length||0);
 const REASON_PRIORITY=['quota_exceeded','rate_limited','provider_error','network_error','truncated_output','core_incomplete','invalid_repair_response','invalid_response'];
 const strongestReason=reasons=>REASON_PRIORITY.find(reason=>reasons.includes(reason))||null;
+export const classifyFinalReason=({attempts,best,fallback='no_usable_model_response'})=>{
+  const main=attempts.filter(row=>!row.repair),successful=main.filter(row=>row.status>=200&&row.status<300);
+  // A provider response that reached validation supersedes an older transport/quota failure.
+  if(successful.length){
+    if(best)return 'core_incomplete';
+    return successful.some(row=>row.finishReason&&row.finishReason!=='STOP')?'truncated_output':'invalid_response';
+  }
+  const attempted=main.filter(row=>row.status!==404),limited=attempted.filter(row=>row.status===429);
+  if(attempted.length&&limited.length/attempted.length>=.8){
+    const quota=limited.filter(row=>row.reason==='quota_exceeded').length;
+    return quota===limited.length?'quota_exceeded':'rate_limited';
+  }
+  return strongestReason(attempts.map(row=>row.reason).filter(Boolean))||fallback;
+};
 
 export async function freeformJudge({archive,locale,env}){
   if(!env.GEMINI_API_KEY)throw new Error('missing_gemini_key');
@@ -70,7 +84,7 @@ export async function freeformJudge({archive,locale,env}){
       const body={system_instruction:{parts:[{text:systemInstruction}]},contents:[{role:'user',parts:[{text:dataPrompt}]}],generationConfig};
       let response,result;
       try{response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1000,Math.min(65000,deadline-Date.now())))});result=await response.json();}
-      catch(error){attempts.push({model,status:0,error:error.name});keepReason('network_error');continue;}
+      catch(error){attempts.push({model,status:0,finishReason:null,schema:useSchema,error:error.name,reason:'network_error'});keepReason('network_error');continue;}
       const record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,schema:useSchema};
       attempts.push(record);
       if(contextFailure(response.status,result)){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
@@ -82,13 +96,13 @@ export async function freeformJudge({archive,locale,env}){
         if(useSchema&&schemaRejected(response.status,result)){useSchema=false;record.schema_rejected=true;keepReason('schema_rejected');attempt--;continue;}
         if(response.status===429){
           const detail=JSON.stringify(result||{});
-          keepReason(/quota|billing|resource_exhausted/i.test(detail)?'quota_exceeded':'rate_limited');
+          record.reason=/quota|billing/i.test(detail)?'quota_exceeded':'rate_limited';keepReason(record.reason);
           // Retrying the same model immediately cannot change an account/model rate limit.
           // Continue with the next fallback instead of spending all three attempts on one 429.
           break;
         }
         if(response.status===404)break;
-        keepReason('provider_error');continue;
+        record.reason='provider_error';keepReason('provider_error');continue;
       }
       const raw=responseText(result),reply=await evaluateReply({raw,archive,registry,env,model,deadline,attempts,repairBudget:6});
       const decorated=reply?{...reply,_model:model,_response_chars:raw.length,_finish_reason:record.finishReason}:null;
@@ -103,7 +117,7 @@ export async function freeformJudge({archive,locale,env}){
   let coreRescue={executed:false,result:'not_run'};
   if(best?.moments?.length){
     const rescueDeadline=Date.now()+30000,result=await repairCore({env,model:best._model,deadline:rescueDeadline,compact:registry.compact(),payload:best._payload||best,validated:best});
-    const rescueAttempt={model:best._model,repair:'core_rescue',status:result.status,finishReason:result.finishReason,reason:result.reason||null,provider_error:result.provider_error||null};attempts.push(rescueAttempt);coreRescue={executed:true,result:result.parsed?'parsed':result.reason||'failed'};
+    const rescueAttempt={model:best._model,repair:'core_rescue',status:result.status,finishReason:result.finishReason,schema:false,reason:result.reason||null,provider_error:result.provider_error||null};attempts.push(rescueAttempt);coreRescue={executed:true,result:result.parsed?'parsed':result.reason||'failed'};
     if(result.parsed&&typeof result.parsed==='object'){
       const base={...(best._payload||best)},fixed=result.parsed;
       if(fixed.opening)base.opening={...(base.opening||{}),...fixed.opening};
@@ -119,6 +133,7 @@ export async function freeformJudge({archive,locale,env}){
   // AI_FAILED means the provider (or the whole subject) failed, never a single wrong reference.
   const error=new Error('AI_FAILED');
   const summary=best?.validation_summary||{};
+  lastReason=classifyFinalReason({attempts,best,fallback:lastReason});
   error.details={stage:'freeform_judge',reason:lastReason,best_core:best?{opening_valid:Boolean(summary.opening),opening_problems:summary.opening_problems||[],games_required:summary.required_games||0,games_valid:summary.games_valid||0,games_missing:summary.games_missing||0,profile_review_valid:Boolean(summary.profile_review),moments_valid:summary.moments_valid||0}:null,repair_attempts:attempts.filter(row=>row.repair),core_rescue:coreRescue,attempts,validation_summary:best?.validation_summary||null};
   throw error;
 }

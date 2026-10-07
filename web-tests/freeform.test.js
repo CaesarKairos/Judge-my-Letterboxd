@@ -319,16 +319,22 @@ test('Freeform rhythm and explicit game placement survive materialization',async
   assert.equal(events[firstGame-2].type,'pause');assert.equal(events[firstGame-2].duration,'medium');assert.equal(events[firstGame-1].type,'game_intro');
 });
 
-test('main 200 plus quota-limited core repairs reports quota_exceeded',async t=>{
+test('main 200 plus quota-limited core repairs reports the terminal incomplete contract',async t=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};
   t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
-  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.message==='AI_FAILED'&&error.details.reason==='quota_exceeded'&&error.details.repair_attempts.some(row=>row.reason==='quota_exceeded'));
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.message==='AI_FAILED'&&error.details.reason==='core_incomplete'&&error.details.repair_attempts.some(row=>row.reason==='quota_exceeded'));
 });
 
-test('main 200 plus unavailable core repairs reports provider_error',async t=>{
+test('main 200 plus unavailable core repairs reports the terminal incomplete contract',async t=>{
   const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};let mains=0;
   t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({error:{status:'UNAVAILABLE',message:'busy'}},{status:503});if(mains++)throw new TypeError('later network failure');return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
-  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.details.reason==='provider_error');
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.details.reason==='core_incomplete');
+});
+
+test('an early 429 cannot dominate a later 200 that fails the contract',async t=>{
+  const {ai}=await buildFreeformArchive(richEntries()),payload={...fullResponse(),games:[]};
+  t.mock.method(globalThis,'fetch',async(url,options)=>{const body=JSON.parse(options.body);if(String(url).includes('/blocked:'))return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'temporarily busy'}},{status:429});if(JSON.stringify(body.system_instruction).includes('repair JSON references'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'{}'}]}}]});return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});});
+  await assert.rejects(freeformJudge({archive:ai,locale:'pt-BR',env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'blocked',GEMINI_FALLBACK_MODELS:'responded',GEMINI_MODEL_DISCOVERY:'0'}}),error=>error.details.reason==='core_incomplete'&&error.details.attempts.some(row=>row.status===429)&&error.details.attempts.some(row=>!row.repair&&row.status===200));
 });
 
 test('missing Profile Review is created by a core repair',async t=>{

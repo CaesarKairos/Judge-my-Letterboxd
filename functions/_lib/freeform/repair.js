@@ -17,7 +17,7 @@ async function callRepair({env, model, deadline, request}) {
     let response=await send(true),result=await response.json();
     if(response.status===400&&/thinking|invalid argument/i.test(JSON.stringify(result))){response=await send(false);result=await response.json();}
     const raw=responseText(result),parsed=salvageJson(raw),detail=JSON.stringify(result||{});
-    const reason=!response.ok?(response.status===429?(/quota|billing|resource_exhausted/i.test(detail)?'quota_exceeded':'rate_limited'):'provider_error'):(!parsed?'invalid_repair_response':null);
+    const reason=!response.ok?(response.status===429?(/quota|billing/i.test(detail)?'quota_exceeded':'rate_limited'):'provider_error'):(!parsed?'invalid_repair_response':null);
     return {status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,raw,parsed,reason,provider_error:response.ok?null:{code:result?.error?.code??response.status,status:result?.error?.status||'',message:String(result?.error?.message||'').slice(0,160)}};
   } catch (error) { return {status:0,error:error.name,parsed:null,reason:'network_error',provider_error:{code:0,status:error.name,message:String(error.message||error).slice(0,160)}}; }
 }
@@ -103,7 +103,7 @@ export async function repairFreeform({payload, validated, registry, env, model, 
     if (typeof revalidate === 'function') validated = revalidate(payload);
     return validated;
   };
-  const note=(repair,result)=>attempts.push({model,repair,status:result.status,finishReason:result.finishReason,reason:result.reason||null,provider_error:result.provider_error||null});
+  const note=(repair,result)=>attempts.push({model,repair,status:result.status,finishReason:result.finishReason,schema:false,reason:result.reason||null,provider_error:result.provider_error||null});
   const apply = (result, key, index) => {
     if (!result.parsed || typeof result.parsed !== 'object') return false;
     const fixed = result.parsed[key] && typeof result.parsed[key] === 'object' ? result.parsed[key] : result.parsed;
