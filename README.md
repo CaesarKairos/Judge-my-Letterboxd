@@ -765,8 +765,12 @@ repairs disparados, achados preservados, Top 4 por `film_key`, `Writer called: t
 modelo servido, reações por beat, archetype/closer/Profile Review e o estado final da
 apresentação. Nem a chave da API nem o prompt aparecem em log ou resposta.
 
-Fora da nuvem, os harnesses executam o ZIP com a cadeia Groq; `--stub` simula somente
-as respostas de modelo:
+Fora da nuvem, `test-web-pipeline.mjs` lê `judge-mode.json` e executa o pipeline ativo.
+Em Freeform, o modo normal envia o ZIP à Groq e valida/materializa a resposta pela Pages
+Function; em Curated, executa Analyst, Writer e Presentation. `--stub` simula respostas
+de modelo e serve apenas para validar parsing, contratos e materialização; não comprova
+conectividade nem qualidade do provedor. `analyst-diagnostic.mjs` exercita apenas o
+Analyst do pipeline Curated:
 
 ```bash
 node scripts/analyst-diagnostic.mjs caminho-do-export.zip
@@ -774,28 +778,21 @@ node scripts/test-web-pipeline.mjs caminho-do-export.zip
 node scripts/test-web-pipeline.mjs caminho-do-export.zip --stub
 ```
 
-O diagnóstico Freeform usa o mesmo `GROQ_API_KEY`, `GROQ_MODEL` e cadeia limitada do
-runtime. `npm run probe:groq` é a verificação mínima de conectividade, sem export.
+O diagnóstico real e o runtime leem `GROQ_API_KEY`, `GROQ_MODEL` e a mesma cadeia
+limitada de modelos. `npm run probe:groq` faz uma chamada real mínima, sem export;
+somente HTTP 200 com objeto JSON válido comprova conectividade.
 
 ### Testes
 
-`npm run test:web` cobre parser, análise determinística, relações, Script Engine,
-contrato da apresentação, `ai_unavailable`, estado parcial, Profile Review,
-explainability e o fingerprint enviado ao Writer. `web-tests/analyst.test.js` cobre o
-contrato do Analyst: Top 4 ausente/parcial com repair direcionado, seleção preservada
-quando o repair de semantics falha, JSON truncado vira `truncated_output`, o request
-usa JSON mode Chat Completions e `max_completion_tokens`, `thin` não é falha, falha
-real devolve `analyst.status = failed` sem promover candidatos determinísticos, a
-deduplicação do contexto e as mensagens distintas de Analyst/Writer no frontend. A
-cadeia de modelos tem regressões próprias: modelo 7 e 8 descobertos são alcançados
-quando os anteriores falham rápido, 404 avança sem repetir, 429 não repete o mesmo
-modelo, 5xx tem uma única retry curta, Lite fica depois de todos os Flash completos,
-modelo configurado duplicado não aparece duas vezes, `gemini-2.5-flash` não entra sem
-configuração ou descoberta, resposta não-2xx nunca gera `parse_error`, o deadline
-interrompe o laço e todos falhando o Analyst vira FAILED sem chamar o Writer.
-`npm run test:browser` cobre layouts, demo, harness, os dois cartões compartilháveis
-(PNG 1080×1350, download como fallback), o card da Profile Review, "Entenda como este
-output foi gerado" e o fluxo `AI_FAILED` com a análise local como escolha.
+`npm run test:groq` cobre a integração Groq com respostas simuladas (JSON mode,
+classificação de erros, retry e fallback); não chama o serviço real. `npm run test:web`
+cobre parser, análise, contratos, Freeform, erros, estado parcial, Profile Review,
+explainability e apresentação. `web-tests/analyst.test.js` cobre especificamente o
+Analyst Curated e suas respostas simuladas. `npm run test:edge` e `npm run test:browser`
+precisam de um servidor local em `127.0.0.1:8080`; o segundo cobre layouts, demo,
+harnesses e cartões compartilháveis. Para provar a integração do modo selecionado com
+o provedor, use o `test-web-pipeline.mjs` sem `--stub` e uma credencial válida; a fixture
+com `--stub` cobre apenas o caminho simulado.
 ## Modos de pipeline
 
 `judge-mode.json` na raiz é a única fonte de verdade do modo ativo:
