@@ -3,5 +3,6 @@ GROQ_API_KEY="sua-chave-groq"
 TMDB_API_KEY="sua-chave-tmdb-opcional"
 GROQ_MODEL="openai/gpt-oss-120b"
 GROQ_FALLBACK_MODELS="openai/gpt-oss-20b"
+JUDGE_MAINTENANCE_MODE="0"
 # Opcional para Curated: GROQ_ANALYST_MODEL e GROQ_WRITER_MODEL.
 # JUDGE_DEBUG_CONFIG=1 habilita /api/config (diagnóstico local, nunca expõe a chave).

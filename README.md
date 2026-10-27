@@ -138,6 +138,13 @@ Production e Preview que você usa e faça um novo deploy. Localmente, copie
 Também é possível usar `.env` para os scripts de probe. As chaves ficam em
 `context.env` da Function e nunca são enviados ao navegador.
 
+A manutenção do site é controlada por `JUDGE_MAINTENANCE_MODE` no Pages: `1` serve
+uma página 503 simples; `0` ou variável ausente mantém o site normal. Configure o valor
+em Settings → Variables and Secrets para Production (e Preview, se desejar). Como
+alternativa pelo Wrangler, cadastre `JUDGE_MAINTENANCE_MODE` como secret com valor `1`.
+Para reabrir, altere/remova a variável e publique um novo deploy. `/api/judge` GET e
+`/api/config` continuam acessíveis para diagnóstico; ações de API ficam pausadas.
+
 No dashboard, adicione `GROQ_API_KEY` em Settings → Variables and Secrets → Add → Secret
 para Production e Preview. Ou use `npx wrangler pages secret put GROQ_API_KEY --project-name judge-my-letterboxd`.
 
