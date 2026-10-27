@@ -43,5 +43,5 @@ await page.unroute('**/api/judge');
 
 await page.route('**/api/judge',async r=>{await new Promise(resolve=>setTimeout(resolve,300));await r.fulfill({status:501,body:''}).catch(()=>{});});
 await page.locator('#judge').click();await page.locator('#cancel').click();await page.waitForTimeout(500);assert.equal(await page.locator('#landing').isVisible(),true);
-await page.goto(base+'/?demo=1');await page.locator('#ending').waitFor();await page.locator('.favorites').scrollIntoViewIfNeeded();await page.screenshot({path:'web-tests/artifacts/top-four-mobile.png'});
+await page.goto(base+'/?demo=1');await page.locator('#start-judgment').click();await page.locator('#ending').waitFor();await page.locator('.favorites').scrollIntoViewIfNeeded();await page.screenshot({path:'web-tests/artifacts/top-four-mobile.png'});
 await browser.close();console.log('PASS: zero/one/two/four favorites, oversized ZIP, safe DOM, drag/drop/remove, 429/500/invalid response, AI_FAILED never plays alone, local analysis by choice, cancellation, mobile favorites.');
