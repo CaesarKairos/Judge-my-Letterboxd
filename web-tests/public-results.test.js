@@ -19,3 +19,12 @@ test('direct result HTML has server metadata and its durable OG is 1200x630',asy
  const og=await onRequest({request:new Request(`https://example.test${saved.slug}/og.png`),env}),image=new Uint8Array(await og.arrayBuffer());assert.equal(og.status,200);assert.match(og.headers.get('content-type'),/^image\/png/);assert.deepEqual([...image.slice(1,4)],[80,78,71]);assert.equal(new DataView(image.buffer,image.byteOffset,image.byteLength).getUint32(16),1200);assert.equal(new DataView(image.buffer,image.byteOffset,image.byteLength).getUint32(20),630);
  const missing=await onRequest({request:new Request('https://example.test/@critic/Judge-99'),env});assert.equal(missing.status,404);
 });
+
+test('catch-all Pages Function passes non-result paths to static assets',async()=>{
+ const calls=[];
+ for(const path of ['/','/api/judge','/css/style.css']){
+  const response=await onRequest({request:new Request(`https://example.test${path}`),env:{},next:async()=>{calls.push(path);return new Response('static asset',{status:200});}});
+  assert.equal(response.status,200);assert.equal(await response.text(),'static asset');
+ }
+ assert.deepEqual(calls,['/','/api/judge','/css/style.css']);
+});
