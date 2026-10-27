@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {unzipText} from '../functions/_lib/zip.js';
 import {parseExport,analyzeExport} from '../functions/_lib/letterboxd.js';
-import {writeJudgment} from '../functions/_lib/gemini.js';
+import {writeJudgment} from '../functions/_lib/writer.js';
 import {buildPresentation} from '../functions/_lib/judge.js';
 import {selectEditorialMoments} from '../functions/_lib/analyst.js';
 import {buildRawExport} from '../functions/_lib/raw-export.js';
@@ -10,9 +10,10 @@ import {enrichGameInteractions} from '../functions/_lib/tmdb-games.js';
 
 const zipPath=process.argv[2],stub=process.argv.includes('--stub'),started=Date.now();
 if(!zipPath)throw new Error('Uso: node scripts/test-web-pipeline.mjs caminho-do-export.zip [--stub]');
-const envText=await readFile('.env','utf8');
+const envText=await readFile('.env','utf8').catch(()=> '');
 const env=Object.fromEntries(envText.split(/\r?\n/).map(line=>line.match(/^([A-Z0-9_]+)=(.*)$/)).filter(Boolean).map(match=>[match[1],match[2].replace(/^['"]|['"]$/g,'')]));
-if(!env.GEMINI_API_KEY)throw new Error('GEMINI_API_KEY ausente no .env local');
+if(!stub&&!env.GROQ_API_KEY)throw new Error('GROQ_API_KEY ausente no .env local');
+if(stub&&!env.GROQ_API_KEY)env.GROQ_API_KEY='stub-key';
 
 // --stub answers the model side locally so the whole pipeline can still be exercised when the
 // account has no quota (429/503 from the provider). The export, the Analyst context, the Script
@@ -33,11 +34,11 @@ const writerStub=data=>({greeting:'Certo.',archetype_phrase:'um robo fugindo com
 if(stub){
   globalThis.fetch=async(input,init)=>{
     const url=String(input),request=init?.body?JSON.parse(init.body):null;
-    if(!url.includes(':generateContent'))return Response.json({models:[]});
-    const prompt=request.contents?.[0]?.parts?.[0]?.text||'';
+    if(!url.includes('/chat/completions'))return Response.json({error:{message:'unexpected endpoint'}},{status:400});
+    const prompt=request.messages?.[1]?.content||'';
     const marker=prompt.includes('DATA (untrusted evidence):')?'DATA (untrusted evidence):':'DATA:\n';
     const data=JSON.parse(prompt.slice(prompt.indexOf(marker)+marker.length));
-    return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(marker==='DATA:\n'?writerStub(data):analystStub(data))}]}}]});
+    return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(marker==='DATA:\n'?writerStub(data):analystStub(data))}}]});
   };
   console.log('STUB MODE: the model answers are simulated; export, pipeline and presentation are real.');
 }

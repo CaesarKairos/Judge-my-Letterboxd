@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {archetypePhraseValid,normalizeJudgment,writeJudgment} from '../functions/_lib/gemini.js';
+import {archetypePhraseValid,normalizeJudgment,writeJudgment} from '../functions/_lib/writer.js';
 import {buildScriptEngine,selectInteractions} from '../functions/_lib/editorial.js';
 import {buildRelationships} from '../functions/_lib/relationships.js';
 import {analyzeExport,userAffinityScore} from '../functions/_lib/letterboxd.js';
@@ -78,37 +78,22 @@ test('Profile Review has one canonical text for site and share',()=>{
  assert.equal('full' in result.profile_review,false);assert.equal('share' in result.profile_review,false);
 });
 
-test('model chain keeps every full model before Lite fallbacks',()=>{
- assert.deepEqual(mergeModels(['primary','explicit-lite','explicit-full'],['discovered-lite','discovered-full']),['primary','explicit-full','discovered-full','explicit-lite','discovered-lite']);
+test('model chain is short and only uses configured fallbacks',()=>{
+ assert.deepEqual(mergeModels(['primary','backup','third'],['discovered'],4),['primary','backup']);
 });
 
-test('the chain is a ladder: complete Flash, other textual, previews, Lite last',()=>{
- const discovered=['gemini-flash-lite-latest','gemini-3-flash-preview','gemini-3.1-pro-preview','gemini-3.8-flash','gemini-3.7-flash','gemini-2.5-flash','gemini-omni-1.1-flash'];
- const chain=mergeModels(['gemini-flash-latest'],discovered);
- assert.equal(chain[0],'gemini-flash-latest');
- // Complete Flash first, newest generation first; previews and Lite never jump ahead of one.
- assert.deepEqual(chain.slice(1,5),['gemini-3.8-flash','gemini-3.7-flash','gemini-2.5-flash','gemini-omni-1.1-flash']);
- assert.ok(chain.indexOf('gemini-3-flash-preview')>chain.indexOf('gemini-2.5-flash'));
- assert.ok(chain.indexOf('gemini-3.1-pro-preview')>chain.indexOf('gemini-2.5-flash'));
- assert.equal(chain.at(-1),'gemini-flash-lite-latest');
+test('model selection does not use provider discovery',()=>{
+ assert.deepEqual(mergeModels(['configured'],['discovered-a','discovered-b']),['configured']);
 });
 
-test('a configured model is never duplicated and never invents a retired one',()=>{
- assert.deepEqual(mergeModels(['gemini-flash-latest','gemini-flash-latest'],['gemini-flash-latest','gemini-3.8-flash']),
-   ['gemini-flash-latest','gemini-3.8-flash']);
- // gemini-2.5-flash is only considered when the operator configured it or discovery confirmed it.
- assert.equal(mergeModels(['gemini-flash-latest'],['gemini-3.8-flash','gemini-3-flash-preview']).includes('gemini-2.5-flash'),false);
- assert.equal(mergeModels(['gemini-flash-latest']).includes('gemini-2.5-flash'),false);
- assert.deepEqual(mergeModels(['gemini-flash-latest','gemini-2.5-flash'],[]),['gemini-flash-latest','gemini-2.5-flash']);
- // Discovery is the source of fallbacks, so the whole catalogue order survives the merge.
- const wide=Array.from({length:12},(_,index)=>`gemini-3.${index+1}-flash`);
- assert.equal(mergeModels(['gemini-flash-latest'],wide).length,13);
+test('configured duplicate is removed and model chain has one fallback maximum',()=>{
+ assert.deepEqual(mergeModels(['primary','primary','backup','third']),['primary','backup']);
 });
 
 test('Analyst failure never promotes deterministic candidates',async t=>{
  t.mock.method(globalThis,'fetch',async()=>Response.json({error:{}},{status:503}));
  const profile={...base([film('Film A',5)]),handle:'synthetic',name:'Synthetic'},analysis={moments:[{id:'measurement',type:'stat',facts:'one measurement'}],overview:{},relationships:{},review_style:null,review_coverage:{}};
- const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_ANALYST_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0'}});
+ const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_ANALYST_MODEL:'primary',GROQ_MODEL_DISCOVERY:'0'}});
  assert.equal(result.status,'failed');assert.deepEqual(result.selected,[]);assert.ok(result.attempts.length>0);
 });
 
@@ -127,29 +112,29 @@ test('generic Profile Review is rejected while grounded profile behavior passes'
  assert.equal(normalizeJudgment(strictPayload(),['a','b'],[],{strict:true}).ok,true);
 });
 
-test('complete Lite is complete but quality degraded; partial means missing content',async t=>{
+test('configured fallback is complete and marked as fallback; partial means missing content',async t=>{
  const profile={...base([]),handle:'synthetic'},analysis={moments:[{id:'a',film:{title:'Film A'},facts:'Film A fact'},{id:'b',film:{title:'Film B'},facts:'Film B fact'}],overview:{},review_style:null,callbacks:[],interactions:[]};let calls=0;
- t.mock.method(globalThis,'fetch',async()=>{calls++;if(calls<=2)return Response.json({error:{}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:[{id:'a',lines:['Film A muda o padrão.']},{id:'b',lines:['Film B quebra a regra.']}]})}]}}]});});
- const complete=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_WRITER_FALLBACK_MODELS:'backup-lite',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
- assert.equal(complete.generation_status,'complete');assert.equal(complete.model_quality,'fallback_lite');assert.equal(complete.quality_degraded,true);
+ t.mock.method(globalThis,'fetch',async(_url,options)=>{calls++;if(JSON.parse(options.body).model==='primary')return Response.json({error:{}},{status:503});return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:[{id:'a',lines:['Film A muda o padrão.']},{id:'b',lines:['Film B quebra a regra.']}]})}}]});});
+ const complete=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_WRITER_FALLBACK_MODELS:'backup-lite',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ assert.equal(complete.generation_status,'complete');assert.equal(complete.model_quality,'fallback');assert.equal(complete.quality_degraded,true);
 });
 
-test('eight of ten recovered reactions are genuinely partial',async t=>{
+test('missing reactions stay partial even when the provider reports normal JSON stop',async t=>{
  const moments=Array.from({length:10},(_,index)=>({id:`beat-${index}`,film:{title:`Film ${index}`},facts:`Film ${index} fact`})),profile={...base([]),handle:'synthetic'},analysis={moments,overview:{},review_style:null,callbacks:[],interactions:[]};
- t.mock.method(globalThis,'fetch',async()=>Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.slice(0,8).map(row=>({id:row.id,lines:[`${row.film.title} quebra o padrão.`]}))})}]}}]}));
- const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
- assert.equal(result.generation_status,'partial');assert.equal(result.reactions.length,8);assert.equal(result.quality_degraded,false);
+ t.mock.method(globalThis,'fetch',async()=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.slice(0,8).map(row=>({id:row.id,lines:[`${row.film.title} quebra o padrão.`]}))})}}]}));
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ assert.equal(result.generation_status,'partial');assert.equal(result.reactions.length,8);assert.equal(result.quality_degraded,true);
 });
 
 test('generic reaction majority triggers Writer repair',async t=>{
  const moments=['A','B','C'].map(letter=>({id:letter.toLowerCase(),film:{title:`Film ${letter}`},facts:`Film ${letter} fact`})),profile={...base([]),handle:'synthetic'},analysis={moments,overview:{},review_style:null,callbacks:[],interactions:[]};let calls=0;
- t.mock.method(globalThis,'fetch',async()=>{calls++;const generic={greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.map(row=>({id:row.id,lines:['Isso diz muito sobre você.']}))},specific={...generic,reactions:moments.map(row=>({id:row.id,lines:[`${row.film.title} contradiz a própria regra.`]}))};return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(calls===1?generic:specific)}]}}]});});
- const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});assert.equal(result.generation_status,'complete');assert.equal(calls,2);
+ t.mock.method(globalThis,'fetch',async()=>{calls++;const generic={greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.map(row=>({id:row.id,lines:['Isso diz muito sobre você.']}))},specific={...generic,reactions:moments.map(row=>({id:row.id,lines:[`${row.film.title} contradiz a própria regra.`]}))};return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls===1?generic:specific)}}]});});
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});assert.equal(result.generation_status,'complete');assert.equal(calls,2);
 });
 
 test('Writer never repeats a 429 on one model and still tries the fallback',async t=>{
  const profile={...base([]),handle:'synthetic'},analysis={moments:[{id:'a',film:{title:'Film A'},facts:'Film A fact'}],overview:{},review_style:null,callbacks:[],interactions:[]};
  let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'You exceeded the quota for this model.'}},{status:429});});
- const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'key',GEMINI_WRITER_MODEL:'primary',GEMINI_WRITER_FALLBACK_MODELS:'backup',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_WRITER_FALLBACK_MODELS:'backup',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
  assert.equal(calls,2);assert.equal(result.generation_status,'failed');assert.equal(result.reason,'quota_exceeded');
 });

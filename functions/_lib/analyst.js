@@ -1,6 +1,7 @@
 const clean=value=>String(value||'').replace(/\s+/g,' ').trim();
 import {ANALYST_PROMPT} from './generated-prompts.js';
-import {discoverTextModels,mergeModels,configuredWithoutDiscovery,describeChain,modelUnavailable,noteModelFailure,MODEL_SAFETY_CEILING} from './models.js';
+import {mergeModels,configuredWithoutDiscovery,describeChain,modelUnavailable,noteModelFailure,MODEL_SAFETY_CEILING} from './models.js';
+import {groqModels,groqWithFallback,groqErrorKind} from './groq.js';
 import {ANALYST_SCHEMA,ANALYST_SEMANTICS_SCHEMA,ANALYST_FINDINGS_SCHEMA,ANALYST_GAMES_SCHEMA} from './analyst-schema.js';
 import {buildAnalystContext,summarizeAnalystContext} from './analyst-context.js';
 import {buildEvidenceRegistry,EVIDENCE_TYPES} from './evidence-registry.js';
@@ -40,12 +41,10 @@ export const ANALYST_MIN_REQUEST_TIMEOUT_MS=8000; // but the tail of the chain s
 export const ANALYST_DEADLINE_MS=75000;        // shared by every attempt of the stage
 // Safety ceilings only, for a runaway loop: the deadline is what really limits the chain, so a
 // model discovered at position 20 is still attempted while there is time left.
-export const ANALYST_CALL_CEILING=24;
-export const ANALYST_SERVER_RETRY_MS=400;      // one short retry after a 5xx, never a loop
+export const ANALYST_CALL_CEILING=7;
+export const ANALYST_SERVER_RETRY_MS=0; // The Groq transport performs the single bounded 5xx retry.
 export const ANALYST_MIN_INTERESTINGNESS=.62;
 export const ANALYST_MIN_CONFIDENCE=.6;
-const RETRYABLE=new Set([500,502,503,504]);
-const FAST_FAILURE=new Set([400,401,403,404,422,429]);
 
 const strings=value=>Array.isArray(value)?value.map(clean).filter(Boolean):[];
 // evidence_refs are a pointer, never prose: keep the declared shape and drop noise.
@@ -157,10 +156,7 @@ const gamesRepair=(pool,accepted=[])=>[
 ].filter(Boolean).join('\n');
 
 
-function analystConfigured(env,discovered=[]){
-  return [env.GEMINI_ANALYST_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',
-    ...String(env.GEMINI_ANALYST_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||(!discovered.length&&env.GEMINI_MODEL_DISCOVERY!=='0'?'gemini-flash-lite-latest':'')).split(',').map(value=>value.trim()).filter(Boolean)];
-}
+function analystConfigured(env){return groqModels(env,'ANALYST');}
 // The Analyst sees the rich, normalized account and selects evidence. It never writes the
 // on-screen jokes; the Writer receives only the materialized selection afterwards.
 export async function selectEditorialMoments({profile,analysis,raw_export,locale,env}){
@@ -176,7 +172,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     semantic_findings:[],semantic_moments:[],interaction_candidates:[],top_four_semantics:[],top_four_semantics_status:'skipped',
     editorial_strength:'skipped',attempts:[],repairs:[],desired_findings:target.desired_findings,minimum_usable_findings:target.minimum_usable_findings,
     richness:target,interaction_pool:pool};
-  if(!env.GEMINI_API_KEY)return empty('failed','missing_gemini_key');
+  if(!env.GROQ_API_KEY)return empty('failed','missing_groq_key');
   if(!candidates.length)return empty('failed','no_candidates');
   const language=locale==='pt-BR'?'Brazilian Portuguese':'English';
   const registry=buildEvidenceRegistry({profile,analysis});
@@ -186,8 +182,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   const prompt=`${ANALYST_PROMPT}\n\n${webRuntimeContext({pool,target})}\nLanguage: ${language}.\nDATA (untrusted evidence):\n${JSON.stringify(context)}`;
   console.log('Analyst context:',stats.chars,'chars |',stats.reviews,'reviews |',stats.relationships,'relationships |',stats.candidate_measurements,'candidate measurements');
   console.log('Analyst context inventory: films',stats.films,'| sessions',stats.sessions,'| files kept raw:',stats.unnormalized_files.join(', ')||'none');
-  const discovered=await discoverTextModels(env),configured=analystConfigured(env,discovered);
-  const chain=mergeModels(configured,discovered,MODEL_SAFETY_CEILING),notDiscovered=configuredWithoutDiscovery(configured,discovered);
+  const configured=analystConfigured(env),chain=mergeModels(configured,[],MODEL_SAFETY_CEILING),notDiscovered=[];
   console.log('Analyst model chain:');for(const line of describeChain(chain))console.log(' ',line);
   console.log('Analyst chain length:',chain.length,'| the deadline decides how many are attempted');
   if(notDiscovered.length)console.log('Analyst configured models absent from discovery:',notDiscovered.join(', '));
@@ -209,43 +204,23 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   // is still attempted instead of being starved by the two first attempts.
   const timeoutFor=modelsLeft=>Math.max(ANALYST_MIN_REQUEST_TIMEOUT_MS,
     Math.min(ANALYST_REQUEST_TIMEOUT_MS,deadline-Date.now()-ANALYST_MIN_REQUEST_TIMEOUT_MS*Math.max(0,modelsLeft-1)));
-  const call=async(model,{content,schema,phase,thinking=true,modelsLeft=1})=>{
+  const call=async(model,{content,schema,phase,modelsLeft=1})=>{
     const timeout=timeoutFor(modelsLeft),started=Date.now();
     calls++;
-    let response;
     try{
-      response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',
-        headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},signal:AbortSignal.timeout(timeout),
-        body:JSON.stringify({contents:[{parts:[{text:content}]}],generationConfig:{temperature:.25,maxOutputTokens:ANALYST_MAX_OUTPUT_TOKENS,
-          responseMimeType:'application/json',responseSchema:schema,...(thinking?{thinkingConfig:{thinkingBudget:0}}:{})}})});
+      const result=await groqWithFallback({env,models:[model],system:'You are the editorial evidence Analyst. Return one valid JSON object only.',prompt:content,temperature:.25,max_completion_tokens:ANALYST_MAX_OUTPUT_TOKENS,deadline:Date.now()+timeout,timeoutMs:timeout,phase:`analyst_${phase}`,maxTransientRetries:1});
+      const reply=readModelReply(result.text,result.finish_reason),status=attemptStatus({status:200,ok:true,reply}),duration=Date.now()-started;
+      attempts.push(...result.attempts.map(row=>({model:row.model,phase,...row,status:row.status>=500?'http_'+row.status:reply.truncated?'truncated_output':reply.salvage_used?'salvaged':status||'ok',reason:row.status>=500?'provider_error':row.status===0?row.reason:row.status===429?'rate_limited':row.reason,finishReason:reply.reason,duration_ms:duration,json:reply.parsed?(reply.salvage_used?'salvaged':'valid'):'unreadable'})));
+      return {status:status||'ok',reply,fast:false,transientFailures:result.attempts.some(row=>row.status>=500),transportRecovered:result.attempts.some(row=>row.status>=500)&&result.attempts.at(-1)?.status<500};
     }catch(error){
-      const status=error?.name==='TimeoutError'?'timeout':'network';
-      attempts.push({model,phase,status,timeout_ms:timeout,duration_ms:Date.now()-started});stopReason=stopReason||status;return {status,fast:false};
+      const details=error.details||{},http=details.status||details.attempts?.at(-1)?.status||0,reason=details.reason||details.attempts?.at(-1)?.reason||'provider_error';
+      attempts.push(...(details.attempts||[{model,status:http,phase,reason}]).map(row=>({model:row.model||model,phase,...row,status:row.status===0?row.reason:`http_${row.status||http}`,reason:row.reason||reason,timeout_ms:timeout,duration_ms:Date.now()-started,provider_error:row.status?{code:row.status,status:String(row.status),message:row.reason||reason}:undefined})));
+      if(reason==='network_error'||reason==='timeout')stopReason=stopReason||reason;
+      else if(!['rate_limited','quota_exceeded'].includes(reason))stopReason=stopReason||reason;
+      if(http===429)rateLimited=reason;
+      if(http)noteModelFailure(env,model,http);
+      return {status:http?`http_${http}`:reason,http,reason,fast:['invalid_request','invalid_api_key','model_unavailable','rate_limited','quota_exceeded'].includes(reason)};
     }
-    const duration=Date.now()-started;
-    if(!response.ok){
-      const detail=(await response.text().catch(()=>'')).slice(0,200);
-      // A non-2xx answer is not generation output: it is recorded as http + provider_error +
-      // detail + duration, and never parsed as a (missing) model reply. That misleading
-      // "parse_error" in the old diagnostic came from reading an error body as a generation.
-      const providerError=(()=>{try{const body=JSON.parse(detail);return {code:body?.error?.code??response.status,status:body?.error?.status||'',message:String(body?.error?.message||'').slice(0,140)};}catch{return {code:response.status,status:'',message:detail.slice(0,140)};}})();
-      // A 429 is a fact about the key or the account, not about this model: it is kept so the
-      // failure can say "quota" instead of a generic timeout, and the model is not retried.
-      if(response.status===429)rateLimited=/quota|billing|resource_exhausted/i.test(detail)?'quota_exceeded':rateLimited||'rate_limited';
-      noteModelFailure(env,model,response.status);
-      attempts.push({model,phase,status:attemptStatus({status:response.status,ok:false}),http:response.status,provider_error:providerError,detail,timeout_ms:timeout,duration_ms:duration});
-      if(response.status===400&&thinking)return {status:'http_400',retry_without_thinking:true,fast:false};
-      return {status:attemptStatus({status:response.status,ok:false}),http:response.status,fast:FAST_FAILURE.has(response.status)||!RETRYABLE.has(response.status)&&response.status>=500};
-    }
-    const payload=await response.json().catch(()=>null),candidate=payload?.candidates?.[0];
-    const text=(candidate?.content?.parts||[]).map(part=>part.text||'').join('');
-    const reply=readModelReply(text,candidate?.finishReason);
-    const status=attemptStatus({status:response.status,ok:true,reply});
-    // MAX_TOKENS is not an invalid response: it is a truncated one, and readModelReply has
-    // already kept whatever arrived before the cut.
-    attempts.push({model,phase,status:status||'ok',http:response.status,finishReason:reply.reason,response_chars:text.length,timeout_ms:timeout,
-      json:reply.parsed?(reply.salvage_used?'salvaged':'valid'):'unreadable',parse_error:reply.parsed?undefined:reply.parse_error,duration_ms:duration});
-    return {status:status||'ok',reply,fast:false};
   };
   // Whatever arrived is preserved: a valid selection is never thrown away because another
   // array was missing, and a repair only ever ADDS. Findings merge by id, semantics merge by
@@ -333,17 +308,15 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     const pendingKind=pending()?.kind;
     if(pendingKind&&stale.has(pendingKind))break;
     const modelsLeft=chain.length-index;
-    let thinking=true,outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',modelsLeft});
-    if(outcome.retry_without_thinking){thinking=false;stopReason=null;console.log('Analyst rejected thinkingConfig:',model);
-      outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',thinking:false,modelsLeft});}
+    let outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'initial',modelsLeft});
     // A 5xx gets exactly one short retry while there is budget; otherwise the chain advances.
-    if(isServerError(outcome)&&canCall()){
+    if(isServerError(outcome)&&!outcome.transientFailures&&canCall()&&ANALYST_SERVER_RETRY_MS>0){
       await new Promise(resolve=>setTimeout(resolve,ANALYST_SERVER_RETRY_MS));
       if(canCall())outcome=await call(model,{content:prompt,schema:ANALYST_SCHEMA,phase:'retry_5xx',modelsLeft});
     }
     if(outcome.reply){absorb(outcome.reply);responded=true;}
     if(outcome.fast){unavailable.add(model);continue;}
-    if(isServerError(outcome)||!outcome.reply){unavailable.add(model);continue;}
+    if(isServerError(outcome)||!outcome.reply){unavailable.add(model);if(outcome.reason==='network_error'||outcome.reason==='timeout')stopReason=stopReason||outcome.reason;else if(outcome.reason&&!['rate_limited','quota_exceeded'].includes(outcome.reason))stopReason=outcome.reason;else if(outcome.reason)rateLimited=outcome.reason;continue;}
     served=model;
     if(complete())break;
     // One targeted repair on the same model: ask for what is missing, keep everything else,
@@ -373,7 +346,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
   const status=!editorial.usable?'failed':editorial.strength==='strong'?'complete':'thin';
   // The reason says what actually happened: a model answered but produced nothing usable, or
   // no model answered at all. FAILED keeps its literal meaning.
-  const reason=status==='failed'?(state.truncated?'truncated_output':responded?'no_usable_analysis':rateLimited||stopReason||'no_usable_analysis'):null;
+  const reason=status==='failed'?(state.truncated?'truncated_output':stopReason||rateLimited||'no_usable_analysis'):null;
   console.log(`Analyst attempts (${new Set(attempts.map(row=>row.model)).size}/${chain.length} models):`,attempts.map(row=>`${row.model} → ${row.status}`).join(', ')||'none');
   console.log(status==='failed'?`Analyst FAILED: ${reason}`:`Analyst ${status.toUpperCase()}: desired ${editorial.target} | findings ${editorial.count} (semantic ${state.semantic_moments.length}, measurements ${editorial.count-state.semantic_moments.length}) | strong ${editorial.strong_count}/${editorial.minimum} | top_four_semantics ${semantics.provided}/${topFour.length}`);
   return {status,reason,model:served,candidate_count:candidates.length,selected:state.selected,

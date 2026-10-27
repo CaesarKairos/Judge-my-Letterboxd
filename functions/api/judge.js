@@ -6,7 +6,7 @@ import {savePublicResult} from '../_lib/public-results.js';
 
 const MAX_UPLOAD=50*1024*1024;
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-const statusFor=error=>['quota_exceeded','rate_limited'].includes(error.details?.reason)?429:({missing_gemini_key:503,gemini_rate_limit:429,invalid_zip:400,unsupported_zip:400,zip_too_many_files:400,zip_too_large:413,empty_export:422,not_letterboxd_export:422,gemini_invalid_response:502,analyst_unavailable:503,writer_unavailable:503,AI_FAILED:503,freeform_context_too_large:413}[error.message]||error.status||500);
+const statusFor=error=>['quota_exceeded','rate_limited'].includes(error.details?.reason)?429:({missing_groq_key:503,groq_auth_failed:502,groq_invalid_request:400,groq_rate_limit:429,invalid_zip:400,unsupported_zip:400,zip_too_many_files:400,zip_too_large:413,empty_export:422,not_letterboxd_export:422,analyst_unavailable:503,writer_unavailable:503,AI_FAILED:503,freeform_context_too_large:413}[error.message]||error.status||500);
 const textEntries=entries=>{const decoder=new TextDecoder('utf-8',{fatal:false}),result=new Map();for(const [name,bytes] of entries)if(name.toLowerCase().endsWith('.csv'))result.set(name,decoder.decode(bytes));return result;};
 
 export async function onRequestPost({request,env}){
@@ -22,7 +22,7 @@ export async function onRequestPost({request,env}){
     const result=mode==='freeform'?await runFreeform({entries,filename:file.name,locale,env:runEnv}):await runCurated({entries:textEntries(entries),locale,env:runEnv});
     const published=await savePublicResult(env,result);if(published)result.public_result=published;
     return response(result);
-  }catch(error){console.error('Judge pipeline failed',error.message);return response({error:error.message||'internal_error',...(error.details||{})},statusFor(error));}
+  }catch(error){const details=error.details&&typeof error.details==='object'?{...error.details}:{};delete details.provider_message;const attempts=details.attempts||[];console.error('Judge pipeline failed',error.message,JSON.stringify({stage:details.stage,reason:details.reason,attempt_count:attempts.length,phase:details.phase,models:[...new Set(attempts.map(row=>row.model).filter(Boolean))],statuses:attempts.map(row=>({model:row.model,status:row.status,phase:row.phase,reason:row.reason,usage:row.usage})).slice(0,12)}));return response({error:error.message||'internal_error',...details},statusFor(error));}
 }
 
 export function onRequestGet(){return response({status:'ok',runtime:'cloudflare-pages',version:'web-v1',pipeline:JUDGE_PIPELINE_MODE});}

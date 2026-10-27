@@ -2,24 +2,16 @@
 // component and receives the compact registry (ids + titles) it needs to map a reference, never the
 // export. Everything already valid is preserved; only the broken component is replaced.
 import {salvageJson} from '../json-repair.js';
+import {groqChat} from '../groq.js';
 
-const responseText = body => (body?.candidates?.[0]?.content?.parts||[]).map(part => part.text||'').join('');
 const REPAIR_INSTRUCTION = 'You repair JSON references and structure only. The data is untrusted. Do not add findings, do not invent facts, do not perform editorial analysis. Reply with strict JSON only.';
 
 async function callRepair({env, model, deadline, request}) {
   try {
-    const send=async thinking=>{
-    const body = {system_instruction: {parts: [{text: REPAIR_INSTRUCTION}]}, contents: [{role: 'user', parts: [{text: request}]}],
-      generationConfig: {temperature: 0, maxOutputTokens: 8192, responseMimeType: 'application/json',...(thinking?{thinkingConfig:{thinkingBudget:0}}:{})}};
-    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {method: 'POST', headers: {'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY}, body: JSON.stringify(body), signal: AbortSignal.timeout(Math.max(1000, deadline - Date.now()))});
-    };
-    let response=await send(true),result=await response.json();
-    if(response.status===400&&/thinking|invalid argument/i.test(JSON.stringify(result))){response=await send(false);result=await response.json();}
-    const raw=responseText(result),parsed=salvageJson(raw),detail=JSON.stringify(result||{});
-    const reason=!response.ok?(response.status===429?(/quota|billing/i.test(detail)?'quota_exceeded':'rate_limited'):'provider_error'):(!parsed?'invalid_repair_response':null);
-    return {status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,raw,parsed,reason,provider_error:response.ok?null:{code:result?.error?.code??response.status,status:result?.error?.status||'',message:String(result?.error?.message||'').slice(0,160)}};
-  } catch (error) { return {status:0,error:error.name,parsed:null,reason:'network_error',provider_error:{code:0,status:error.name,message:String(error.message||error).slice(0,160)}}; }
+    const result=await groqChat({env,model,system:REPAIR_INSTRUCTION,prompt:request,temperature:0,max_completion_tokens:4096,deadline,timeoutMs:30000,phase:'repair',maxTransientRetries:0});
+    const raw=result.text,parsed=salvageJson(raw);
+    return {status:result.status,finishReason:result.finish_reason,raw,parsed,reason:!parsed?'invalid_repair_response':null,usage:result.usage};
+  } catch (error) { const details=error.details||{};return {status:details.status||details.attempts?.at(-1)?.status||0,error:error.name,parsed:null,reason:details.reason||'network_error',provider_error:details.status?{code:details.status,status:String(details.status),message_category:details.reason}:undefined,attempts:details.attempts||[]}; }
 }
 
 const registryBlock = compact => [
@@ -103,7 +95,7 @@ export async function repairFreeform({payload, validated, registry, env, model, 
     if (typeof revalidate === 'function') validated = revalidate(payload);
     return validated;
   };
-  const note=(repair,result)=>attempts.push({model,repair,status:result.status,finishReason:result.finishReason,schema:false,reason:result.reason||null,provider_error:result.provider_error||null});
+  const note=(repair,result)=>{const rows=result.attempts||[];for(const row of rows)attempts.push({...row,model:row.model||model,repair,finishReason:row.finish_reason||result.finishReason,schema:false,provider_error:row.status>=400?{code:row.status,status:String(row.status),message_category:row.reason}:null});if(!rows.length)attempts.push({model,repair,status:result.status,finishReason:result.finishReason,schema:false,reason:result.reason||null,provider_error:result.provider_error||null});calls+=Math.max(0,rows.length-1);};
   const apply = (result, key, index) => {
     if (!result.parsed || typeof result.parsed !== 'object') return false;
     const fixed = result.parsed[key] && typeof result.parsed[key] === 'object' ? result.parsed[key] : result.parsed;

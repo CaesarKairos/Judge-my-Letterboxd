@@ -4,11 +4,12 @@ Dois aplicativos independentes que compartilham o contrato `presentation-v1`:
 
 | Aplicativo | Runtime | Entrada | Execução |
 | --- | --- | --- | --- |
-| Web | HTML/CSS/JS + Cloudflare Pages Functions | Upload no navegador | ZIP → parser JS → análise JS → Gemini → Presentation Script |
-| Local | Python via `app.py` | ZIP no computador | Pipeline Python completo → Presentation Script + auditoria local |
+| Web | HTML/CSS/JS + Cloudflare Pages Functions | Upload no navegador | ZIP → parser JS → análise JS → Groq → Presentation Script |
+| Local legado | Python via `app.py` | ZIP no computador | Protótipo histórico; não é um caminho suportado |
 
-O Cloudflare não executa, importa ou chama `app.py`. A aplicação local continua
-funcionando por conta própria, mesmo que o site não esteja publicado.
+O Cloudflare não executa, importa ou chama `app.py`. O produto suportado é o site
+Cloudflare Pages; `app.py`, os módulos Python e as seções antigas de instalação local
+são protótipos/registro histórico e continuam dependendo do cliente Gemini legado.
 
 ## Frontend web
 
@@ -60,7 +61,7 @@ pois `/api/judge` é executado como Pages Function.
   para falhas. Nenhum rating ou evidência é alterado.
 - `functions/api/judge.js` e `functions/_lib/`: backend web independente. Descompacta
   o ZIP com APIs do runtime Workers, interpreta os CSVs, calcula estatísticas e
-  momentos editoriais, chama Gemini com saída estruturada e monta o Presentation Script.
+  momentos editoriais, chama Groq com saída JSON e monta o Presentation Script.
   Não há dependência de Python, subprocesso ou serviço externo próprio.
 
   A resposta do modelo nunca vira roteiro sem validação: JSON cortado pelo limite de saída
@@ -129,12 +130,16 @@ Depois faça um novo deploy. A chave
 páginas individuais usam `noindex,follow`: continuam compartilháveis, mas não entram
 no sitemap nem transformam perfis pessoais em índice público pesquisável.
 
-Configure `TMDB_API_KEY`
-e `GEMINI_API_KEY` como secrets nas configurações do Pages. `GEMINI_MODEL` e
-`GEMINI_FALLBACK_MODELS` são variáveis opcionais; os padrões formam uma cadeia entre
-`gemini-flash-latest`, `gemini-3.8-flash` e `gemini-3.5-flash-lite`. Configure os secrets nos
-ambientes Production e Preview que você usa e faça um novo deploy. Eles ficam em
+Configure `TMDB_API_KEY` e `GROQ_API_KEY` como secrets nas configurações do Pages.
+`GROQ_MODEL` e `GROQ_FALLBACK_MODELS` são variáveis opcionais, com padrões
+`openai/gpt-oss-120b` e `openai/gpt-oss-20b`. Cadastre `GROQ_API_KEY` nos ambientes
+Production e Preview que você usa e faça um novo deploy. Localmente, copie
+`.dev.vars.example` para `.dev.vars` e preencha `GROQ_API_KEY`; esse arquivo é ignorado pelo Git.
+Também é possível usar `.env` para os scripts de probe. As chaves ficam em
 `context.env` da Function e nunca são enviados ao navegador.
+
+No dashboard, adicione `GROQ_API_KEY` em Settings → Variables and Secrets → Add → Secret
+para Production e Preview. Ou use `npx wrangler pages secret put GROQ_API_KEY --project-name judge-my-letterboxd`.
 
 Para desenvolvimento local, copie `.dev.vars.example` para `.dev.vars`, preencha as
 chaves e execute:
@@ -178,7 +183,7 @@ O smoke automatizado usa 360×800,
 
 Compartilhamento usa Web Share, clipboard ou download de texto; não há URL persistida.
 O SVG de Open Graph é um placeholder: algumas redes exigem PNG/JPEG para preview.
-Sem secret TMDB os cartazes usam fallback. Sem `GEMINI_API_KEY`, o upload informa
+Sem secret TMDB os cartazes usam fallback. Sem `GROQ_API_KEY`, o upload informa
 claramente que falta configurar o Judge web. A demo é pt-BR, mesmo com UI em inglês.
 A análise web prioriza uma experiência rápida e não grava o ZIP nem os resultados;
 o pipeline Python permanece mais profundo e mantém todos os artefatos de auditoria.
@@ -240,7 +245,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Se `.env` já existir, edite-o sem sobrescrever sua chave. Preencha `GEMINI_API_KEY`.
+Se `.env` já existir, edite-o sem sobrescrever suas configurações. Preencha `GROQ_API_KEY`.
 Sem ativação, use `.\.venv\Scripts\python.exe` no lugar de `python`.
 Linux/macOS: `source .venv/bin/activate`.
 
@@ -305,9 +310,8 @@ Motivos mais comuns e o que fazer:
 
 | `run_status.json` | Causa | Ação |
 | --- | --- | --- |
-| `analyst: failed`, `error.code: 429`, `limit_window: day` | Cota diária (RPD) do modelo esgotada | RPD renova à meia-noite do Pacífico (04h em Brasília); ou usar `GEMINI_FALLBACK_MODELS` com outro modelo (a cota é por modelo e por projeto); ou rodar `--no-analyst` |
-| `analyst: failed`, `error.code: 429`, `limit_window: minute` | Limite por minuto | Esperar e repetir; reduzir `SCRIPT_MAX_BEATS` |
-| `analyst: failed`, `error.code: 401/403` | Credencial inválida | Conferir `GEMINI_API_KEY` no `.env` |
+| `analyst: failed`, `error.code: 429` | Rate limit ou quota da Groq | Confira o painel Groq; uma única chamada avança ao fallback configurado |
+| `analyst: failed`, `error.code: 401/403` | Credencial inválida | Conferir `GROQ_API_KEY` no `.env` |
 | `writer: failed`, `error.code: 429` | Cota esgotada na chamada do Writer | A estrutura e os dados continuam em `presentation_script.json`; repetir depois da renovação reaproveita o cache |
 | `writer: rejected`, `error.reason: final_writer_contract` | A resposta do Writer violou o contrato (beat novo, efeito inválido, número solto, markdown) | Nenhum texto é aceito; ver `final_writer_response.json.errors` |
 
@@ -317,13 +321,13 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 
 | Variável | Default | Uso |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | vazio | Chave do Gemini |
-| `GEMINI_MODEL` | `gemini-flash-latest` | Compatibilidade: modelo usado quando a variável específica da etapa não foi definida |
-| `GEMINI_ANALYST_MODEL` | herda `GEMINI_MODEL` | Modelo principal do Analyst |
-| `GEMINI_ANALYST_FALLBACK_MODELS` | herda fallback legado | Reservas do Analyst |
-| `GEMINI_WRITER_MODEL` | herda `GEMINI_MODEL` | Modelo principal do Final Writer |
-| `GEMINI_WRITER_FALLBACK_MODELS` | herda fallback legado | Reservas do Writer; variantes Lite são rebaixadas para o fim pelo discovery |
-| `GEMINI_FALLBACK_MODELS` | vazio | Compatibilidade para as duas etapas quando fallbacks específicos não foram definidos |
+| `GROQ_API_KEY` | vazio | Secret obrigatório para julgamento com IA |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Modelo principal do Freeform e padrão do Curated |
+| `GROQ_FALLBACK_MODELS` | `openai/gpt-oss-20b` | Fallback; só o primeiro modelo alternativo é usado |
+| `GROQ_ANALYST_MODEL` | herda `GROQ_MODEL` | Override opcional do Analyst Curated |
+| `GROQ_ANALYST_FALLBACK_MODELS` | herda `GROQ_FALLBACK_MODELS` | Fallback opcional do Analyst Curated |
+| `GROQ_WRITER_MODEL` | herda `GROQ_MODEL` | Override opcional do Writer Curated |
+| `GROQ_WRITER_FALLBACK_MODELS` | herda `GROQ_FALLBACK_MODELS` | Fallback opcional do Writer Curated |
 | `JUDGE_LANGUAGE` | `pt-BR` | Idioma das observações e reações |
 | `MAX_CONTEXT_CHARS` | `1000000` | Prompt + dados do Analyst |
 | `SCRIPT_MAX_BEATS` | `12` | Máximo entre 1 e 14; quality gate pode resultar em menos |
@@ -332,8 +336,6 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 | `WRITER_MAX_WORDS_PER_LINE` | `14` | Teto rígido; linhas continuam curtas |
 | `ANALYST_TEMPERATURE` | `0.2` | Temperatura independente |
 | `WRITER_TEMPERATURE` | `0.75` | Temperatura independente |
-| `MODEL_DISCOVERY` | `1` | Descoberta dinâmica via `models.list` antes do Writer |
-| `MODEL_DISCOVERY_CHAIN_LIMIT` | `8` | Quantos modelos de reserva entram na corrente; Flash-Lite fica por último |
 | `MODEL_DISCOVERY_TTL_MINUTES` | `30` | Validade do cache local de descoberta (desligado por padrão no fluxo) |
 | `JUDGE_HUMOR_TEMPLATES` | `0` | `1` habilita momentos HUMAN_TEMPLATE quando o template casar |
 | `WRITER_MAX_LINES` | `3` | Máximo entre 1 e 3 linhas geradas por beat |
@@ -450,21 +452,13 @@ aí entram só os dados e uma pausa, e isso é decisão de roteiro, não falha.
 - A identidade da conta vem de `profile.csv` (`Username`/`Name`); todo o resto desse
   arquivo continua descartado.
 
-## Descoberta de modelos e fallback
+## Modelos e fallback Groq
 
-A corrente é montada nesta ordem, sem duplicatas: `GEMINI_MODEL` →
-`GEMINI_FALLBACK_MODELS` → modelos descobertos por `models.list` (até
-`MODEL_DISCOVERY_CHAIN_LIMIT`). O filtro aceita apenas o que serve para
-`generateContent` de texto e rejeita, com motivo registrado, embeddings, TTS, áudio,
-imagem, live, transcrição, Lyria, robotics e modelos com ciclo de vida encerrado;
-a preferência é Flash estável, depois Flash `latest`, depois Flash-Lite, e preview/experimental
-perdem pontos quando há alternativa. A descoberta acontece **uma vez por execução** e
-apenas antes do Writer.
-
-Como `models.list` não devolve capacidades para todo projeto, o filtro é heurístico e
-documentado; o que escapar é resolvido em tempo de execução: 404/incompatibilidade,
-429 ou 5xx levam ao próximo modelo da corrente, com `model_attempts` e
-`served_model` gravados. 401/403 é falha global de credencial e para a execução.
+O runtime web usa `GROQ_MODEL` (padrão `openai/gpt-oss-120b`) e até um modelo
+alternativo em `GROQ_FALLBACK_MODELS` (padrão `openai/gpt-oss-20b`). Não há descoberta
+de modelos. 429 avança uma vez ao fallback, sem repetir a chamada; rede e 5xx podem
+repetir uma vez no mesmo modelo. 400 e erros de autenticação param sem retry. Analyst
+e Writer Curated aceitam overrides `GROQ_ANALYST_*` e `GROQ_WRITER_*`.
 
 ## Fallback local (sem IA, sem fingimento)
 
@@ -660,11 +654,10 @@ etapa, com deadline e fallback de modelo.
 
 #### Contrato do Analyst
 
-O Analyst declara o contrato em `responseSchema` (`ANALYST_SCHEMA`), não em prosa: os
-três arrays (`selected`, `interaction_candidates`, `top_four_semantics`) são exigidos
-pela API e pelo gate. Antes, `top_four_semantics` era exigido no aceite sem nunca ter
-sido enviado como schema — o modelo devolvia uma seleção perfeita, omitia um array e a
-sessão inteira morria.
+O Analyst solicita o modo JSON (`response_format: { type: "json_object" }`), sem
+JSON Schema específico do Gemini. A validação local continua exigindo os arrays
+`selected`, `semantic_findings`, `interaction_candidates` e `top_four_semantics` e
+preserva seleção útil enquanto pede reparos direcionados para o contrato incompleto.
 
 - `buildAnalystContext()` (`functions/_lib/analyst-context.js`) monta a ÚNICA
   representação enviada: filmes, ratings, diary, reviews integrais, listas, tags,
@@ -687,46 +680,18 @@ sessão inteira morria.
   parte (`complete`/`failed`/`not_required`), então um Top 4 ausente não derruba a
   sessão: ela continua com `thin`/`complete` e a informação fica auditável.
 
-#### Cadeia de modelos, deadline e quota
+#### Cadeia curta, deadline e quota
 
-- `mergeModels(configured,discovered)`: o primário configurado sempre primeiro; em seguida a
-  escada de qualidade — Flash completos (geração mais nova primeiro), outros modelos textuais,
-  previews e Flash-Lite por último, mesmo quando configurado explicitamente. Deduplicado, e a
-  configuração explícita é apenas critério de desempate dentro do nível.
-- A cadeia NÃO tem corte por quantidade: `MODEL_SAFETY_CEILING=24` existe só para impedir loop
-  infinito e o **deadline de 75s** decide quantos modelos rodam. A descoberta lista até 20
-  (`DISCOVERY_LIMIT`), então um modelo descoberto na última posição ainda é tentado se houver
-  tempo — um 404 ou 429 que responde em menos de 1s nunca bloqueia os seguintes.
-- 404/429: uma tentativa por modelo, sem repetição, avanço imediato. 503 (e demais 5xx):
-  no máximo uma retry curta, se ainda houver orçamento; depois avanço. Timeout: avanço
-  respeitando o deadline.
-- Um 404/429 marca o modelo como indisponível **para aquela execução** (`env` compartilhado
-  entre Analyst e Writer), então o Writer não paga de novo por um modelo que o Analyst já viu
-  morto. Não persiste entre requisições.
-- O timeout de cada requisição respeita o teto (20s) e reserva uma fatia mínima (8s) para cada
-  modelo restante, dentro do deadline de 75s.
-- Resposta não-2xx **nunca** é interpretada como saída do modelo: o registro tem
-  `http`, `provider_error` (código/status/mensagem do provedor), `detail`, `timeout_ms` e
-  `duration_ms`. `parse_error`/`finishReason` só existem quando houve geração 2xx.
-- `thinkingConfig.thinkingBudget=0` é enviado por padrão (o thinking consumia o orçamento de
-  saída em modelos 2.5) e é removido automaticamente se a API rejeitar com 400.
-- Falha por cota ou rate limit é classificada como `quota_exceeded`/`rate_limited`, e o
-  frontend mostra a mensagem de espera em vez de culpar a leitura do perfil.
-
-Variáveis específicas podem separar os modelos:
-
-- `GEMINI_ANALYST_MODEL` e `GEMINI_ANALYST_FALLBACK_MODELS`;
-- `GEMINI_WRITER_MODEL` e `GEMINI_WRITER_FALLBACK_MODELS`;
-- `GEMINI_MODEL` e `GEMINI_FALLBACK_MODELS` continuam compatíveis;
-- `GEMINI_MODEL_DISCOVERY=0` desativa a descoberta server-side;
-- `JUDGE_DEBUG_CONFIG=1` habilita `GET /api/config` (diagnóstico local: chave presente,
-  descoberta ligada, cadeias montadas, modelos configurados fora do catálogo). Sem essa
-  variável a rota responde 404 e nada de configuração é exposto; a chave nunca é
-  devolvida em nenhum caso.
-
-Deixar `GEMINI_FALLBACK_MODELS` vazio é o padrão recomendado: a descoberta monta a
-cadeia a partir de `models.list`, e um nome fixo envelhece (404 remove o modelo da
-etapa, mas o usuário perdeu uma reserva).
+Cada fase tem no máximo dois modelos explícitos (`GROQ_MODEL` e o primeiro
+`GROQ_FALLBACK_MODELS`). 429 avança ao fallback sem repetir a mesma chamada; 400 e
+401/403 param imediatamente. Falhas de rede e 5xx podem repetir uma vez no mesmo
+modelo, desde que reste deadline. O Analyst limita a fase a 75 segundos e sete chamadas
+lógicas; Freeform permite três reparos direcionados e um resgate do núcleo. Cada
+requisição tem timeout limitado pelo deadline. Respostas HTTP de erro nunca são
+interpretadas como conteúdo gerado. O registro guarda fase, modelo, status, motivo e
+uso de tokens quando disponível. `GROQ_ANALYST_MODEL` e `GROQ_ANALYST_FALLBACK_MODELS`
+podem separar o Analyst Curated; `GROQ_WRITER_MODEL` e `GROQ_WRITER_FALLBACK_MODELS`
+podem separar o Writer Curated. Não há descoberta de modelos.
 
 A geração possui três resultados:
 
@@ -793,7 +758,8 @@ repairs disparados, achados preservados, Top 4 por `film_key`, `Writer called: t
 modelo servido, reações por beat, archetype/closer/Profile Review e o estado final da
 apresentação. Nem a chave da API nem o prompt aparecem em log ou resposta.
 
-Fora da nuvem, dois harnesses repetem a execução real com o export do workspace:
+Fora da nuvem, os harnesses executam o ZIP com a cadeia Groq; `--stub` simula somente
+as respostas de modelo:
 
 ```bash
 node scripts/analyst-diagnostic.mjs caminho-do-export.zip
@@ -801,10 +767,8 @@ node scripts/test-web-pipeline.mjs caminho-do-export.zip
 node scripts/test-web-pipeline.mjs caminho-do-export.zip --stub
 ```
 
-O primeiro mostra a conversa HTTP completa do Analyst e o motivo concreto de cada
-rejeição. O segundo roda o pipeline inteiro; `--stub` responde o lado do modelo
-localmente (marcado no log) para quando a conta está sem cota, mantendo export,
-contexto, Script Engine, contrato do Writer e apresentação reais.
+O diagnóstico Freeform usa o mesmo `GROQ_API_KEY`, `GROQ_MODEL` e cadeia limitada do
+runtime. `npm run probe:groq` é a verificação mínima de conectividade, sem export.
 
 ### Testes
 
@@ -813,7 +777,7 @@ contrato da apresentação, `ai_unavailable`, estado parcial, Profile Review,
 explainability e o fingerprint enviado ao Writer. `web-tests/analyst.test.js` cobre o
 contrato do Analyst: Top 4 ausente/parcial com repair direcionado, seleção preservada
 quando o repair de semantics falha, JSON truncado vira `truncated_output`, o request
-carrega `responseMimeType`/`responseSchema`/`maxOutputTokens`, `thin` não é falha, falha
+usa JSON mode Chat Completions e `max_completion_tokens`, `thin` não é falha, falha
 real devolve `analyst.status = failed` sem promover candidatos determinísticos, a
 deduplicação do contexto e as mensagens distintas de Analyst/Writer no frontend. A
 cadeia de modelos tem regressões próprias: modelo 7 e 8 descobertos são alcançados
@@ -836,8 +800,16 @@ Depois de trocar o valor, execute `python scripts/sync-mode.py` antes de rodar o
 `python scripts/sync-mode.py --check` falha quando o artefato Cloudflare está divergente; `npm run build`
 faz a sincronização automaticamente. Não configure o modo no dashboard da Cloudflare.
 
-O modo Freeform é experimental e envia ao Gemini todo o conteúdo textual e celular do export, incluindo
+O modo Freeform é experimental e envia à Groq todo o conteúdo textual e celular do export, incluindo
 reviews, comments, likes, listas, arquivos em `deleted/` e `orphaned/` e arquivos desconhecidos. Binários
 grandes permanecem no JSON lossless local, enquanto o modelo recebe seus metadados, tamanho e SHA-256.
 Se o contexto não couber, a execução falha explicitamente com `freeform_context_too_large`; não há corte
 silencioso nem fallback automático para Curated.
+
+O runtime JavaScript usa exclusivamente a API Chat Completions da Groq. Cada fase tem no máximo dois
+modelos configurados; `429` avança uma vez ao fallback e `5xx`/rede podem repetir uma vez no mesmo
+modelo. Freeform permite até três reparos direcionados e um resgate do núcleo, dentro do deadline.
+Para validar a credencial localmente sem imprimir chave ou conteúdo de resposta, execute `npm run probe:groq`.
+O cliente Python em `src/gemini_client.py` e `app.py` é um protótipo legado, fora do runtime suportado
+Cloudflare Pages. As seções históricas anteriores a “Pipeline web (Cloudflare Pages)” documentam
+esse protótipo e decisões antigas; não são instruções de configuração ou diagnóstico do site.

@@ -12,15 +12,14 @@ import {buildFreeformRegistry,normalizeFreeformReferences} from '../functions/_l
 import {validateFreeformResponse} from '../functions/_lib/freeform/validator.js';
 import {freeformJudge} from '../functions/_lib/freeform/judge.js';
 import {materializeFreeform} from '../functions/_lib/freeform/materializer.js';
-import {discoverTextModels,mergeModels} from '../functions/_lib/models.js';
+import {groqModels} from '../functions/_lib/groq.js';
 import {validateScript} from '../js/utils.js';
 
 process.loadEnvFile('.env');
-const pick=name=>(process.env[name]||'').trim();
-const env={GEMINI_API_KEY:pick('GEMINI_API_KEY'),GEMINI_MODEL:pick('GEMINI_MODEL'),GEMINI_FALLBACK_MODELS:pick('GEMINI_FALLBACK_MODELS'),
-  GEMINI_FREEFORM_MODEL:pick('GEMINI_FREEFORM_MODEL'),GEMINI_FREEFORM_FALLBACK_MODELS:pick('GEMINI_FREEFORM_FALLBACK_MODELS'),
-  GEMINI_WRITER_MODEL:pick('GEMINI_WRITER_MODEL'),GEMINI_WRITER_FALLBACK_MODELS:pick('GEMINI_WRITER_FALLBACK_MODELS'),
-  GEMINI_MODEL_DISCOVERY:pick('GEMINI_MODEL_DISCOVERY')};
+const devVars=Object.fromEntries((await readFile('.dev.vars','utf8').catch(()=>'' )).split(/\r?\n/).map(line=>line.match(/^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/)).filter(Boolean).map(([,name,value])=>[name,value.replace(/^(['"])(.*)\1$/,'$2')]));
+const pick=name=>(process.env[name]||devVars[name]||'').trim();
+const env={GROQ_API_KEY:pick('GROQ_API_KEY'),GROQ_MODEL:pick('GROQ_MODEL'),GROQ_FALLBACK_MODELS:pick('GROQ_FALLBACK_MODELS'),
+  GROQ_FREEFORM_MODEL:pick('GROQ_FREEFORM_MODEL'),GROQ_FREEFORM_FALLBACK_MODELS:pick('GROQ_FREEFORM_FALLBACK_MODELS')};
 const zipPath=process.argv[2];
 if(!zipPath)throw new Error('Uso: node scripts/freeform-diagnostic.mjs caminho-do-export.zip');
 
@@ -31,32 +30,30 @@ const registry=buildFreeformRegistry(ai);
 console.log('Archive (AI):',diagnostics.archive_ai_chars,'chars | lossless:',diagnostics.archive_lossless_chars,'chars | files:',diagnostics.files,'rows:',diagnostics.rows);
 console.log('Entity counts:',JSON.stringify(registry.size));
 
-const configured=[env.GEMINI_FREEFORM_MODEL||env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',
-  ...String(env.GEMINI_FREEFORM_FALLBACK_MODELS||env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(value=>value.trim()).filter(Boolean)];
-const discovered=await discoverTextModels(env),models=mergeModels(configured,discovered);
+const models=groqModels(env,'FREEFORM');
 console.log('Model chain ('+models.length+'):',models.join(' -> ')||'(none)');
-console.log('Discovery:',discovered.length?`ok, ${discovered.length} textual models`:'unavailable','| key present',Boolean(env.GEMINI_API_KEY));
+console.log('Groq key present:',Boolean(env.GROQ_API_KEY));
 
 // Every call is intercepted so the stage can be audited from the log alone. Editorial answers are
 // re-validated here offline to expose the per-response contract result the judge hides internally.
 const traffic=[],original=globalThis.fetch;
 globalThis.fetch=async(input,init={})=>{
   const url=typeof input==='string'?input:String(input?.url||''),raw=typeof init?.body==='string'?init.body:'';
-  const request=raw?JSON.parse(raw):{},systemText=request?.system_instruction?.parts?.[0]?.text||'';
-  const kind=/repair JSON references/.test(systemText)?'repair':(request?.generationConfig?.responseSchema?'editorial':'other');
-  const entry={kind,request_chars:raw.length,schema:Boolean(request?.generationConfig?.responseSchema),started:Date.now()};
+  const request=raw?JSON.parse(raw):{},systemText=request?.messages?.[0]?.content||'';
+  const kind=/repair JSON references/.test(systemText)?'repair':'editorial';
+  const entry={kind,request_chars:raw.length,json_mode:request?.response_format?.type==='json_object',started:Date.now()};
   traffic.push(entry);
   const response=await original(input,init);
   entry.status=response.status;entry.ms=Date.now()-entry.started;
-  if(url.includes(':generateContent')){
+  if(url.includes('/chat/completions')){
     const clone=response.clone();
     if(!response.ok){
       try{const body=await clone.json();entry.provider_error={code:body?.error?.code??response.status,status:body?.error?.status||'',message:String(body?.error?.message||'').slice(0,160)};}
       catch{entry.provider_error={code:response.status,message:'unreadable error body'};}
     }else{
       try{
-        const body=await clone.json(),candidate=body?.candidates?.[0],text=(candidate?.content?.parts||[]).map(part=>part.text||'').join('');
-        entry.finishReason=candidate?.finishReason||null;entry.response_chars=text.length;entry.blocked=Boolean(body?.promptFeedback?.blockReason);
+        const body=await clone.json(),text=body?.choices?.[0]?.message?.content||'';
+        entry.finishReason=body?.choices?.[0]?.finish_reason||null;entry.response_chars=text.length;
         if(kind==='editorial'){
           const parsed=salvageJson(text);
           if(!parsed){entry.summary={parse:'salvage_failed'};}

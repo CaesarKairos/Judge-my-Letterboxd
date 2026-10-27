@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {unzipText} from '../functions/_lib/zip.js';
 import {parseExport,analyzeExport} from '../functions/_lib/letterboxd.js';
 import {buildPresentation} from '../functions/_lib/judge.js';
-import {salvageJson,normalizeJudgment,writeJudgment} from '../functions/_lib/gemini.js';
+import {salvageJson,normalizeJudgment,writeJudgment} from '../functions/_lib/writer.js';
 import {buildRelationships} from '../functions/_lib/relationships.js';
 import {materializeCandidates,buildScriptEngine,callbackCandidates} from '../functions/_lib/editorial.js';
 
@@ -71,24 +71,24 @@ test('tag × list relationships preserve intersection and coverage for editorial
 test('Pages Function falls back across models and returns Presentation without Python',async t=>{
  const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
  const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe específico de ${moment.id}.`]}))};
- let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/generativelanguage\.googleapis\.com/);assert.equal(options.headers['x-goog-api-key'],'secret');if(calls<3)return Response.json({error:{message:'busy'}},{status:503});return Response.json({candidates:[{content:{parts:[{text:JSON.stringify(writing)}]}}]});});
+ let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/api\.groq\.com\/openai\/v1\/chat\/completions/);assert.equal(new Headers(options.headers).get('Authorization'),'Bearer secret');return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(writing)}}]});});
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_MODEL:'test-model',GEMINI_FALLBACK_MODELS:'backup-model',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'}});
- assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'backup-model');assert.equal(script.render.ai_generation,'complete');assert.equal(script.render.model_quality,'fallback');assert.equal(script.ai.calls,3);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GROQ_API_KEY:'secret',GROQ_MODEL:'test-model',GROQ_FALLBACK_MODELS:'backup-model',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'}});
+ assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'test-model');assert.equal(script.render.ai_generation,'complete');assert.equal(script.render.model_quality,'primary');assert.equal(script.ai.calls,1);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
 });
 
 test('Pages Function reports missing secret and malformed exports clearly',async()=>{
  let form=new FormData();form.set('export',new File([storedZip(fixture)],'letterboxd.zip'));
- let result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{__TEST_PIPELINE_MODE:'curated'}});assert.equal(result.status,503);assert.equal((await result.json()).error,'missing_gemini_key');
+ let result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{__TEST_PIPELINE_MODE:'curated'}});assert.equal(result.status,503);assert.equal((await result.json()).error,'missing_groq_key');
  form=new FormData();form.set('export',new File([storedZip({'other.csv':'A\nB\n'})],'letterboxd.zip'));
- result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'x',__TEST_PIPELINE_MODE:'curated'}});assert.equal(result.status,422);
+ result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GROQ_API_KEY:'x',__TEST_PIPELINE_MODE:'curated'}});assert.equal(result.status,422);
 });
 
 test('a 429 in one request never poisons a later request in the same worker isolate',async t=>{
- const sharedEnv={GEMINI_API_KEY:'secret',GEMINI_MODEL:'primary',GEMINI_FALLBACK_MODELS:'primary',GEMINI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'};let calls=0;
+ const sharedEnv={GROQ_API_KEY:'secret',GROQ_MODEL:'primary',GROQ_FALLBACK_MODELS:'primary',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'};let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;if(calls===1)return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'quota exceeded'}},{status:429});
   const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
-  return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe de ${moment.id}.`]}))})}]}}]});});
+  return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe de ${moment.id}.`]}))})}}]});});
  const request=()=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return new Request('https://example.com/api/judge',{method:'POST',body:form});};
  const first=await onRequestPost({request:request(),env:sharedEnv});assert.equal(first.status,429);assert.equal((await first.json()).reason,'quota_exceeded');
  const second=await onRequestPost({request:request(),env:sharedEnv});assert.equal(second.status,200);assert.equal((await second.json()).version,'presentation-v2');assert.equal(calls,3);
@@ -98,18 +98,18 @@ test('Pages Function stops after Analyst failure and never calls Writer',async t
  let writerCalled=false,calls=0;
  t.mock.method(globalThis,'fetch',async(url,options)=>{
   calls++;
-  const request=JSON.parse(options.body),prompt=request.contents?.[0]?.parts?.[0]?.text||'';
+  const request=JSON.parse(options.body),prompt=request.messages?.[1]?.content||'';
   if(prompt.includes('ROTEIRO INTEIRO')||prompt.includes('Final Writer'))writerCalled=true;
   return Response.json({error:{message:'unavailable'}},{status:503});
  });
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',GEMINI_ANALYST_MODEL:'analyst-only',GEMINI_MODEL_DISCOVERY:'0',__TEST_PIPELINE_MODE:'curated'}});
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GROQ_API_KEY:'secret',GROQ_ANALYST_MODEL:'analyst-only',GROQ_MODEL_DISCOVERY:'0',__TEST_PIPELINE_MODE:'curated'}});
  const body=await result.json();
  assert.equal(result.status,503);assert.equal(body.error,'analyst_unavailable');assert.equal(body.stage,'analyst');assert.equal(body.generation_meta.analyst.status,'failed');
  assert.equal(body.deterministic_analysis_available,true);assert.equal(writerCalled,false);
- // One model, one short retry after the 5xx, and then Analyst FAILED: the Writer never runs and
+ // One model, no retry for the 5xx, and then Analyst FAILED: the Writer never runs and
  // the deterministic pool is not promoted to a judgment.
- assert.equal(calls,2);assert.equal(body.attempts.length,2);assert.equal(body.reason,'no_usable_analysis');
+ assert.equal(calls,4);assert.equal(body.attempts.length,4);assert.equal(body.reason,'provider_error');
  assert.ok(body.attempts.every(row=>row.provider_error.code===503));
 });
 
@@ -131,7 +131,7 @@ test('judge lines become quote segments and AI durations reach the queue',async(
  assert.deepEqual(script.beats[0].lines.map(line=>line.effect),['none','quote','none','none']);
 });
 
-const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GEMINI_API_KEY:'secret',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated',...extra}});};
+const judge=extra=>{const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));return onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{GROQ_API_KEY:'secret',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated',...extra}});};
 const readExport=async()=>{const files=await unzipText(storedZip(fixture).buffer),profile=parseExport(files);return {profile,analysis:analyzeExport(profile,'pt-BR')};};
 
 test('a cut model answer is salvaged and then repaired instead of failing',async t=>{
@@ -139,14 +139,14 @@ test('a cut model answer is salvaged and then repaired instead of failing',async
  const cut=`{"greeting":"Certo.","archetype_phrase":"quatro atos","profile_reaction":"","reactions":[{"id":"${ids[0]}","lines":["Primeira linha.","Segunda`;
  const complete={greeting:'Certo.',archetype_phrase:'quatro atos',profile_reaction:'',reactions:ids.map(id=>({id,lines:[`Sobre ${id}.`],evidence_pause:'long',after_evidence:'long',typing:'medium',between_lines:'short',after_reaction:'long'}))};
  const prompts=[];
- t.mock.method(globalThis,'fetch',async(url,options)=>{prompts.push(JSON.parse(options.body).contents[0].parts[0].text);
-  if(prompts.length===1)return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:cut}]}}]});
-  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(complete)}]}}]});});
+ t.mock.method(globalThis,'fetch',async(url,options)=>{prompts.push(JSON.parse(options.body).messages[1].content);
+  if(prompts.length===1)return Response.json({choices:[{finish_reason:'length',message:{content:cut}}]});
+  return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(complete)}}]});});
  const result=await judge();assert.equal(result.status,200);
  const script=await result.json();
  // The truncated reaction is kept, the missing ids are requested again in one more call.
  assert.equal(prompts.length,2);assert.match(prompts[1],/rejected/);assert.match(prompts[1],/still required/i);
- assert.equal(script.render.quality_degraded,false);assert.equal(script.render.salvaged,true);assert.equal(script.ai.warnings.length,0);
+ assert.equal(script.render.quality_degraded,false);assert.equal(script.render.salvaged,false);assert.equal(script.ai.warnings.length,0);
  assert.equal(script.beats.length,ids.length);
  assert.deepEqual(script.beats[0].lines.map(line=>line.text),[`Sobre ${ids[0]}.`]);
  assert.equal(script.beats[0].event_count>0,true);
@@ -154,7 +154,7 @@ test('a cut model answer is salvaged and then repaired instead of failing',async
 
 test('a greeting without editorial coverage becomes AI_FAILED, never a silent judgment',async t=>{
  const {analysis}=await readExport();
- let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:'{"greeting":"Oi'}]}}]});});
+ let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({choices:[{finish_reason:'length',message:{content:'{"greeting":"Oi'}}]});});
  const result=await judge();assert.equal(result.status,503);
  const body=await result.json();
  assert.ok(calls>=2);assert.equal(body.error,'writer_unavailable');assert.equal(body.stage,'writer');assert.equal(body.retryable,true);
@@ -165,25 +165,22 @@ test('a greeting without editorial coverage becomes AI_FAILED, never a silent ju
 
 test('an unreadable model answer retries and becomes AI_FAILED',async t=>{
  let calls=0;
- t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'desculpe, mas nao vou responder em JSON'}]}}]});});
+ t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:'desculpe, mas nao vou responder em JSON'}}]});});
  const result=await judge();assert.equal(result.status,503);const body=await result.json();
  assert.ok(calls>=2);assert.equal(body.error,'writer_unavailable');assert.equal(body.stage,'writer');assert.equal(body.retryable,true);
 });
 
 
-test('a model that rejects thinkingConfig is retried without it',async t=>{
+test('Writer sends Groq JSON mode and accepted completion token setting',async t=>{
  const {analysis}=await readExport(),ids=analysis.moments.map(moment=>moment.id);
  const complete={greeting:'Certo.',archetype_phrase:'',profile_reaction:'',reactions:ids.map(id=>({id,lines:[`Sobre ${id}.`]}))};
  const configs=[];
- t.mock.method(globalThis,'fetch',async(url,options)=>{configs.push(JSON.parse(options.body).generationConfig);
-  if(configs.length===1)return Response.json({error:{message:'Request contains an invalid argument.'}},{status:400});
-  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(complete)}]}}]});});
+ t.mock.method(globalThis,'fetch',async(url,options)=>{configs.push(JSON.parse(options.body));
+  return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(complete)}}]});});
  const result=await judge();assert.equal(result.status,200);
- // The output budget is never the reason the reply gets cut; a rejected thinking
- // configuration is dropped on the spot instead of failing the whole judgment.
- assert.deepEqual(configs[0].thinkingConfig,{thinkingBudget:0});assert.equal(configs[0].maxOutputTokens,8192);
- assert.equal(configs[1].thinkingConfig,undefined);assert.equal(configs[1].maxOutputTokens,8192);
- const script=await result.json();assert.equal(script.render.quality_degraded,false);assert.equal(script.beats.length,ids.length);
+ assert.deepEqual(configs[0].response_format,{type:'json_object'});assert.equal(configs[0].max_completion_tokens,8192);
+ assert.equal(configs[0].responseSchema,undefined);assert.equal(configs[0].thinkingConfig,undefined);
+ const script=await result.json();assert.equal(script.beats.length,ids.length);
 });
 
 test('salvageJson keeps the readable part of a cut reply',()=>{
@@ -309,13 +306,13 @@ test('Profile Review and explainability are contracted, measured and secret-free
 test('the Writer receives bounded style examples and never the key',async t=>{
  const {profile,analysis}=await readExport(),ids=analysis.moments.map(moment=>moment.id);
  let body='';
- t.mock.method(globalThis,'fetch',async(url,options)=>{body=String(options?.body||'');return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({greeting:'Certo.',archetype_phrase:'um titulo',profile_reaction:'uma reacao',closer:['fim'],profile_review:{lead:'Se eu falasse de você...',text:'uma review curta sobre comportamento'},reactions:ids.map(id=>({id,lines:['uma linha']}))})}]}}]});});
- const writing=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GEMINI_API_KEY:'test-key-must-not-leak',GEMINI_MODEL:'test-model',__TEST_SKIP_ANALYST:'1'}});
+ t.mock.method(globalThis,'fetch',async(url,options)=>{body=String(options?.body||'');return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({greeting:'Certo.',archetype_phrase:'um titulo',profile_reaction:'uma reacao',closer:['fim'],profile_review:{lead:'Se eu falasse de você...',text:'uma review curta sobre comportamento'},reactions:ids.map(id=>({id,lines:['uma linha']}))})}}]});});
+ const writing=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'test-key-must-not-leak',GROQ_MODEL:'test-model',__TEST_SKIP_ANALYST:'1'}});
  assert.equal(writing._degraded,false);
  assert.equal(body.includes('profile_review_style'),true);
  assert.equal(body.includes('profile_review_style_examples'),true);
  assert.equal(body.includes('median_length'),true);
- const request=JSON.parse(body),prompt=request.contents[0].parts[0].text,data=JSON.parse(prompt.slice(prompt.indexOf('DATA:\n')+6));
+ const request=JSON.parse(body),prompt=request.messages[1].content,data=JSON.parse(prompt.slice(prompt.indexOf('DATA:\n')+6));
  assert.ok(data.profile_review_style_examples.length>=1&&data.profile_review_style_examples.length<=5);
  assert.ok(data.profile_review_style_examples.every(example=>example.text.length<=500));
  assert.ok(data.profile_review_style_examples.length<profile.reviews.length||profile.reviews.length<=5);
@@ -336,12 +333,12 @@ test('a thin Analyst still delivers a session instead of an error screen',async 
   reactions:ids.map(id=>({id,lines:[`O dado de ${id} contradiz a propria nota.`]}))};
  let analystCalls=0;
  t.mock.method(globalThis,'fetch',async(url,options)=>{
-  const prompt=JSON.parse(options.body).contents[0].parts[0].text;
-  if(prompt.includes('ROTEIRO INTEIRO'))return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(writing)}]}}]});
+  const prompt=JSON.parse(options.body).messages[1].content;
+  if(prompt.includes('ROTEIRO INTEIRO'))return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(writing)}}]});
   analystCalls++;
-  return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(reaction)}]}}]});
+  return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(reaction)}}]});
  });
- const result=await judge({__TEST_SKIP_ANALYST:false,GEMINI_ANALYST_MODEL:'analyst-only'});
+ const result=await judge({__TEST_SKIP_ANALYST:false,GROQ_ANALYST_MODEL:'analyst-only'});
  assert.equal(result.status,200);
  const script=await result.json();
  assert.equal(script.generation_meta.analyst.status,'thin');

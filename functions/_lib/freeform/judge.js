@@ -1,4 +1,5 @@
-import {discoverTextModels,mergeModels,modelUnavailable,noteModelFailure,FREEFORM_MODEL_LIMIT} from '../models.js';
+import {mergeModels,modelUnavailable,noteModelFailure,FREEFORM_MODEL_LIMIT} from '../models.js';
+import {groqModels,groqWithFallback} from '../groq.js';
 import {salvageJson} from '../json-repair.js';
 import {FREEFORM_JUDGE_PROMPT,JUDGE_VOICE_PROMPT} from '../generated-prompts.js';
 import {validateFreeformResponse} from './validator.js';
@@ -15,29 +16,10 @@ const schema={type:'OBJECT',required:['opening','moments','games','closer','endi
 }};
 export {schema as freeformResponseSchema};
 
-const responseText=body=>(body?.candidates?.[0]?.content?.parts||[]).map(part=>part.text||'').join('');
+const responseText=body=>body?.choices?.[0]?.message?.content||'';
 const contextFailure=(status,body)=>status===413||status===400&&/context|token|too (large|long)|input size/i.test(JSON.stringify(body));
-const providerText=body=>String(body?.error?.message||'');
-const safeProviderError=(status,body)=>({code:body?.error?.code??status,status:String(body?.error?.status||''),message_category:status===400?categorizeBadRequest(body):status===404?'model_unavailable':status===429?'capacity_limit':status===503?'provider_unavailable':'provider_error'});
-export const categorizeBadRequest=body=>{
-  const message=providerText(body);
-  if(/thinkingConfig|thinking[_ ]?config|thinkingBudget/i.test(message))return 'unsupported_thinking_config';
-  if(/responseSchema|response_schema|schema/i.test(message))return 'unsupported_response_schema';
-  if(/responseMimeType|response_mime|mime.?type/i.test(message))return 'unsupported_response_mime';
-  if(/generationConfig|generation_config/i.test(message))return 'invalid_generation_config';
-  if(/unknown (field|name)|unrecognized|invalid (field|argument|value)/i.test(message))return 'invalid_request';
-  return 'unknown_400';
-};
-const compatibilityFlags=body=>{const message=providerText(body);return {mentions_thinking:/thinkingConfig|thinking[_ ]?config|thinkingBudget/i.test(message),mentions_schema:/responseSchema|response_schema|schema/i.test(message),mentions_mime:/responseMimeType|response_mime|mime.?type/i.test(message),mentions_invalid_field:/unknown (field|name)|unrecognized|invalid (field|argument|value)/i.test(message)};};
-const capacityReason=body=>{const error=body?.error||{},text=`${error.status||''} ${error.message||''}`;return /quota|billing|daily limit|per day/i.test(text)?'quota_exceeded':'rate_limited';};
-export const thinkingConfigForModel=model=>{
-  const name=String(model||'').toLowerCase();
-  if(/^gemini-3(?:\.|-)/.test(name))return {thinkingLevel:'low'};
-  if(/^gemini-2\.5-flash(?:-|$)/.test(name))return {thinkingBudget:0};
-  // Aliases and unknown families are intentionally conservative: their server-side target can
-  // change without the name changing, so the provider default is safer than a guessed field.
-  return null;
-};
+export const categorizeBadRequest=()=> 'invalid_request';
+export const thinkingConfigForModel=()=>null;
 
 // One model reply → normalize references → validate → repair the specific broken components.
 // Normalization runs first on purpose: an evidence_ref written as an entity id becomes the real
@@ -69,16 +51,16 @@ async function evaluateReply({raw,archive,registry,env,model,deadline,attempts,r
   return {...validated,_payload:payload,_repair_reason:strongestReason(repairReasons),_conversions:conversions,_repairs:repairs,_core_before_repair:coreBeforeRepair,_core_after_repair:validated.validation_summary};
 }
 const score=value=>(value.core_contract_complete?1_000_000:0)+(value.opening_valid?100_000:0)+Math.min(value.games?.length||0,value.required_games||0)*10_000+(value.profile_review_valid?5_000:0)+(value.moments?.length||0)*50-(value.moments_invalid?.length||0)*20-(value.attachments_invalid?.length||0);
-const REASON_PRIORITY=['quota_exceeded','rate_limited','provider_error','network_error','truncated_output','core_incomplete','invalid_repair_response','invalid_response'];
+const REASON_PRIORITY=['quota_exceeded','rate_limited','invalid_api_key','invalid_request','model_unavailable','provider_error','timeout','network_error','truncated_output','core_incomplete','invalid_repair_response','invalid_response'];
 const strongestReason=reasons=>REASON_PRIORITY.find(reason=>reasons.includes(reason))||null;
 export const classifyFinalReason=({attempts,best,fallback='no_usable_model_response'})=>{
-  const main=attempts.filter(row=>!row.repair),successful=main.filter(row=>row.status>=200&&row.status<300);
+  const main=attempts.filter(row=>!row.repair),successful=main.filter(row=>row.status>=200&&row.status<300&&(!row.reason||row.reason==='ok'));
   // A provider response that reached validation supersedes an older transport/quota failure.
   if(successful.length){
     if(best)return 'core_incomplete';
-    return successful.some(row=>row.finishReason&&row.finishReason!=='STOP')?'truncated_output':'invalid_response';
+    return successful.some(row=>row.finishReason&&row.finishReason.toLowerCase()!=='stop')?'truncated_output':'invalid_response';
   }
-  const attempted=main.filter(row=>row.status>0),limited=attempted.filter(row=>row.status===429),unavailable=attempted.filter(row=>row.status===503);
+  const attempted=main.filter(row=>row.status>0),limited=attempted.filter(row=>row.status===429),unavailable=attempted.filter(row=>row.status>=500);
   if(attempted.length&&limited.length/attempted.length>=.8){
     const quota=limited.filter(row=>row.reason==='quota_exceeded').length;
     return quota===limited.length?'quota_exceeded':'rate_limited';
@@ -90,63 +72,54 @@ export const classifyFinalReason=({attempts,best,fallback='no_usable_model_respo
 };
 
 export async function freeformJudge({archive,locale,env}){
-  if(!env.GEMINI_API_KEY)throw new Error('missing_gemini_key');
+  if(!env.GROQ_API_KEY)throw new Error('missing_groq_key');
   const archiveJson=JSON.stringify(archive),limit=Number(env.FREEFORM_MAX_PAYLOAD_CHARS||1800000);
   if(archiveJson.length>limit){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
   const systemInstruction=`${JUDGE_VOICE_PROMPT}\n\n${FREEFORM_JUDGE_PROMPT}`;
   const dataPrompt=`Language: ${locale==='en-US'?'English':'Brazilian Portuguese'}. acid_level=0.8.\n<ARCHIVE_DATA>\n${archiveJson}\n</ARCHIVE_DATA>`;
-  const discovered=await discoverTextModels(env),configured=[env.GEMINI_FREEFORM_MODEL||env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_FREEFORM_FALLBACK_MODELS||env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(v=>v.trim()).filter(Boolean)],models=mergeModels(configured,discovered,FREEFORM_MODEL_LIMIT);
+  const models=mergeModels(groqModels(env),[],FREEFORM_MODEL_LIMIT);
   const registry=buildFreeformRegistry(archive);
-  const attempts=[],deadline=Date.now()+190000;let lastReason='no_usable_model_response',best=null;
+  const attempts=[],deadline=Date.now()+190000;let lastReason='no_usable_model_response',best=null,budgetUsed=false;
   const keepReason=reason=>{lastReason=strongestReason([lastReason,reason].filter(Boolean))||reason;};
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
-    const modelThinking=thinkingConfigForModel(model),capabilities={thinking:Boolean(modelThinking),schema:true,mime:true};
-    for(let compatibilityAttempt=0;compatibilityAttempt<4&&Date.now()<deadline;compatibilityAttempt++){
-      const generationConfig={temperature:.8,maxOutputTokens:16384,...(capabilities.mime?{responseMimeType:'application/json'}:{}),...(capabilities.schema?{responseSchema:schema}:{}),...(capabilities.thinking?{thinkingConfig:modelThinking}:{})};
-      const body={system_instruction:{parts:[{text:systemInstruction}]},contents:[{role:'user',parts:[{text:dataPrompt}]}],generationConfig};
-      let response,result;
-      try{response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify(body),signal:AbortSignal.timeout(Math.max(1000,Math.min(65000,deadline-Date.now())))});result=await response.json();}
-      catch(error){attempts.push({model,status:0,finishReason:null,schema:capabilities.schema,mime:capabilities.mime,thinking:capabilities.thinking,error:error.name,reason:'network_error',action:'next_model'});keepReason('network_error');break;}
-      const before={thinking:capabilities.thinking,schema:capabilities.schema,mime:capabilities.mime},record={model,status:response.status,finishReason:result?.candidates?.[0]?.finishReason||null,...before,capabilities_before:before};
-      attempts.push(record);
-      if(contextFailure(response.status,result)){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
-      if(!response.ok){
-        record.provider_error=safeProviderError(response.status,result);
-        if(response.status===400){
-          record.reason=categorizeBadRequest(result);Object.assign(record,compatibilityFlags(result));
-          const retry=action=>{record.retry_action=action;record.capabilities_after={thinking:capabilities.thinking,schema:capabilities.schema,mime:capabilities.mime};};
-          if(record.reason==='unsupported_thinking_config'&&capabilities.thinking){capabilities.thinking=false;retry('thinking_disabled');continue;}
-          if(record.reason==='unsupported_response_schema'&&capabilities.schema){capabilities.schema=false;retry('schema_disabled');continue;}
-          if(record.reason==='unsupported_response_mime'&&capabilities.mime){capabilities.mime=false;capabilities.schema=false;retry('mime_and_schema_disabled');continue;}
-          if(['invalid_request','unknown_400'].includes(record.reason)){
-            if(capabilities.thinking){capabilities.thinking=false;retry('thinking_disabled');continue;}
-            if(capabilities.schema){capabilities.schema=false;retry('schema_disabled');continue;}
-            if(capabilities.mime){capabilities.mime=false;retry('mime_disabled');continue;}
-          }
-          record.action='model_incompatible';keepReason('provider_error');break;
-        }
-        if(response.status===429){
-          record.reason=capacityReason(result);record.action='model_skipped';noteModelFailure(env,model,response.status);keepReason(record.reason);break;
-        }
-        if(response.status===404){record.reason='model_unavailable';record.action='model_skipped';noteModelFailure(env,model,response.status);break;}
-        if(response.status===503){record.reason='provider_unavailable';record.action='next_model';keepReason(record.reason);break;}
-        record.reason='provider_error';record.action='next_model';keepReason('provider_error');break;
-      }
-      const raw=responseText(result),reply=await evaluateReply({raw,archive,registry,env,model,deadline,attempts,repairBudget:6});
-      const decorated=reply?{...reply,_model:model,_response_chars:raw.length,_finish_reason:record.finishReason}:null;
+    try{
+      const result=await groqWithFallback({env,models:[model],system:systemInstruction,prompt:dataPrompt,temperature:.8,max_completion_tokens:16384,deadline,timeoutMs:65000,phase:'freeform',maxTransientRetries:1});
+      attempts.push(...result.attempts.map(row=>({...row,status:row.status>=200&&row.status<300?200:row.status,reason:row.status>=200&&row.status<300?null:row.reason,finishReason:row.finish_reason||null})));
+      const raw=result.text,record={model:result.model,status:200,finishReason:result.finish_reason,reason:'ok',usage:result.usage};
+      budgetUsed=true;
+      const repairBudget=Math.max(0,3-attempts.filter(row=>row.repair).length);
+      const reply=await evaluateReply({raw,archive,registry,env,model:result.model,deadline,attempts,repairBudget});
+      const decorated=reply?{...reply,_model:result.model,_response_chars:raw.length,_finish_reason:record.finishReason}:null;
       if(decorated&&decorated.core_contract_complete&&decorated.generation_status==='complete')return {...decorated,_attempts:attempts,_request_chars:systemInstruction.length+dataPrompt.length,_main_calls:1};
       if(decorated&&(!best||score(decorated)>score(best)))best=decorated;
       // A publishable optional partial is a fallback, not an excuse to repeat the same model.
       if(decorated?.core_contract_complete)break;
-      lastReason=strongestReason([reply?._repair_reason,lastReason,record.finishReason&&record.finishReason!=='STOP'?'truncated_output':'core_incomplete'].filter(Boolean))||'invalid_response';
+      lastReason=strongestReason([reply?._repair_reason,record.finishReason&&record.finishReason.toLowerCase()!=='stop'?'truncated_output':'core_incomplete'].filter(Boolean))||'invalid_response';
+      // A model that returned incomplete JSON is not called again with the full archive.
+      if(result.attempts.some(row=>row.model!==model))continue;
+      break;
+    }catch(error){
+      const details=error.details||{},reason=details.reason||'provider_error';
+      for(const row of details.attempts||[])attempts.push({...row,model:row.model||model,status:row.status===0?0:row.status,repair:false,provider_error:row.status?{code:row.status,status:String(row.status),message_category:row.reason}:undefined});
+      if(contextFailure(details.status||details.attempts?.at(-1)?.status,{error:{message:details.provider_message||''}})){
+        const oversized=new Error('freeform_context_too_large');oversized.details={stage:'freeform_judge',reason:'context_exceeded',model,payload_chars:archiveJson.length,attempts};throw oversized;
+      }
+      keepReason(reason);if(['rate_limited','quota_exceeded','model_unavailable'].includes(reason))noteModelFailure(env,model,details.status||details.attempts?.at(-1)?.status||429);
+      if(reason==='invalid_request'){const invalid=new Error('groq_invalid_request');invalid.details={stage:'freeform_judge',reason:'invalid_request',attempts};throw invalid;}
+      if(reason==='invalid_api_key'){const authError=new Error('groq_auth_failed');authError.details={stage:'freeform_judge',reason:'invalid_api_key',attempts};throw authError;}
+      if(reason==='timeout')keepReason('timeout');if(reason==='network_error')keepReason('network_error');
+      if(['rate_limited','quota_exceeded','model_unavailable','provider_error'].includes(reason))continue;
+      break;
     }
   }
   if(best?.core_contract_complete)return {...best,_attempts:attempts,_request_chars:systemInstruction.length+dataPrompt.length,_main_calls:1};
   let coreRescue={executed:false,result:'not_run'};
-  if(best?.moments?.length){
-    const rescueDeadline=Date.now()+30000,result=await repairCore({env,model:best._model,deadline:rescueDeadline,compact:registry.compact(),payload:best._payload||best,validated:best});
-    const rescueAttempt={model:best._model,repair:'core_rescue',status:result.status,finishReason:result.finishReason,schema:false,reason:result.reason||null,provider_error:result.provider_error||null};attempts.push(rescueAttempt);coreRescue={executed:true,result:result.parsed?'parsed':result.reason||'failed'};
+  if(best?.moments?.length&&budgetUsed&&Date.now()<deadline){
+    const rescueDeadline=Math.min(deadline,Date.now()+30000),result=await repairCore({env,model:best._model,deadline:rescueDeadline,compact:registry.compact(),payload:best._payload||best,validated:best});
+    for(const row of result.attempts||[])attempts.push({...row,model:row.model||best._model,repair:'core_rescue',finishReason:row.finish_reason||null,provider_error:row.status>=400?{code:row.status,status:String(row.status),message_category:row.reason}:null});
+    if(!(result.attempts||[]).length)attempts.push({model:best._model,repair:'core_rescue',status:result.status,finishReason:result.finishReason,schema:false,reason:result.reason||null,provider_error:result.provider_error||null});
+    coreRescue={executed:true,result:result.parsed?'parsed':result.reason||'failed'};
     if(result.parsed&&typeof result.parsed==='object'){
       const base={...(best._payload||best)},fixed=result.parsed;
       if(fixed.opening)base.opening={...(base.opening||{}),...fixed.opening};
@@ -162,7 +135,7 @@ export async function freeformJudge({archive,locale,env}){
   // AI_FAILED means the provider (or the whole subject) failed, never a single wrong reference.
   const error=new Error('AI_FAILED');
   const summary=best?.validation_summary||{};
-  lastReason=classifyFinalReason({attempts,best,fallback:lastReason});
+  lastReason=best?'core_incomplete':classifyFinalReason({attempts,best,fallback:lastReason});
   error.details={stage:'freeform_judge',reason:lastReason,best_core:best?{opening_valid:Boolean(summary.opening),opening_problems:summary.opening_problems||[],games_required:summary.required_games||0,games_valid:summary.games_valid||0,games_missing:summary.games_missing||0,profile_review_valid:Boolean(summary.profile_review),moments_valid:summary.moments_valid||0}:null,repair_attempts:attempts.filter(row=>row.repair),core_rescue:coreRescue,attempts,validation_summary:best?.validation_summary||null};
   throw error;
 }

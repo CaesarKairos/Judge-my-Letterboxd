@@ -5,7 +5,7 @@ import {buildAnalystContext} from '../functions/_lib/analyst-context.js';
 import {ANALYST_SCHEMA,ANALYST_SEMANTICS_SCHEMA} from '../functions/_lib/analyst-schema.js';
 import {mergeModels} from '../functions/_lib/models.js';
 import {salvageJson as salvageFromRepair} from '../functions/_lib/json-repair.js';
-import {salvageJson as salvageFromWriter} from '../functions/_lib/gemini.js';
+import {salvageJson as salvageFromWriter} from '../functions/_lib/writer.js';
 import {buildScriptEngine,materializeCandidates} from '../functions/_lib/editorial.js';
 import {judgeExport} from '../js/api.js';
 
@@ -19,14 +19,14 @@ const profile={films,sessions:[{film_key:films[0].film_key,title:'Alpha',year:'2
   reviews:[],lists:[],topFour:films.slice(0,4),watchlist:2,likes:{films:1,reviews:2,lists:0},handle:'synthetic',name:'Synthetic'};
 const analysis={moments:ids.map((id,index)=>({id,type:'stat',facts:`measurement ${index+1}`})),overview:{watched:6},
   relationships:{relations:[],tag_films:[]},review_style:null,review_coverage:{},affinity:[]};
-const env=extra=>({GEMINI_API_KEY:'test-key',GEMINI_ANALYST_MODEL:'primary',GEMINI_MODEL_DISCOVERY:'0',...extra});
+const env=extra=>({GROQ_API_KEY:'test-key',GROQ_ANALYST_MODEL:'primary',...extra});
 const finding=id=>({id,type:'stat',interestingness:.8,confidence:.8,observation:`observation ${id}`,why_interesting:'why'});
 const selection=list=>list.map(finding);
 const semanticsOf=rows=>rows.map(row=>({film_key:row.film_key,ingredients:['archetype','setting']}));
-const answer=payload=>Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(payload)}]}}]});
+const answer=payload=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(payload)}}]});
 const semanticsAnswer=rows=>answer({top_four_semantics:semanticsOf(rows)});
 const bodyOf=options=>JSON.parse(options.body);
-const promptsOf=calls=>calls.map(call=>bodyOf(call.options).contents[0].parts[0].text);
+const promptsOf=calls=>calls.map(call=>bodyOf(call.options).messages[1].content);
 
 // The mock answers a queue of behaviours and keeps every request for inspection. A single
 // function entry is a persistent handler instead of a one-shot answer.
@@ -51,7 +51,7 @@ test('the salvage implementation is shared by the Writer and the Analyst',()=>{
 // --- the regression that killed real sessions -------------------------------------------
 test('a valid selection without top_four_semantics is preserved and repaired, never failed',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[]}),semanticsAnswer(profile.topFour)]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'primary'})});
   assert.equal(result.status,'complete');
   assert.equal(result.selected.length,6);
   assert.equal(result.top_four_semantics_status,'complete');
@@ -93,12 +93,12 @@ test('selected survives when the semantics repair also fails',async t=>{
 
 test('a reply cut by the output limit is truncated_output and still repaired',async t=>{
   const cut=`{"selected":${JSON.stringify(selection(ids))},"interaction_candidates":[{"id":"g1","type":"forced`;
-  const calls=responder(t,[Response.json({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:cut}]}}]}),
+  const calls=responder(t,[Response.json({choices:[{finish_reason:'length',message:{content:cut}}]}),
     answer({top_four_semantics:semanticsOf(profile.topFour)})]);
   const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
   assert.equal(result.attempts[0].status,'truncated_output');
   assert.equal(result.attempts[0].json,'salvaged');
-  assert.equal(result.attempts[0].finishReason,'MAX_TOKENS');
+  assert.equal(result.attempts[0].finishReason,'LENGTH');
   assert.equal(result.truncated,true);
   assert.equal(result.status,'complete');
   assert.equal(result.selected.length,6);
@@ -106,47 +106,37 @@ test('a reply cut by the output limit is truncated_output and still repaired',as
   assert.equal(calls.length,2);
 
 // --- transport, budget and chain ---------------------------------------------------------
-test('the request declares the schema, the output budget and no thinking budget',async t=>{
+test('Analyst sends a Groq JSON object request with completion budget',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
   await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
-  const config=bodyOf(calls[0].options).generationConfig;
-  assert.equal(config.responseMimeType,'application/json');
-  assert.deepEqual(config.responseSchema,ANALYST_SCHEMA);
-  assert.deepEqual(config.responseSchema.required,['selected','semantic_findings','interaction_candidates','top_four_semantics']);
-  assert.equal(config.maxOutputTokens,ANALYST_MAX_OUTPUT_TOKENS);
-  assert.equal(config.maxOutputTokens,8192);
-  // Thinking tokens used to eat the visible budget and cut the JSON mid-array.
-  assert.deepEqual(config.thinkingConfig,{thinkingBudget:0});
-  assert.equal(bodyOf(calls[0].options).contents[0].parts[0].text.match(/top_four_semantics[\s\S]*MUST contain one entry for each Favorite Film/)?.[0]!==undefined,true);
+  const config=bodyOf(calls[0].options);
+  assert.deepEqual(config.response_format,{type:'json_object'});
+  assert.equal(config.max_completion_tokens,ANALYST_MAX_OUTPUT_TOKENS);
+  assert.equal(config.responseSchema,undefined);assert.equal(config.thinkingConfig,undefined);
+  assert.equal(bodyOf(calls[0].options).messages[1].content.match(/top_four_semantics[\s\S]*MUST contain one entry for each Favorite Film/)?.[0]!==undefined,true);
 });
 
 test('the semantics repair asks for the semantics contract only',async t=>{
   const calls=responder(t,[answer({selected:selection(ids)}),semanticsAnswer(profile.topFour)]);
   await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
   assert.deepEqual(Object.keys(ANALYST_SEMANTICS_SCHEMA.properties),['top_four_semantics']);
-  assert.deepEqual(bodyOf(calls[1].options).generationConfig.responseSchema,ANALYST_SEMANTICS_SCHEMA);
+  assert.deepEqual(bodyOf(calls[1].options).response_format,{type:'json_object'});
 });
 
 test('429 and 404 advance the chain instead of repeating the same model',async t=>{
-  const calls=responder(t,[Response.json({error:{}},{status:429}),Response.json({error:{}},{status:404}),
-    answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
-  assert.deepEqual(result.chain,['primary','backup-a','backup-b']);
-  assert.deepEqual(result.attempts.map(row=>row.status),['http_429','http_404','ok']);
-  assert.deepEqual(calls.map(call=>call.url.match(/models\/([^:]+)/)[1]),['primary','backup-a','backup-b']);
+  const calls=responder(t,[Response.json({error:{}},{status:429}),Response.json({error:{}},{status:404})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  assert.deepEqual(result.chain,['primary','backup-a']);
+  assert.deepEqual(result.attempts.map(row=>row.status),['http_429','http_404']);
+  assert.deepEqual(calls.map(call=>JSON.parse(call.options.body).model),['primary','backup-a']);
   assert.deepEqual(result.unavailable_models,['primary','backup-a']);
-  assert.equal(result.status,'complete');
+  assert.equal(result.status,'failed');
 });
 
-test('discovery extends the chain behind the configured primary',async t=>{
-  const calls=responder(t,[
-    ()=>Response.json({models:[{name:'models/full-A',supportedGenerationMethods:['generateContent']},
-      {name:'models/full-B',supportedGenerationMethods:['generateContent']},{name:'models/lite-C',supportedGenerationMethods:['generateContent']}]}),
-    answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_MODEL_DISCOVERY:'1'})});
-  assert.deepEqual(result.chain,['primary','full-A','full-B','lite-C']);
-  assert.equal(calls[1].url.includes('/models/primary:generateContent'),true);
-  assert.equal(result.status,'complete');
+test('model chain contains only configured models and caps at one fallback',async t=>{
+  const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  assert.deepEqual(result.chain,['primary','backup-a']);assert.equal(calls.length,1);assert.equal(result.status,'complete');
 });
 
 test('three genuinely strong findings are thin, never a failure',async t=>{
@@ -211,86 +201,68 @@ test('the frontend tells an Analyst failure apart from a Writer failure',async t
 test('a real failure is reported as a failure and never fabricates candidates',async t=>{
   responder(t,[()=>{throw new TypeError('fetch failed');},Response.json({error:{}},{status:429}),
     Response.json({error:{}},{status:500}),
-    Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:'nao vou responder JSON'}]}}]})]);
+    Response.json({choices:[{finish_reason:'stop',message:{content:'nao vou responder JSON'}}]})]);
   const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',
-    env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
+    env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
   assert.equal(result.status,'failed');
-  // A model did answer, so the failure is "no usable analysis"; the transport fact stays in stop_reason.
-  assert.equal(result.reason,'no_usable_analysis');
-  assert.equal(result.stop_reason,'network');
+  // Later fallback failures determine the terminal reason; the first network failure stays in attempts.
+  assert.equal(result.reason,'provider_error');
+  assert.ok(result.attempts.some(row=>row.status==='network_error'));
   assert.deepEqual(result.selected,[]);
   assert.deepEqual(result.interaction_candidates,[]);
   assert.equal(result.editorial_strength,'empty');
   assert.equal(result.top_four_semantics_status,'failed');
-  assert.deepEqual(result.attempts.map(row=>row.status).slice(0,4),['network','http_429','http_500','invalid_response']);
+  assert.deepEqual(result.attempts.map(row=>row.status).slice(0,2),['network_error','http_429']);
   // Never promoted from the deterministic pool: that was the bug this contract forbids.
   assert.notDeepEqual(result.selected,analysis.moments);
 });
 
 test('an exhausted quota is named instead of hidden behind a timeout',async t=>{
   const quota=()=>Response.json({error:{code:429,message:'You exceeded your current quota, please check your plan and billing details.'}},{status:429});
-  responder(t,[quota(),quota()]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'})});
+  responder(t,[quota()]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'primary'})});
   assert.equal(result.status,'failed');
   assert.equal(result.reason,'quota_exceeded');
-  assert.deepEqual(result.unavailable_models,['primary','backup-a']);
+  assert.deepEqual(result.unavailable_models,['primary']);
 });
 
 });
 
 // --- the chain is limited by the deadline, never by a fixed count ------------------------
-test('every discovered model is reachable: models 7 and 8 run when the first six fail fast',async t=>{
-  const wide=Array.from({length:8},(_,index)=>`gemini-3.${index+1}-flash`);
-  const calls=responder(t,[call=>{
-    if(!call.url.includes(':generateContent'))return Response.json({models:wide.map(name=>({name:`models/${name}`,supportedGenerationMethods:['generateContent']}))});
-    if(call.url.includes('gemini-3.2-flash')||call.url.includes('gemini-3.1-flash'))
-      return answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)});
-    return Response.json({error:{code:404,message:'gone'}},{status:404});
-  }]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_MODEL_DISCOVERY:'1'})});
-  // primary + 8 discovered, all of them in the chain: nothing is cut before the deadline says so.
-  assert.equal(result.chain.length,9);
-  assert.equal(result.status,'complete');
-  assert.ok(['gemini-3.2-flash','gemini-3.1-flash'].includes(result.model),String(result.model));
-  const attempted=result.attempts.map(row=>row.model);
-  assert.equal(attempted.length,8,'the eight generateContent attempts');
-  assert.equal(attempted.at(-1),'gemini-3.2-flash');
-  assert.equal(calls.length,9);
-  // A 404 answered in milliseconds never stopped a later discovered model.
-  assert.equal(result.attempts.filter(row=>row.status==='http_404').length,7);
+test('configured model chain never expands from provider discovery',async t=>{
+  const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
+  assert.deepEqual(result.chain,['primary','backup-a']);assert.equal(calls.length,1);assert.equal(result.status,'complete');
 });
 
 test('a transient 429 or a 404 is tried once per model and never retried',async t=>{
   const calls=responder(t,[Response.json({error:{code:429,message:'rate limit'}},{status:429}),
-    Response.json({error:{code:404,message:'gone'}},{status:404}),
-    answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
-  assert.deepEqual(calls.map(call=>call.url.match(/models\/([^:]+)/)[1]),['primary','backup-a','backup-b']);
+    Response.json({error:{code:404,message:'gone'}},{status:404})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  assert.deepEqual(calls.map(call=>JSON.parse(call.options.body).model),['primary','backup-a']);
   assert.equal(result.attempts.filter(row=>row.model==='primary').length,1);
   assert.equal(result.attempts.filter(row=>row.model==='backup-a').length,1);
-  assert.equal(result.status,'complete');
+  assert.equal(result.status,'failed');
 });
 
 test('a 5xx gets one short retry, then the chain advances',async t=>{
-  const calls=responder(t,[Response.json({error:{code:503,message:'high demand'}},{status:503}),
-    Response.json({error:{code:503,message:'high demand'}},{status:503}),
-    answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'})});
+  const calls=responder(t,[Response.json({error:{code:503,message:'high demand'}},{status:503}),answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a'})});
   const primary=result.attempts.filter(row=>row.model==='primary');
-  assert.deepEqual(primary.map(row=>row.phase),['initial','retry_5xx']);
-  assert.deepEqual(primary.map(row=>row.status),['http_503','http_503']);
+  assert.deepEqual(primary.map(row=>row.phase),['analyst_initial','analyst_initial']);
+  assert.deepEqual(primary.map(row=>row.status),['http_503','ok']);
   assert.equal(result.status,'complete');
-  assert.equal(result.model,'backup-a');
-  assert.equal(calls.length,3);
+  assert.equal(result.model,'primary');
+  assert.equal(calls.length,2);
 });
 
 test('a non-2xx answer is never parsed as generation output',async t=>{
   responder(t,[Response.json({error:{code:429,status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota'}},{status:429})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'primary'})});
   const [attempt]=result.attempts;
   assert.equal(attempt.status,'http_429');
   assert.equal(attempt.http,429);
-  assert.deepEqual(attempt.provider_error,{code:429,status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota'});
+  assert.deepEqual(attempt.provider_error,{code:429,status:'429',message:'quota_exceeded'});
   assert.equal(attempt.parse_error,undefined,'an error body is not a truncated reply');
   assert.equal(attempt.json,undefined);
   assert.equal(attempt.finishReason,undefined);
@@ -299,7 +271,7 @@ test('a non-2xx answer is never parsed as generation output',async t=>{
 
 test('the deadline stops the walk instead of looping forever',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({__TEST_ANALYST_DEADLINE_MS:-1,GEMINI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({__TEST_ANALYST_DEADLINE_MS:-1,GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
   assert.equal(calls.length,0,'not a single request after the deadline');
   assert.equal(result.status,'failed');
   assert.equal(result.stop_reason,'deadline');
@@ -308,9 +280,9 @@ test('the deadline stops the walk instead of looping forever',async t=>{
 });
 
 test('a model that is unavailable in this run is not paid for again',async t=>{
-  const calls=responder(t,[call=>call.url.includes('/models/primary:')?Response.json({error:{code:404,message:'gone'}},{status:404})
+  const calls=responder(t,[call=>JSON.parse(call.options.body).model==='primary'?Response.json({error:{code:404,message:'gone'}},{status:404})
     :answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const shared=env({GEMINI_ANALYST_FALLBACK_MODELS:'backup-a'});
+  const shared=env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a'});
   const first=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:shared});
   assert.equal(first.attempts.filter(row=>row.model==='primary').length,1);
   assert.equal(first.status,'complete');

@@ -2,25 +2,25 @@
 // would serve, what did discovery return?" without ever echoing a secret. Without
 // JUDGE_DEBUG_CONFIG=1 the route behaves as if it did not exist, so a production deployment
 // exposes nothing by accident: no key, no prompt, no environment dump.
-import {discoverTextModels,mergeModels,configuredWithoutDiscovery,MODEL_SAFETY_CEILING,FREEFORM_MODEL_LIMIT} from '../_lib/models.js';
+import {mergeModels,MODEL_SAFETY_CEILING,FREEFORM_MODEL_LIMIT} from '../_lib/models.js';
+import {groqModels} from '../_lib/groq.js';
 
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-const configured=(env,stage)=>[env[`GEMINI_${stage}_MODEL`]||env.GEMINI_MODEL||'gemini-flash-latest',
-  ...String(env[`GEMINI_${stage}_FALLBACK_MODELS`]||env.GEMINI_FALLBACK_MODELS||'').split(',').map(value=>value.trim()).filter(Boolean)];
+const configured=(env,stage)=>groqModels(env,stage==='FREEFORM'?undefined:stage);
 
 export async function onRequestGet({env}){
   if(env.JUDGE_DEBUG_CONFIG!=='1')return response({error:'not_found'},404);
-  const discovered=await discoverTextModels(env),analyst=configured(env,'ANALYST'),writer=configured(env,'WRITER'),freeform=[env.GEMINI_FREEFORM_MODEL||env.GEMINI_WRITER_MODEL||env.GEMINI_MODEL||'gemini-flash-latest',...String(env.GEMINI_FREEFORM_FALLBACK_MODELS||env.GEMINI_WRITER_FALLBACK_MODELS||env.GEMINI_FALLBACK_MODELS||'').split(',').map(value=>value.trim()).filter(Boolean)];
+  const analyst=configured(env,'ANALYST'),writer=configured(env,'WRITER'),freeform=configured(env,'FREEFORM');
   return response({
-    gemini_key_present:Boolean(env.GEMINI_API_KEY),
+    groq_key_present:Boolean(env.GROQ_API_KEY),
     tmdb_key_present:Boolean(env.TMDB_API_KEY),
-    model_discovery_enabled:env.GEMINI_MODEL_DISCOVERY!=='0',
+    model_discovery_enabled:false,
     primary_model:analyst[0],
     fallback_count:analyst.length-1,
-    discovered_models:discovered,
+    discovered_models:[],
     configured:{analyst,writer,freeform},
-    chains:{analyst:mergeModels(analyst,discovered),writer:mergeModels(writer,discovered),freeform:mergeModels(freeform,discovered,FREEFORM_MODEL_LIMIT)},
-    configured_without_discovery:configuredWithoutDiscovery([...new Set([...analyst,...writer,...freeform])],discovered),
-    limits:{chain:MODEL_SAFETY_CEILING,freeform_chain:FREEFORM_MODEL_LIMIT,discovery:discovered.length}
+    chains:{analyst:mergeModels(analyst),writer:mergeModels(writer),freeform:mergeModels(freeform,[],FREEFORM_MODEL_LIMIT)},
+    configured_without_discovery:[],
+    limits:{chain:MODEL_SAFETY_CEILING,freeform_chain:FREEFORM_MODEL_LIMIT,discovery:0}
   });
 }
