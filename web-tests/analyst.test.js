@@ -184,9 +184,9 @@ test('the Analyst context keeps every review once and drops only duplicated tabl
   assert.equal(context.deterministic_measurements.length,analysis.moments.length);
 });
 
-test('the frontend tells an Analyst failure apart from a Writer failure',async t=>{
+test('the frontend distinguishes missing Groq configuration and AI stage failures',async t=>{
   const file=new File(['PK'],'test.zip');
-  for(const [error,expected] of [['analyst_unavailable','analystUnavailable'],['writer_unavailable','writerUnavailable']]){
+  for(const [error,expected] of [['missing_groq_key','missingGroqKey'],['analyst_unavailable','analystUnavailable'],['writer_unavailable','writerUnavailable']]){
     const mock=t.mock.method(globalThis,'fetch',async()=>Response.json({error,stage:error.split('_')[0],retryable:true,attempts:[{model:'m',status:'http_429'}]},{status:503}));
     await assert.rejects(judgeExport(file,'pt-BR'),new RegExp(expected));
     mock.mock.restore();
