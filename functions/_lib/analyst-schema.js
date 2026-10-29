@@ -1,4 +1,4 @@
-// Local Analyst contract shape used by validators and targeted repairs; Groq receives JSON mode only. The editorial
+// Local Analyst contract shape used by validators and targeted repairs; Workers AI receives JSON mode only. The editorial
 // contract used to travel as prose only ("return JSON with selected and
 // interaction_candidates"), so the model was free to omit top_four_semantics and the stage
 // had no way to ask for a shape the API had never been told about. The schema is the

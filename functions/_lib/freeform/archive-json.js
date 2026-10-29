@@ -39,7 +39,8 @@ export async function buildFreeformArchive(entries,{filename='letterboxd.zip',bi
   // CSV cells are the same information as raw_text, so the AI form keeps all cells once instead
   // of paying twice for identical text. Non-CSV text remains byte-for-byte decoded as raw_text.
   const ai={version:2,archive,entities,files:files.map(file=>file.format==='csv'?{path:file.path,format:file.format,mime_type:file.mime_type,size:file.size,sha256:file.sha256,ref:file.ref,headers:file.headers,rows:file.rows}:file.format==='binary'?{path:file.path,format:'binary',mime_type:file.mime_type,size:file.size,sha256:file.sha256,ref:file.ref,base64_in_lossless:Boolean(file.base64)}:file)};
-  return {lossless,ai,diagnostics:{files:files.length,rows:rowCount,text_chars:textChars,reviews,lists,unknown_files:unknown,archive_lossless_chars:JSON.stringify(lossless).length,archive_ai_chars:JSON.stringify(ai).length}};
+  const archive_model_chars=JSON.stringify({version:ai.version,archive:ai.archive,files:ai.files}).length;
+  return {lossless,ai,diagnostics:{files:files.length,rows:rowCount,text_chars:textChars,reviews,lists,unknown_files:unknown,archive_lossless_chars:JSON.stringify(lossless).length,archive_ai_chars:JSON.stringify(ai).length,archive_model_chars}};
 }
 
 export function archiveRefs(archive){

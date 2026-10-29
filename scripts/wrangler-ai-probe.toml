@@ -1,0 +1,6 @@
+name = "judge-my-letterboxd-ai-probe"
+main = "workers-ai-probe-worker.mjs"
+compatibility_date = "2026-09-27"
+
+[ai]
+binding = "AI"

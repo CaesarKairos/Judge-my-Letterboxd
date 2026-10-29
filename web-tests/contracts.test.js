@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {simulatedWorkersAI} from './simulated-workers-ai.js';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync} from 'node:fs';
 import {validateScript} from '../js/utils.js';
@@ -58,18 +59,18 @@ test('poster without secret falls back; invalid query returns 400; web judge hea
  assert.equal(getJudge().status,200);assert.equal((await getJudge().json()).runtime,'cloudflare-pages');
 
 test('configuration diagnostics are dev-only and never expose the key',async t=>{
-  assert.equal((await getConfig({env:{GROQ_API_KEY:'secret-value'}})).status,404);
-  const result=await getConfig({env:{GROQ_API_KEY:'secret-value',JUDGE_DEBUG_CONFIG:'1',GROQ_MODEL:'primary',GROQ_ANALYST_FALLBACK_MODELS:'backup'}});
+  assert.equal((await getConfig({env:{AI:simulatedWorkersAI()}})).status,404);
+  const result=await getConfig({env:{AI:simulatedWorkersAI(),JUDGE_DEBUG_CONFIG:'1',AI_MODEL:'primary',AI_ANALYST_FALLBACK_MODELS:'backup'}});
   assert.equal(result.status,200);
   const body=await result.json();
-  assert.equal(body.groq_key_present,true);
+  assert.equal(body.workers_ai_binding_present,true);
   assert.equal(body.model_discovery_enabled,false);
   assert.equal(body.primary_model,'primary');
   assert.equal(body.fallback_count,1);
   assert.deepEqual(body.discovered_models,[]);
   assert.deepEqual(body.chains.analyst,['primary','backup']);
-  assert.deepEqual(body.configured.freeform,['primary','openai/gpt-oss-20b']);
-  assert.deepEqual(body.chains.freeform,['primary','openai/gpt-oss-20b']);
+  assert.deepEqual(body.configured.freeform,['primary','@cf/openai/gpt-oss-20b']);
+  assert.deepEqual(body.chains.freeform,['primary','@cf/openai/gpt-oss-20b']);
   assert.equal(body.limits.freeform_chain,2);
   // A diagnostic endpoint that leaks the key would be worse than no endpoint at all.
   assert.equal(JSON.stringify(body).includes('secret-value'),false);

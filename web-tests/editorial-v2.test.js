@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {simulatedWorkersAI} from './simulated-workers-ai.js';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {archetypePhraseValid,normalizeJudgment,writeJudgment} from '../functions/_lib/writer.js';
@@ -93,7 +94,7 @@ test('configured duplicate is removed and model chain has one fallback maximum',
 test('Analyst failure never promotes deterministic candidates',async t=>{
  t.mock.method(globalThis,'fetch',async()=>Response.json({error:{}},{status:503}));
  const profile={...base([film('Film A',5)]),handle:'synthetic',name:'Synthetic'},analysis={moments:[{id:'measurement',type:'stat',facts:'one measurement'}],overview:{},relationships:{},review_style:null,review_coverage:{}};
- const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_ANALYST_MODEL:'primary',GROQ_MODEL_DISCOVERY:'0'}});
+ const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:{AI:simulatedWorkersAI(),AI_ANALYST_MODEL:'primary',AI_MODEL_DISCOVERY:'0'}});
  assert.equal(result.status,'failed');assert.deepEqual(result.selected,[]);assert.ok(result.attempts.length>0);
 });
 
@@ -115,26 +116,26 @@ test('generic Profile Review is rejected while grounded profile behavior passes'
 test('configured fallback is complete and marked as fallback; partial means missing content',async t=>{
  const profile={...base([]),handle:'synthetic'},analysis={moments:[{id:'a',film:{title:'Film A'},facts:'Film A fact'},{id:'b',film:{title:'Film B'},facts:'Film B fact'}],overview:{},review_style:null,callbacks:[],interactions:[]};let calls=0;
  t.mock.method(globalThis,'fetch',async(_url,options)=>{calls++;if(JSON.parse(options.body).model==='primary')return Response.json({error:{}},{status:503});return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:[{id:'a',lines:['Film A muda o padrão.']},{id:'b',lines:['Film B quebra a regra.']}]})}}]});});
- const complete=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_WRITER_FALLBACK_MODELS:'backup-lite',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ const complete=await writeJudgment({profile,analysis,locale:'pt-BR',env:{AI:simulatedWorkersAI(),AI_WRITER_MODEL:'primary',AI_WRITER_FALLBACK_MODELS:'backup-lite',AI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
  assert.equal(complete.generation_status,'complete');assert.equal(complete.model_quality,'fallback');assert.equal(complete.quality_degraded,true);
 });
 
 test('missing reactions stay partial even when the provider reports normal JSON stop',async t=>{
  const moments=Array.from({length:10},(_,index)=>({id:`beat-${index}`,film:{title:`Film ${index}`},facts:`Film ${index} fact`})),profile={...base([]),handle:'synthetic'},analysis={moments,overview:{},review_style:null,callbacks:[],interactions:[]};
  t.mock.method(globalThis,'fetch',async()=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.slice(0,8).map(row=>({id:row.id,lines:[`${row.film.title} quebra o padrão.`]}))})}}]}));
- const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{AI:simulatedWorkersAI(),AI_WRITER_MODEL:'primary',AI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
  assert.equal(result.generation_status,'partial');assert.equal(result.reactions.length,8);assert.equal(result.quality_degraded,true);
 });
 
 test('generic reaction majority triggers Writer repair',async t=>{
  const moments=['A','B','C'].map(letter=>({id:letter.toLowerCase(),film:{title:`Film ${letter}`},facts:`Film ${letter} fact`})),profile={...base([]),handle:'synthetic'},analysis={moments,overview:{},review_style:null,callbacks:[],interactions:[]};let calls=0;
  t.mock.method(globalThis,'fetch',async()=>{calls++;const generic={greeting:'Oi.',archetype_phrase:'',profile_reaction:'',reactions:moments.map(row=>({id:row.id,lines:['Isso diz muito sobre você.']}))},specific={...generic,reactions:moments.map(row=>({id:row.id,lines:[`${row.film.title} contradiz a própria regra.`]}))};return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls===1?generic:specific)}}]});});
- const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});assert.equal(result.generation_status,'complete');assert.equal(calls,2);
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{AI:simulatedWorkersAI(),AI_WRITER_MODEL:'primary',AI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});assert.equal(result.generation_status,'complete');assert.equal(calls,2);
 });
 
 test('Writer never repeats a 429 on one model and still tries the fallback',async t=>{
  const profile={...base([]),handle:'synthetic'},analysis={moments:[{id:'a',film:{title:'Film A'},facts:'Film A fact'}],overview:{},review_style:null,callbacks:[],interactions:[]};
  let calls=0;t.mock.method(globalThis,'fetch',async()=>{calls++;return Response.json({error:{status:'RESOURCE_EXHAUSTED',message:'You exceeded the quota for this model.'}},{status:429});});
- const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{GROQ_API_KEY:'key',GROQ_WRITER_MODEL:'primary',GROQ_WRITER_FALLBACK_MODELS:'backup',GROQ_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
+ const result=await writeJudgment({profile,analysis,locale:'pt-BR',env:{AI:simulatedWorkersAI(),AI_WRITER_MODEL:'primary',AI_WRITER_FALLBACK_MODELS:'backup',AI_MODEL_DISCOVERY:'0',__TEST_SKIP_ANALYST:true}});
  assert.equal(calls,2);assert.equal(result.generation_status,'failed');assert.equal(result.reason,'quota_exceeded');
 });

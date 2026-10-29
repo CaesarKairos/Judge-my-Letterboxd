@@ -4,7 +4,7 @@ Dois aplicativos independentes que compartilham o contrato `presentation-v1`:
 
 | Aplicativo | Runtime | Entrada | Execução |
 | --- | --- | --- | --- |
-| Web | HTML/CSS/JS + Cloudflare Pages Functions | Upload no navegador | ZIP → parser JS → análise JS → Groq → Presentation Script |
+| Web | HTML/CSS/JS + Cloudflare Pages Functions | Upload no navegador | ZIP → parser JS → análise JS → Workers AI pelo binding `AI` → Presentation Script |
 | Local legado | Python via `app.py` | ZIP no computador | Protótipo histórico; não é um caminho suportado |
 
 O Cloudflare não executa, importa ou chama `app.py`. O produto suportado é o site
@@ -61,8 +61,8 @@ pois `/api/judge` é executado como Pages Function.
   para falhas. Nenhum rating ou evidência é alterado.
 - `functions/api/judge.js` e `functions/_lib/`: backend web independente. Descompacta
   o ZIP com APIs do runtime Workers, interpreta os CSVs, calcula estatísticas e
-  momentos editoriais, chama Groq com saída JSON e monta o Presentation Script.
-  Não há dependência de Python, subprocesso ou serviço externo próprio.
+  momentos editoriais, chama Workers AI pelo binding `AI` com saída JSON e monta o Presentation Script.
+  Não há dependência de Python, subprocesso ou API externa de modelo.
 
   A resposta do modelo nunca vira roteiro sem validação: JSON cortado pelo limite de saída
   é reparado, campos de ritmo ausentes usam padrões e cada rejeição volta para a IA com o
@@ -130,13 +130,11 @@ Depois faça um novo deploy. A chave
 páginas individuais usam `noindex,follow`: continuam compartilháveis, mas não entram
 no sitemap nem transformam perfis pessoais em índice público pesquisável.
 
-Configure `TMDB_API_KEY` e `GROQ_API_KEY` como secrets nas configurações do Pages.
-`GROQ_MODEL` e `GROQ_FALLBACK_MODELS` são variáveis opcionais, com padrões
-`openai/gpt-oss-120b` e `openai/gpt-oss-20b`. Cadastre `GROQ_API_KEY` nos ambientes
-Production e Preview que você usa e faça um novo deploy. Localmente, copie
-`.dev.vars.example` para `.dev.vars` e preencha `GROQ_API_KEY`; esse arquivo é ignorado pelo Git.
-Também é possível usar `.env` para os scripts de probe. As chaves ficam em
-`context.env` da Function e nunca são enviados ao navegador.
+Configure o binding Workers AI com o nome exato `AI` em Production e Preview.
+O padrão é `@cf/openai/gpt-oss-120b`, com `@cf/openai/gpt-oss-20b` como único fallback.
+Não é necessária uma chave externa para inferência. `TMDB_API_KEY` segue opcional para
+cartazes. Localmente, `wrangler pages dev dist --ai AI` fornece o mesmo binding; `.dev.vars`
+continua disponível para variáveis locais opcionais. O binding fica no runtime da Function.
 
 A manutenção do site é controlada por `JUDGE_MAINTENANCE_MODE` no Pages: `1` serve
 uma página 503 simples; `0` ou variável ausente mantém o site normal. Configure o valor
@@ -145,8 +143,8 @@ alternativa pelo Wrangler, cadastre `JUDGE_MAINTENANCE_MODE` como secret com val
 Para reabrir, altere/remova a variável e publique um novo deploy. `/api/judge` GET e
 `/api/config` continuam acessíveis para diagnóstico; ações de API ficam pausadas.
 
-No dashboard, adicione `GROQ_API_KEY` em Settings → Variables and Secrets → Add → Secret
-para Production e Preview. Ou use `npx wrangler pages secret put GROQ_API_KEY --project-name judge-my-letterboxd`.
+No dashboard, abra Settings → Bindings → Add → Workers AI e use `AI` como Variable name
+em Production e Preview. [wrangler.toml](wrangler.toml) registra essa configuração.
 
 Para desenvolvimento local, copie `.dev.vars.example` para `.dev.vars`, preencha as
 chaves e execute:
@@ -190,8 +188,8 @@ O smoke automatizado usa 360×800,
 
 Compartilhamento usa Web Share, clipboard ou download de texto; não há URL persistida.
 O SVG de Open Graph é um placeholder: algumas redes exigem PNG/JPEG para preview.
-Sem secret TMDB os cartazes usam fallback. Sem `GROQ_API_KEY`, o upload informa
-claramente que falta configurar o Judge web. A demo é pt-BR, mesmo com UI em inglês.
+Sem secret TMDB os cartazes usam fallback. Sem o binding `AI`, o upload informa
+claramente que falta configurar Workers AI no Judge web. A demo é pt-BR, mesmo com UI em inglês.
 A análise web prioriza uma experiência rápida e não grava o ZIP nem os resultados;
 o pipeline Python permanece mais profundo e mantém todos os artefatos de auditoria.
 
@@ -252,7 +250,8 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Se `.env` já existir, edite-o sem sobrescrever suas configurações. Preencha `GROQ_API_KEY`.
+Se `.env` já existir, edite-o sem sobrescrever suas configurações. A configuração Gemini
+é somente para o protótipo Python legado; o site web usa o binding Workers AI.
 Sem ativação, use `.\.venv\Scripts\python.exe` no lugar de `python`.
 Linux/macOS: `source .venv/bin/activate`.
 
@@ -317,8 +316,8 @@ Motivos mais comuns e o que fazer:
 
 | `run_status.json` | Causa | Ação |
 | --- | --- | --- |
-| `analyst: failed`, `error.code: 429` | Rate limit ou quota da Groq | Confira o painel Groq; uma única chamada avança ao fallback configurado |
-| `analyst: failed`, `error.code: 401/403` | Credencial inválida | Conferir `GROQ_API_KEY` no `.env` |
+| `analyst: failed`, `error.code: 429` | Rate limit ou quota do Workers AI | A chamada avança uma vez ao modelo fallback configurado |
+| `analyst: failed`, `error.code: workers_ai_binding_missing` | Binding ausente | Configure `AI` em Pages → Settings → Bindings |
 | `writer: failed`, `error.code: 429` | Cota esgotada na chamada do Writer | A estrutura e os dados continuam em `presentation_script.json`; repetir depois da renovação reaproveita o cache |
 | `writer: rejected`, `error.reason: final_writer_contract` | A resposta do Writer violou o contrato (beat novo, efeito inválido, número solto, markdown) | Nenhum texto é aceito; ver `final_writer_response.json.errors` |
 
@@ -328,13 +327,13 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 
 | Variável | Default | Uso |
 | --- | --- | --- |
-| `GROQ_API_KEY` | vazio | Secret obrigatório para julgamento com IA |
-| `GROQ_MODEL` | `openai/gpt-oss-120b` | Modelo principal do Freeform e padrão do Curated |
-| `GROQ_FALLBACK_MODELS` | `openai/gpt-oss-20b` | Fallback; só o primeiro modelo alternativo é usado |
-| `GROQ_ANALYST_MODEL` | herda `GROQ_MODEL` | Override opcional do Analyst Curated |
-| `GROQ_ANALYST_FALLBACK_MODELS` | herda `GROQ_FALLBACK_MODELS` | Fallback opcional do Analyst Curated |
-| `GROQ_WRITER_MODEL` | herda `GROQ_MODEL` | Override opcional do Writer Curated |
-| `GROQ_WRITER_FALLBACK_MODELS` | herda `GROQ_FALLBACK_MODELS` | Fallback opcional do Writer Curated |
+| `AI` | binding Cloudflare | Obrigatório para julgamento web; não é uma chave |
+| `AI_MODEL` | `@cf/openai/gpt-oss-120b` | Modelo principal do Freeform e padrão do Curated |
+| `AI_FALLBACK_MODELS` | `@cf/openai/gpt-oss-20b` | Um único modelo fallback |
+| `AI_ANALYST_MODEL` | herda `AI_MODEL` | Override opcional do Analyst Curated |
+| `AI_ANALYST_FALLBACK_MODELS` | herda `AI_FALLBACK_MODELS` | Fallback opcional do Analyst Curated |
+| `AI_WRITER_MODEL` | herda `AI_MODEL` | Override opcional do Writer Curated |
+| `AI_WRITER_FALLBACK_MODELS` | herda `AI_FALLBACK_MODELS` | Fallback opcional do Writer Curated |
 | `JUDGE_LANGUAGE` | `pt-BR` | Idioma das observações e reações |
 | `MAX_CONTEXT_CHARS` | `1000000` | Prompt + dados do Analyst |
 | `SCRIPT_MAX_BEATS` | `12` | Máximo entre 1 e 14; quality gate pode resultar em menos |
@@ -459,13 +458,14 @@ aí entram só os dados e uma pausa, e isso é decisão de roteiro, não falha.
 - A identidade da conta vem de `profile.csv` (`Username`/`Name`); todo o resto desse
   arquivo continua descartado.
 
-## Modelos e fallback Groq
+## Modelos e fallback Workers AI
 
-O runtime web usa `GROQ_MODEL` (padrão `openai/gpt-oss-120b`) e até um modelo
-alternativo em `GROQ_FALLBACK_MODELS` (padrão `openai/gpt-oss-20b`). Não há descoberta
-de modelos. 429 avança uma vez ao fallback, sem repetir a chamada; rede e 5xx podem
-repetir uma vez no mesmo modelo. 400 e erros de autenticação param sem retry. Analyst
-e Writer Curated aceitam overrides `GROQ_ANALYST_*` e `GROQ_WRITER_*`.
+O runtime web chama `env.AI.run(model, { messages })` com `@cf/openai/gpt-oss-120b` e
+`@cf/openai/gpt-oss-20b`. Não há descoberta de modelos. 429 avança uma vez ao fallback,
+sem repetir a chamada; rede e 5xx podem repetir uma vez no mesmo modelo. Pedidos inválidos
+e contexto excessivo param sem retry. Analyst e Writer Curated aceitam overrides `AI_ANALYST_*`
+e `AI_WRITER_*`. O JSON mode documentado é solicitado com `response_format` e toda resposta
+continua passando pelo parsing e pelos validadores existentes.
 
 ## Fallback local (sem IA, sem fingimento)
 
@@ -689,15 +689,15 @@ preserva seleção útil enquanto pede reparos direcionados para o contrato inco
 
 #### Cadeia curta, deadline e quota
 
-Cada fase tem no máximo dois modelos explícitos (`GROQ_MODEL` e o primeiro
-`GROQ_FALLBACK_MODELS`). 429 avança ao fallback sem repetir a mesma chamada; 400 e
-401/403 param imediatamente. Falhas de rede e 5xx podem repetir uma vez no mesmo
+Cada fase tem no máximo dois modelos explícitos (`AI_MODEL` e o primeiro
+`AI_FALLBACK_MODELS`). 429 avança ao fallback sem repetir a mesma chamada; pedidos
+inválidos param imediatamente. Falhas de rede e 5xx podem repetir uma vez no mesmo
 modelo, desde que reste deadline. O Analyst limita a fase a 75 segundos e sete chamadas
 lógicas; Freeform permite três reparos direcionados e um resgate do núcleo. Cada
 requisição tem timeout limitado pelo deadline. Respostas HTTP de erro nunca são
 interpretadas como conteúdo gerado. O registro guarda fase, modelo, status, motivo e
-uso de tokens quando disponível. `GROQ_ANALYST_MODEL` e `GROQ_ANALYST_FALLBACK_MODELS`
-podem separar o Analyst Curated; `GROQ_WRITER_MODEL` e `GROQ_WRITER_FALLBACK_MODELS`
+uso de tokens quando disponível. `AI_ANALYST_MODEL` e `AI_ANALYST_FALLBACK_MODELS`
+podem separar o Analyst Curated; `AI_WRITER_MODEL` e `AI_WRITER_FALLBACK_MODELS`
 podem separar o Writer Curated. Não há descoberta de modelos.
 
 A geração possui três resultados:
@@ -765,34 +765,27 @@ repairs disparados, achados preservados, Top 4 por `film_key`, `Writer called: t
 modelo servido, reações por beat, archetype/closer/Profile Review e o estado final da
 apresentação. Nem a chave da API nem o prompt aparecem em log ou resposta.
 
-Fora da nuvem, `test-web-pipeline.mjs` lê `judge-mode.json` e executa o pipeline ativo.
-Em Freeform, o modo normal envia o ZIP à Groq e valida/materializa a resposta pela Pages
-Function; em Curated, executa Analyst, Writer e Presentation. `--stub` simula respostas
-de modelo e serve apenas para validar parsing, contratos e materialização; não comprova
-conectividade nem qualidade do provedor. `analyst-diagnostic.mjs` exercita apenas o
-Analyst do pipeline Curated:
+`test-web-pipeline.mjs` executa o pipeline Freeform ativo com um ZIP inteiramente fictício
+e um binding Workers AI explicitamente simulado; valida parsing, contrato e materialização,
+mas não comprova conectividade nem qualidade do provedor:
 
 ```bash
-node scripts/analyst-diagnostic.mjs caminho-do-export.zip
-node scripts/test-web-pipeline.mjs caminho-do-export.zip
-node scripts/test-web-pipeline.mjs caminho-do-export.zip --stub
+node scripts/test-web-pipeline.mjs
 ```
 
-O diagnóstico real e o runtime leem `GROQ_API_KEY`, `GROQ_MODEL` e a mesma cadeia
-limitada de modelos. `npm run probe:groq` faz uma chamada real mínima, sem export;
-somente HTTP 200 com objeto JSON válido comprova conectividade.
+`npm run probe:workers-ai` inicia Wrangler local com o binding `AI` e faz uma chamada
+real mínima ao modelo principal, sem export. A saída contém somente status, modelo, uso
+disponível, validade do JSON e categoria da falha.
 
 ### Testes
 
-`npm run test:groq` cobre a integração Groq com respostas simuladas (JSON mode,
-classificação de erros, retry e fallback); não chama o serviço real. `npm run test:web`
+`npm run test:workers-ai` cobre o adaptador com binding simulado (extração de resposta,
+JSON mode, erros, retry, timeout e fallback); não chama o serviço real. `npm run test:web`
 cobre parser, análise, contratos, Freeform, erros, estado parcial, Profile Review,
 explainability e apresentação. `web-tests/analyst.test.js` cobre especificamente o
 Analyst Curated e suas respostas simuladas. `npm run test:edge` e `npm run test:browser`
 precisam de um servidor local em `127.0.0.1:8080`; o segundo cobre layouts, demo,
-harnesses e cartões compartilháveis. Para provar a integração do modo selecionado com
-o provedor, use o `test-web-pipeline.mjs` sem `--stub` e uma credencial válida; a fixture
-com `--stub` cobre apenas o caminho simulado.
+harnesses e cartões compartilháveis. Use o probe Wrangler para verificar a integração real.
 ## Modos de pipeline
 
 `judge-mode.json` na raiz é a única fonte de verdade do modo ativo:
@@ -804,16 +797,19 @@ Depois de trocar o valor, execute `python scripts/sync-mode.py` antes de rodar o
 `python scripts/sync-mode.py --check` falha quando o artefato Cloudflare está divergente; `npm run build`
 faz a sincronização automaticamente. Não configure o modo no dashboard da Cloudflare.
 
-O modo Freeform é experimental e envia à Groq todo o conteúdo textual e celular do export, incluindo
+O modo Freeform é experimental e envia ao Workers AI todo o conteúdo textual e tabular do export, incluindo
 reviews, comments, likes, listas, arquivos em `deleted/` e `orphaned/` e arquivos desconhecidos. Binários
 grandes permanecem no JSON lossless local, enquanto o modelo recebe seus metadados, tamanho e SHA-256.
-Se o contexto não couber, a execução falha explicitamente com `freeform_context_too_large`; não há corte
+As linhas CSV e os textos são preservados por inteiro; somente o índice `entities`, derivado e redundante,
+fica fora do prompt. O JSON de cada CSV usa linhas ordenadas e elimina wrappers de referência repetidos.
+Um pré-cheque conservador reserva 16.384 tokens para a saída dentro da janela documentada de 128k. Se o
+contexto não couber, a execução falha explicitamente com `freeform_context_too_large`; não há corte
 silencioso nem fallback automático para Curated.
 
-O runtime JavaScript usa exclusivamente a API Chat Completions da Groq. Cada fase tem no máximo dois
+O runtime JavaScript usa exclusivamente o binding Cloudflare Workers AI. Cada fase tem no máximo dois
 modelos configurados; `429` avança uma vez ao fallback e `5xx`/rede podem repetir uma vez no mesmo
 modelo. Freeform permite até três reparos direcionados e um resgate do núcleo, dentro do deadline.
-Para validar a credencial localmente sem imprimir chave ou conteúdo de resposta, execute `npm run probe:groq`.
+Para validar a integração real sem export nem conteúdo de resposta, execute `npm run probe:workers-ai`.
 O cliente Python em `src/gemini_client.py` e `app.py` é um protótipo legado, fora do runtime suportado
 Cloudflare Pages. As seções históricas anteriores a “Pipeline web (Cloudflare Pages)” documentam
 esse protótipo e decisões antigas; não são instruções de configuração ou diagnóstico do site.

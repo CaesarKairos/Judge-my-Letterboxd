@@ -9,7 +9,7 @@ export async function judgeExport(file, locale, signal) {
     if (!response.ok) {
       let body={};try{body=await response.json();}catch{}
       const reason=body.error||'';
-      const known={missing_groq_key:'missingGroqKey',groq_auth_failed:'configuration',groq_invalid_request:'server',AI_FAILED:'aiUnavailable',freeform_context_too_large:'freeformTooLarge',ai_unavailable:'aiUnavailable',writer_unavailable:'writerUnavailable',analyst_unavailable:'analystUnavailable',invalid_zip:'zip',unsupported_zip:'zip',not_letterboxd_export:'exportFormat',empty_export:'emptyExport',file_too_large:'large',rate_limited:'rate',quota_exceeded:'rate',invalid_response:'modelInvalid',core_incomplete:'modelInvalid'};
+      const known={workers_ai_binding_missing:'missingWorkersAI',workers_ai_invalid_request:'server',AI_FAILED:'aiUnavailable',freeform_context_too_large:'freeformTooLarge',ai_unavailable:'aiUnavailable',writer_unavailable:'writerUnavailable',analyst_unavailable:'analystUnavailable',invalid_zip:'zip',unsupported_zip:'zip',not_letterboxd_export:'exportFormat',empty_export:'emptyExport',file_too_large:'large',rate_limited:'rate',quota_exceeded:'rate',invalid_response:'modelInvalid',core_incomplete:'modelInvalid'};
       // A stage failure caused by the quota or by a rate limit is a waiting problem, not a
       // "the Judge could not read you" problem: the copy has to say the true thing.
       const waiting={quota_exceeded:'quota',rate_limited:'rate'}[body.reason];

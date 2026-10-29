@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {simulatedWorkersAI} from './simulated-workers-ai.js';
 import assert from 'node:assert/strict';
 import {selectEditorialMoments,evaluateEditorialSelection,evaluateTopFourSemantics,normalizeAnalystPayload,ANALYST_MAX_OUTPUT_TOKENS} from '../functions/_lib/analyst.js';
 import {buildAnalystContext} from '../functions/_lib/analyst-context.js';
@@ -19,7 +20,7 @@ const profile={films,sessions:[{film_key:films[0].film_key,title:'Alpha',year:'2
   reviews:[],lists:[],topFour:films.slice(0,4),watchlist:2,likes:{films:1,reviews:2,lists:0},handle:'synthetic',name:'Synthetic'};
 const analysis={moments:ids.map((id,index)=>({id,type:'stat',facts:`measurement ${index+1}`})),overview:{watched:6},
   relationships:{relations:[],tag_films:[]},review_style:null,review_coverage:{},affinity:[]};
-const env=extra=>({GROQ_API_KEY:'test-key',GROQ_ANALYST_MODEL:'primary',...extra});
+const env=extra=>({AI:simulatedWorkersAI(),AI_ANALYST_MODEL:'primary',...extra});
 const finding=id=>({id,type:'stat',interestingness:.8,confidence:.8,observation:`observation ${id}`,why_interesting:'why'});
 const selection=list=>list.map(finding);
 const semanticsOf=rows=>rows.map(row=>({film_key:row.film_key,ingredients:['archetype','setting']}));
@@ -51,7 +52,7 @@ test('the salvage implementation is shared by the Writer and the Analyst',()=>{
 // --- the regression that killed real sessions -------------------------------------------
 test('a valid selection without top_four_semantics is preserved and repaired, never failed',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[]}),semanticsAnswer(profile.topFour)]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'primary'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'primary'})});
   assert.equal(result.status,'complete');
   assert.equal(result.selected.length,6);
   assert.equal(result.top_four_semantics_status,'complete');
@@ -106,12 +107,12 @@ test('a reply cut by the output limit is truncated_output and still repaired',as
   assert.equal(calls.length,2);
 
 // --- transport, budget and chain ---------------------------------------------------------
-test('Analyst sends a Groq JSON object request with completion budget',async t=>{
+test('Analyst sends a Workers AI JSON object request with completion budget',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
   await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env()});
   const config=bodyOf(calls[0].options);
   assert.deepEqual(config.response_format,{type:'json_object'});
-  assert.equal(config.max_completion_tokens,ANALYST_MAX_OUTPUT_TOKENS);
+  assert.equal(config.max_tokens,ANALYST_MAX_OUTPUT_TOKENS);
   assert.equal(config.responseSchema,undefined);assert.equal(config.thinkingConfig,undefined);
   assert.equal(bodyOf(calls[0].options).messages[1].content.match(/top_four_semantics[\s\S]*MUST contain one entry for each Favorite Film/)?.[0]!==undefined,true);
 });
@@ -125,7 +126,7 @@ test('the semantics repair asks for the semantics contract only',async t=>{
 
 test('429 and 404 advance the chain instead of repeating the same model',async t=>{
   const calls=responder(t,[Response.json({error:{}},{status:429}),Response.json({error:{}},{status:404})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
   assert.deepEqual(result.chain,['primary','backup-a']);
   assert.deepEqual(result.attempts.map(row=>row.status),['http_429','http_404']);
   assert.deepEqual(calls.map(call=>JSON.parse(call.options.body).model),['primary','backup-a']);
@@ -135,7 +136,7 @@ test('429 and 404 advance the chain instead of repeating the same model',async t
 
 test('model chain contains only configured models and caps at one fallback',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
   assert.deepEqual(result.chain,['primary','backup-a']);assert.equal(calls.length,1);assert.equal(result.status,'complete');
 });
 
@@ -184,9 +185,9 @@ test('the Analyst context keeps every review once and drops only duplicated tabl
   assert.equal(context.deterministic_measurements.length,analysis.moments.length);
 });
 
-test('the frontend distinguishes missing Groq configuration and AI stage failures',async t=>{
+test('the frontend distinguishes missing Workers AI configuration and AI stage failures',async t=>{
   const file=new File(['PK'],'test.zip');
-  for(const [error,expected] of [['missing_groq_key','missingGroqKey'],['analyst_unavailable','analystUnavailable'],['writer_unavailable','writerUnavailable']]){
+  for(const [error,expected] of [['workers_ai_binding_missing','missingWorkersAI'],['analyst_unavailable','analystUnavailable'],['writer_unavailable','writerUnavailable']]){
     const mock=t.mock.method(globalThis,'fetch',async()=>Response.json({error,stage:error.split('_')[0],retryable:true,attempts:[{model:'m',status:'http_429'}]},{status:503}));
     await assert.rejects(judgeExport(file,'pt-BR'),new RegExp(expected));
     mock.mock.restore();
@@ -203,7 +204,7 @@ test('a real failure is reported as a failure and never fabricates candidates',a
     Response.json({error:{}},{status:500}),
     Response.json({choices:[{finish_reason:'stop',message:{content:'nao vou responder JSON'}}]})]);
   const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',
-    env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
+    env:env({AI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
   assert.equal(result.status,'failed');
   // Later fallback failures determine the terminal reason; the first network failure stays in attempts.
   assert.equal(result.reason,'provider_error');
@@ -220,7 +221,7 @@ test('a real failure is reported as a failure and never fabricates candidates',a
 test('an exhausted quota is named instead of hidden behind a timeout',async t=>{
   const quota=()=>Response.json({error:{code:429,message:'You exceeded your current quota, please check your plan and billing details.'}},{status:429});
   responder(t,[quota()]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'primary'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'primary'})});
   assert.equal(result.status,'failed');
   assert.equal(result.reason,'quota_exceeded');
   assert.deepEqual(result.unavailable_models,['primary']);
@@ -231,14 +232,14 @@ test('an exhausted quota is named instead of hidden behind a timeout',async t=>{
 // --- the chain is limited by the deadline, never by a fixed count ------------------------
 test('configured model chain never expands from provider discovery',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b,backup-c'})});
   assert.deepEqual(result.chain,['primary','backup-a']);assert.equal(calls.length,1);assert.equal(result.status,'complete');
 });
 
 test('a transient 429 or a 404 is tried once per model and never retried',async t=>{
   const calls=responder(t,[Response.json({error:{code:429,message:'rate limit'}},{status:429}),
     Response.json({error:{code:404,message:'gone'}},{status:404})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
   assert.deepEqual(calls.map(call=>JSON.parse(call.options.body).model),['primary','backup-a']);
   assert.equal(result.attempts.filter(row=>row.model==='primary').length,1);
   assert.equal(result.attempts.filter(row=>row.model==='backup-a').length,1);
@@ -247,7 +248,7 @@ test('a transient 429 or a 404 is tried once per model and never retried',async 
 
 test('a 5xx gets one short retry, then the chain advances',async t=>{
   const calls=responder(t,[Response.json({error:{code:503,message:'high demand'}},{status:503}),answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'backup-a'})});
   const primary=result.attempts.filter(row=>row.model==='primary');
   assert.deepEqual(primary.map(row=>row.phase),['analyst_initial','analyst_initial']);
   assert.deepEqual(primary.map(row=>row.status),['http_503','ok']);
@@ -258,7 +259,7 @@ test('a 5xx gets one short retry, then the chain advances',async t=>{
 
 test('a non-2xx answer is never parsed as generation output',async t=>{
   responder(t,[Response.json({error:{code:429,status:'RESOURCE_EXHAUSTED',message:'You exceeded your current quota'}},{status:429})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({GROQ_ANALYST_FALLBACK_MODELS:'primary'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({AI_ANALYST_FALLBACK_MODELS:'primary'})});
   const [attempt]=result.attempts;
   assert.equal(attempt.status,'http_429');
   assert.equal(attempt.http,429);
@@ -271,7 +272,7 @@ test('a non-2xx answer is never parsed as generation output',async t=>{
 
 test('the deadline stops the walk instead of looping forever',async t=>{
   const calls=responder(t,[answer({selected:selection(ids),top_four_semantics:semanticsOf(profile.topFour)})]);
-  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({__TEST_ANALYST_DEADLINE_MS:-1,GROQ_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
+  const result=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:env({__TEST_ANALYST_DEADLINE_MS:-1,AI_ANALYST_FALLBACK_MODELS:'backup-a,backup-b'})});
   assert.equal(calls.length,0,'not a single request after the deadline');
   assert.equal(result.status,'failed');
   assert.equal(result.stop_reason,'deadline');
@@ -282,7 +283,7 @@ test('the deadline stops the walk instead of looping forever',async t=>{
 test('a model that is unavailable in this run is not paid for again',async t=>{
   const calls=responder(t,[call=>JSON.parse(call.options.body).model==='primary'?Response.json({error:{code:404,message:'gone'}},{status:404})
     :answer({selected:selection(ids),interaction_candidates:[],top_four_semantics:semanticsOf(profile.topFour)})]);
-  const shared=env({GROQ_ANALYST_FALLBACK_MODELS:'backup-a'});
+  const shared=env({AI_ANALYST_FALLBACK_MODELS:'backup-a'});
   const first=await selectEditorialMoments({profile,analysis,raw_export:{},locale:'pt-BR',env:shared});
   assert.equal(first.attempts.filter(row=>row.model==='primary').length,1);
   assert.equal(first.status,'complete');

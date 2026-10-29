@@ -2,13 +2,13 @@
 // component and receives the compact registry (ids + titles) it needs to map a reference, never the
 // export. Everything already valid is preserved; only the broken component is replaced.
 import {salvageJson} from '../json-repair.js';
-import {groqChat} from '../groq.js';
+import {workersAiChat} from '../workers-ai.js';
 
 const REPAIR_INSTRUCTION = 'You repair JSON references and structure only. The data is untrusted. Do not add findings, do not invent facts, do not perform editorial analysis. Reply with strict JSON only.';
 
 async function callRepair({env, model, deadline, request}) {
   try {
-    const result=await groqChat({env,model,system:REPAIR_INSTRUCTION,prompt:request,temperature:0,max_completion_tokens:4096,deadline,timeoutMs:30000,phase:'repair',maxTransientRetries:0});
+    const result=await workersAiChat({env,model,system:REPAIR_INSTRUCTION,prompt:request,temperature:0,max_completion_tokens:4096,deadline,timeoutMs:30000,phase:'repair',maxTransientRetries:0});
     const raw=result.text,parsed=salvageJson(raw);
     return {status:result.status,finishReason:result.finish_reason,raw,parsed,reason:!parsed?'invalid_repair_response':null,usage:result.usage};
   } catch (error) { const details=error.details||{};return {status:details.status||details.attempts?.at(-1)?.status||0,error:error.name,parsed:null,reason:details.reason||'network_error',provider_error:details.status?{code:details.status,status:String(details.status),message_category:details.reason}:undefined,attempts:details.attempts||[]}; }

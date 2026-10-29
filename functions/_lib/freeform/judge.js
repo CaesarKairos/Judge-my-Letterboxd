@@ -1,5 +1,5 @@
 import {mergeModels,modelUnavailable,noteModelFailure,FREEFORM_MODEL_LIMIT} from '../models.js';
-import {groqModels,groqWithFallback} from '../groq.js';
+import {workersAiModels,workersAiWithFallback} from '../workers-ai.js';
 import {salvageJson} from '../json-repair.js';
 import {FREEFORM_JUDGE_PROMPT,JUDGE_VOICE_PROMPT} from '../generated-prompts.js';
 import {validateFreeformResponse} from './validator.js';
@@ -20,6 +20,14 @@ const responseText=body=>body?.choices?.[0]?.message?.content||'';
 const contextFailure=(status,body)=>status===413||status===400&&/context|token|too (large|long)|input size/i.test(JSON.stringify(body));
 export const categorizeBadRequest=()=> 'invalid_request';
 export const thinkingConfigForModel=()=>null;
+export const freeformModelArchive=archive=>({
+  version:archive.version,archive:archive.archive,
+  // Rows are lossless cell arrays; their physical #row ref is the 1-based array position.
+  // Keep every source row, but omit per-row ref/index object wrappers and the duplicate entities map.
+  files:(archive.files||[]).map(file=>file.format==='csv'?{path:file.path,format:file.format,rows:(file.rows||[]).map(row=>row.cells)}:
+    file.format==='binary'?{path:file.path,format:file.format,mime_type:file.mime_type,size:file.size,sha256:file.sha256,base64_in_lossless:Boolean(file.base64)}:
+    {path:file.path,format:file.format,raw_text:file.raw_text,ref:file.ref})
+});
 
 // One model reply → normalize references → validate → repair the specific broken components.
 // Normalization runs first on purpose: an evidence_ref written as an entity id becomes the real
@@ -72,19 +80,29 @@ export const classifyFinalReason=({attempts,best,fallback='no_usable_model_respo
 };
 
 export async function freeformJudge({archive,locale,env}){
-  if(!env.GROQ_API_KEY)throw new Error('missing_groq_key');
-  const archiveJson=JSON.stringify(archive),limit=Number(env.FREEFORM_MAX_PAYLOAD_CHARS||1800000);
-  if(archiveJson.length>limit){const error=new Error('freeform_context_too_large');error.details={payload_chars:archiveJson.length,file_count:archive.archive?.file_count||0};throw error;}
+  if(!env.AI||typeof env.AI.run!=='function')throw new Error('workers_ai_binding_missing');
+  // `entities` is a derived identity index and duplicates review/session/table contents already
+  // present in every source file. Keep the entire lossless file rows/text, while excluding only
+  // that redundant index from the model context. The server-side validator retains full entities.
+  const modelArchive=freeformModelArchive(archive);
+  const archiveJson=JSON.stringify(modelArchive);
   const systemInstruction=`${JUDGE_VOICE_PROMPT}\n\n${FREEFORM_JUDGE_PROMPT}`;
   const dataPrompt=`Language: ${locale==='en-US'?'English':'Brazilian Portuguese'}. acid_level=0.8.\n<ARCHIVE_DATA>\n${archiveJson}\n</ARCHIVE_DATA>`;
-  const models=mergeModels(groqModels(env),[],FREEFORM_MODEL_LIMIT);
+  const requestChars=systemInstruction.length+dataPrompt.length;
+  // Conservative estimate (one token per two UTF-8 bytes) reserves 16k output tokens and
+  // headroom for the model's chat template inside the documented 128k context window.
+  // The full archive is retained; oversized uploads fail explicitly instead of being clipped.
+  const estimatedInputTokens=Math.ceil(new TextEncoder().encode(systemInstruction+dataPrompt).length/2);
+  const maxEstimatedInputTokens=100000;
+  if(estimatedInputTokens>maxEstimatedInputTokens){const error=new Error('freeform_context_too_large');error.details={reason:'context_preflight',payload_chars:requestChars,estimated_input_tokens:estimatedInputTokens,max_estimated_input_tokens:maxEstimatedInputTokens,file_count:archive.archive?.file_count||0};throw error;}
+  const models=mergeModels(workersAiModels(env),[],FREEFORM_MODEL_LIMIT);
   const registry=buildFreeformRegistry(archive);
   const attempts=[],deadline=Date.now()+190000;let lastReason='no_usable_model_response',best=null,budgetUsed=false;
   const keepReason=reason=>{lastReason=strongestReason([lastReason,reason].filter(Boolean))||reason;};
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
     try{
-      const result=await groqWithFallback({env,models:[model],system:systemInstruction,prompt:dataPrompt,temperature:.8,max_completion_tokens:16384,deadline,timeoutMs:65000,phase:'freeform',maxTransientRetries:1});
+      const result=await workersAiWithFallback({env,models:[model],system:systemInstruction,prompt:dataPrompt,temperature:.8,max_completion_tokens:16384,deadline,timeoutMs:65000,phase:'freeform',maxTransientRetries:1});
       attempts.push(...result.attempts.map(row=>({...row,status:row.status>=200&&row.status<300?200:row.status,reason:row.status>=200&&row.status<300?null:row.reason,finishReason:row.finish_reason||null})));
       const raw=result.text,record={model:result.model,status:200,finishReason:result.finish_reason,reason:'ok',usage:result.usage};
       budgetUsed=true;
@@ -106,8 +124,8 @@ export async function freeformJudge({archive,locale,env}){
         const oversized=new Error('freeform_context_too_large');oversized.details={stage:'freeform_judge',reason:'context_exceeded',model,payload_chars:archiveJson.length,attempts};throw oversized;
       }
       keepReason(reason);if(['rate_limited','quota_exceeded','model_unavailable'].includes(reason))noteModelFailure(env,model,details.status||details.attempts?.at(-1)?.status||429);
-      if(reason==='invalid_request'){const invalid=new Error('groq_invalid_request');invalid.details={stage:'freeform_judge',reason:'invalid_request',attempts};throw invalid;}
-      if(reason==='invalid_api_key'){const authError=new Error('groq_auth_failed');authError.details={stage:'freeform_judge',reason:'invalid_api_key',attempts};throw authError;}
+      if(reason==='invalid_request'){const invalid=new Error('workers_ai_invalid_request');invalid.details={stage:'freeform_judge',reason:'invalid_request',attempts};throw invalid;}
+      if(reason==='context_exceeded'){const oversized=new Error('freeform_context_too_large');oversized.details={stage:'freeform_judge',reason:'context_exceeded',model,payload_chars:archiveJson.length,attempts};throw oversized;}
       if(reason==='timeout')keepReason('timeout');if(reason==='network_error')keepReason('network_error');
       if(['rate_limited','quota_exceeded','model_unavailable','provider_error'].includes(reason))continue;
       break;

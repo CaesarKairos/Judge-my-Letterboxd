@@ -1,7 +1,7 @@
 const clean=value=>String(value||'').replace(/\s+/g,' ').trim();
 import {ANALYST_PROMPT} from './generated-prompts.js';
 import {mergeModels,configuredWithoutDiscovery,describeChain,modelUnavailable,noteModelFailure,MODEL_SAFETY_CEILING} from './models.js';
-import {groqModels,groqWithFallback,groqErrorKind} from './groq.js';
+import {workersAiModels,workersAiWithFallback} from './workers-ai.js';
 import {ANALYST_SCHEMA,ANALYST_SEMANTICS_SCHEMA,ANALYST_FINDINGS_SCHEMA,ANALYST_GAMES_SCHEMA} from './analyst-schema.js';
 import {buildAnalystContext,summarizeAnalystContext} from './analyst-context.js';
 import {buildEvidenceRegistry,EVIDENCE_TYPES} from './evidence-registry.js';
@@ -42,7 +42,7 @@ export const ANALYST_DEADLINE_MS=75000;        // shared by every attempt of the
 // Safety ceilings only, for a runaway loop: the deadline is what really limits the chain, so a
 // model discovered at position 20 is still attempted while there is time left.
 export const ANALYST_CALL_CEILING=7;
-export const ANALYST_SERVER_RETRY_MS=0; // The Groq transport performs the single bounded 5xx retry.
+export const ANALYST_SERVER_RETRY_MS=0; // The Workers AI adapter performs one bounded transient retry.
 export const ANALYST_MIN_INTERESTINGNESS=.62;
 export const ANALYST_MIN_CONFIDENCE=.6;
 
@@ -156,7 +156,7 @@ const gamesRepair=(pool,accepted=[])=>[
 ].filter(Boolean).join('\n');
 
 
-function analystConfigured(env){return groqModels(env,'ANALYST');}
+function analystConfigured(env){return workersAiModels(env,'ANALYST');}
 // The Analyst sees the rich, normalized account and selects evidence. It never writes the
 // on-screen jokes; the Writer receives only the materialized selection afterwards.
 export async function selectEditorialMoments({profile,analysis,raw_export,locale,env}){
@@ -172,7 +172,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     semantic_findings:[],semantic_moments:[],interaction_candidates:[],top_four_semantics:[],top_four_semantics_status:'skipped',
     editorial_strength:'skipped',attempts:[],repairs:[],desired_findings:target.desired_findings,minimum_usable_findings:target.minimum_usable_findings,
     richness:target,interaction_pool:pool};
-  if(!env.GROQ_API_KEY)return empty('failed','missing_groq_key');
+  if(!env.AI||typeof env.AI.run!=='function')return empty('failed','workers_ai_binding_missing');
   if(!candidates.length)return empty('failed','no_candidates');
   const language=locale==='pt-BR'?'Brazilian Portuguese':'English';
   const registry=buildEvidenceRegistry({profile,analysis});
@@ -208,7 +208,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     const timeout=timeoutFor(modelsLeft),started=Date.now();
     calls++;
     try{
-      const result=await groqWithFallback({env,models:[model],system:'You are the editorial evidence Analyst. Return one valid JSON object only.',prompt:content,temperature:.25,max_completion_tokens:ANALYST_MAX_OUTPUT_TOKENS,deadline:Date.now()+timeout,timeoutMs:timeout,phase:`analyst_${phase}`,maxTransientRetries:1});
+      const result=await workersAiWithFallback({env,models:[model],system:'You are the editorial evidence Analyst. Return one valid JSON object only.',prompt:content,temperature:.25,max_completion_tokens:ANALYST_MAX_OUTPUT_TOKENS,deadline:Date.now()+timeout,timeoutMs:timeout,phase:`analyst_${phase}`,maxTransientRetries:1});
       const reply=readModelReply(result.text,result.finish_reason),status=attemptStatus({status:200,ok:true,reply}),duration=Date.now()-started;
       attempts.push(...result.attempts.map(row=>({model:row.model,phase,...row,status:row.status>=500?'http_'+row.status:reply.truncated?'truncated_output':reply.salvage_used?'salvaged':status||'ok',reason:row.status>=500?'provider_error':row.status===0?row.reason:row.status===429?'rate_limited':row.reason,finishReason:reply.reason,duration_ms:duration,json:reply.parsed?(reply.salvage_used?'salvaged':'valid'):'unreadable'})));
       return {status:status||'ok',reply,fast:false,transientFailures:result.attempts.some(row=>row.status>=500),transportRecovered:result.attempts.some(row=>row.status>=500)&&result.attempts.at(-1)?.status<500};

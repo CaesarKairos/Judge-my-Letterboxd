@@ -7,8 +7,8 @@
     "check:sync": "python scripts/sync-mode.py --check && python scripts/sync-prompts.py --check",
     "build": "npm run sync && python scripts/prepare-web.py",
     "check:cloudflare": "node scripts/check-cloudflare.mjs",
-    "probe:groq": "node scripts/probe-groq.mjs",
-    "test:groq": "node --test web-tests/groq.test.js",
+    "probe:workers-ai": "node scripts/probe-workers-ai.mjs",
+    "test:workers-ai": "node --test web-tests/workers-ai.test.js",
     "test:web": "npm run check:sync && node --test web-tests/*.test.js",
     "test:browser": "node web-tests/smoke.mjs && node web-tests/games-smoke.mjs",
     "test:edge": "node web-tests/edge-cases.mjs"
