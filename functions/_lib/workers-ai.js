@@ -4,8 +4,8 @@
 // quality fallback.
 export const AI_DEFAULT_MODEL='@cf/openai/gpt-oss-20b';
 export const AI_DEFAULT_FALLBACK='@cf/openai/gpt-oss-120b';
-export const GEMINI_DEFAULT_MODEL='gemini-3.8-flash';
-export const GEMINI_DEFAULT_FALLBACK='gemini-3.1-flash-lite';
+export const GEMINI_DEFAULT_MODEL='gemini-3.1-flash-lite';
+export const GEMINI_DEFAULT_FALLBACK='gemini-3.8-flash';
 export const AI_MAX_MODELS=2;
 
 export class WorkersAIError extends Error {
@@ -38,8 +38,10 @@ export const workersAiFinishReason=result=>result?.finish_reason||result?.choice
 // Gemini 3 may return internal thought parts beside the final answer. Joining them makes
 // valid JSON unreadable even though the provider returned HTTP 200.
 const geminiText=result=>(result?.candidates?.[0]?.content?.parts||[]).filter(part=>part?.thought!==true).map(part=>part?.text||'').join('');
-async function geminiRun({env,model,system,prompt,temperature,max_completion_tokens,signal}){
-  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',signal,headers:{'content-type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify({systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature,maxOutputTokens:max_completion_tokens,responseMimeType:'application/json'}})});
+const jsonSchema=value=>Array.isArray(value)?value.map(jsonSchema):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,item])=>[key,key==='type'&&typeof item==='string'?item.toLowerCase():jsonSchema(item)])):value;
+async function geminiRun({env,model,system,prompt,temperature,max_completion_tokens,response_schema,signal}){
+  const generationConfig={temperature,maxOutputTokens:max_completion_tokens,responseMimeType:'application/json',...(response_schema?{responseJsonSchema:jsonSchema(response_schema)}:{})};
+  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',signal,headers:{'content-type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify({systemInstruction:{parts:[{text:system}]},contents:[{role:'user',parts:[{text:prompt}]}],generationConfig})});
   const body=await response.json().catch(()=>({}));
   if(!response.ok){const error=new Error(body?.error?.message||`Gemini HTTP ${response.status}`);error.status=response.status;throw error;}
   return {response:geminiText(body),finish_reason:body?.candidates?.[0]?.finishReason?.toLowerCase()||null,usage:body.usageMetadata};
@@ -59,7 +61,7 @@ export const classifyWorkersAiError=error=>{
 
 // The Pages AI binding returns model-specific objects (GPT-OSS exposes generated text in
 // `response`), not OpenAI Chat Completions. This adapter is the only place that knows that.
-export async function workersAiChat({env,model,system,prompt,temperature=.2,max_completion_tokens=8192,deadline=Date.now()+60000,timeoutMs=60000,phase='generation',maxTransientRetries=1}){
+export async function workersAiChat({env,model,system,prompt,temperature=.2,max_completion_tokens=8192,response_schema,deadline=Date.now()+60000,timeoutMs=60000,phase='generation',maxTransientRetries=1}){
   if(!aiConfigured(env))throw new WorkersAIError('workers_ai_binding_missing',{reason:'binding_missing',phase,model});
   const attempts=[];
   for(let retry=0;retry<=maxTransientRetries;retry++){
@@ -68,7 +70,7 @@ export async function workersAiChat({env,model,system,prompt,temperature=.2,max_
     try{
       const controller=new AbortController();
       const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Object.assign(new Error('AI call timed out'),{name:'TimeoutError'}));},Math.max(1,Math.min(timeoutMs,remaining)));});
-      const call=env.GEMINI_API_KEY?geminiRun({env,model,system,prompt,temperature,max_completion_tokens,signal:controller.signal}):env.AI.run(model,workersAiRequest({system,prompt,temperature,max_completion_tokens}));
+      const call=env.GEMINI_API_KEY?geminiRun({env,model,system,prompt,temperature,max_completion_tokens,response_schema,signal:controller.signal}):env.AI.run(model,workersAiRequest({system,prompt,temperature,max_completion_tokens}));
       const raw=await Promise.race([call,timeout]);
       const text=workersAiText(raw),finish_reason=workersAiFinishReason(raw);
       if(!text){attempts.push({model,status:200,phase,reason:'invalid_response',attempt:retry+1});throw new WorkersAIError('workers_ai_invalid_response',{reason:'invalid_response',phase,model,attempts});}

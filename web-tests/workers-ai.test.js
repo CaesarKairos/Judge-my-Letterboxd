@@ -13,10 +13,11 @@ test('Workers AI defaults and bounded primary/fallback chain',()=>{
 
 test('Gemini uses the key header, JSON mode and normalized response without exposing the key',async t=>{
   let request;t.mock.method(globalThis,'fetch',async(url,options)=>{request={url,options};return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{thought:true,text:'internal reasoning that is not JSON'},{text:'{"ok":true}'}]}}],usageMetadata:{totalTokenCount:7}});});
-  const result=await workersAiChat({env:{GEMINI_API_KEY:'private-key'},model:'gemini-3.8-flash',system:'S',prompt:'P'});
+  const result=await workersAiChat({env:{GEMINI_API_KEY:'private-key'},model:'gemini-3.1-flash-lite',system:'S',prompt:'P',response_schema:{type:'OBJECT',required:['ok'],properties:{ok:{type:'BOOLEAN'}}}});
   const body=JSON.parse(request.options.body);
-  assert.match(request.url,/gemini-3\.8-flash:generateContent$/);assert.equal(request.options.headers['x-goog-api-key'],'private-key');
+  assert.match(request.url,/gemini-3\.1-flash-lite:generateContent$/);assert.equal(request.options.headers['x-goog-api-key'],'private-key');
   assert.equal(request.url.includes('private-key'),false);assert.equal(body.generationConfig.responseMimeType,'application/json');
+  assert.deepEqual(body.generationConfig.responseJsonSchema,{type:'object',required:['ok'],properties:{ok:{type:'boolean'}}});
   assert.equal(result.text,'{"ok":true}');assert.equal(result.finish_reason,'stop');assert.equal(result.usage.totalTokenCount,7);
 });
 

@@ -16,6 +16,17 @@ const schema={type:'OBJECT',required:['opening','moments','games','closer','endi
 }};
 export {schema as freeformResponseSchema};
 
+// Gemini rejects the full renderer schema as "too many states". This serving schema keeps
+// every publishable core field but constrains prose to plain strings; the complete local
+// validator below still enforces references, game semantics and editorial quality.
+const stringArray={type:'ARRAY',items:{type:'STRING'}},idArray={type:'ARRAY',items:{type:'STRING'}};
+const geminiResponseSchema={type:'OBJECT',required:['opening','moments','games','closer','ending','profile_review'],properties:{
+  opening:{type:'OBJECT',required:['greeting','archetype_lead','archetype_phrase','archetype_after','username_line','taste_bit','judge_claim','transition'],properties:{greeting:stringArray,archetype_lead:{type:'STRING'},archetype_phrase:{type:'STRING'},archetype_after:stringArray,username_line:{type:'STRING'},taste_bit:{type:'OBJECT',required:['lead','strike','correction','tail'],properties:{lead:{type:'STRING'},strike:{type:'STRING'},correction:{type:'STRING'},tail:{type:'STRING'}}},judge_claim:{type:'STRING'},transition:stringArray}},
+  moments:{type:'ARRAY',items:{type:'OBJECT',required:['id','label','evidence_refs','attachments','lines'],properties:{id:{type:'STRING'},type:{type:'STRING'},label:{type:'STRING'},evidence_refs:idArray,attachments:{type:'ARRAY',items:{type:'OBJECT',required:['type'],properties:{type:{type:'STRING'},film_id:{type:'STRING'},film_ids:idArray,review_ref:{type:'STRING'},list_id:{type:'STRING'},tag_id:{type:'STRING'},session_refs:idArray,phrase:{type:'STRING'},title:{type:'STRING'},display_text:{type:'STRING'}}}},lines:stringArray}}},
+  games:{type:'ARRAY',items:{type:'OBJECT',required:['id','type','film_ids','evidence_refs','after_moment_id','copy'],properties:{id:{type:'STRING'},type:{type:'STRING'},film_ids:idArray,evidence_refs:idArray,after_moment_id:{type:'STRING'},difficulty:{type:'STRING'},why_difficult:{type:'STRING'},copy:{type:'OBJECT',required:['intro','instructions','roles','reaction_hints'],properties:{intro:{type:'STRING'},instructions:{type:'STRING'},question:{type:'STRING'},confirm_label:{type:'STRING'},reveal_copy:{type:'STRING'},roles:{type:'ARRAY',items:{type:'OBJECT',required:['id','label'],properties:{id:{type:'STRING'},label:{type:'STRING'},rank:{type:'NUMBER'}}}},reaction_hints:{type:'ARRAY',items:{type:'OBJECT',required:['film_id','text'],properties:{film_id:{type:'STRING'},role_id:{type:'STRING'},text:{type:'STRING'}}}}}}}}},
+  closer:stringArray,ending:{type:'OBJECT',required:['title'],properties:{title:{type:'STRING'}}},profile_review:{type:'OBJECT',required:['text','evidence_refs'],properties:{text:{type:'STRING'},evidence_refs:idArray}}
+}};
+
 const responseText=body=>body?.choices?.[0]?.message?.content||'';
 const contextFailure=(status,body)=>status===413||status===400&&/context|token|too (large|long)|input size/i.test(JSON.stringify(body));
 export const categorizeBadRequest=()=> 'invalid_request';
@@ -102,7 +113,7 @@ export async function freeformJudge({archive,locale,env}){
   for(const model of models){
     if(Date.now()>deadline)break;if(modelUnavailable(env,model))continue;
     try{
-      const result=await workersAiWithFallback({env,models:[model],system:systemInstruction,prompt:dataPrompt,temperature:.8,max_completion_tokens:16384,deadline,timeoutMs:65000,phase:'freeform',maxTransientRetries:1});
+      const result=await workersAiWithFallback({env,models:[model],system:systemInstruction,prompt:dataPrompt,temperature:.8,max_completion_tokens:16384,response_schema:geminiResponseSchema,deadline,timeoutMs:65000,phase:'freeform',maxTransientRetries:1});
       attempts.push(...result.attempts.map(row=>({...row,status:row.status>=200&&row.status<300?200:row.status,reason:row.status>=200&&row.status<300?null:row.reason,finishReason:row.finish_reason||null})));
       const raw=result.text,record={model:result.model,status:200,finishReason:result.finish_reason,reason:'ok',usage:result.usage};
       const replyShape=salvageJson(raw);

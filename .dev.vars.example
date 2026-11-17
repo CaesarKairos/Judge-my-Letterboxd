@@ -1,8 +1,8 @@
 # Copie para .dev.vars. Nunca coloque valores reais neste arquivo versionado.
 TMDB_API_KEY="sua-chave-tmdb-opcional"
 GEMINI_API_KEY="sua-chave-gemini"
-GEMINI_MODEL="gemini-3.8-flash"
-GEMINI_FALLBACK_MODELS="gemini-3.1-flash-lite"
+GEMINI_MODEL="gemini-3.1-flash-lite"
+GEMINI_FALLBACK_MODELS="gemini-3.8-flash"
 AI_MODEL="@cf/openai/gpt-oss-20b"
 AI_FALLBACK_MODELS="@cf/openai/gpt-oss-120b"
 JUDGE_MAINTENANCE_MODE="0"

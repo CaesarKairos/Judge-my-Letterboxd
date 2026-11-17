@@ -23,7 +23,8 @@ export async function onRequestPost({request,env}){
     const mode=env?.__TEST_PIPELINE_MODE||JUDGE_PIPELINE_MODE;
     console.log('Judge request:',JSON.stringify({request_id:requestId,stage:'parsed',pipeline:mode,upload_bytes:file.size,entry_count:entries.size,duration_ms:Date.now()-started}));
     const result=mode==='freeform'?await runFreeform({entries,filename:file.name,locale,env:runEnv}):await runCurated({entries:textEntries(entries),locale,env:runEnv});
-    const published=await savePublicResult(env,result);if(published)result.public_result=published;
+    try{const published=await savePublicResult(env,result);if(published)result.public_result=published;}
+    catch(error){console.error('Public result save failed:',JSON.stringify({request_id:requestId,reason:/limit|quota/i.test(String(error?.message))?'d1_quota':'d1_error',duration_ms:Date.now()-started}));}
     console.log('Judge request:',JSON.stringify({request_id:requestId,stage:'complete',pipeline:mode,duration_ms:Date.now()-started}));return response(result);
   }catch(error){const details=error.details&&typeof error.details==='object'?{...error.details}:{};delete details.provider_message;const attempts=details.attempts||[];console.error('Judge pipeline failed',error.message,JSON.stringify({request_id:requestId,duration_ms:Date.now()-started,stage:details.stage,reason:details.reason,attempt_count:attempts.length,phase:details.phase,models:[...new Set(attempts.map(row=>row.model).filter(Boolean))],statuses:attempts.map(row=>({model:row.model,status:row.status,phase:row.phase,reason:row.reason,usage:row.usage})).slice(0,12)}));return response({error:error.message||'internal_error',request_id:requestId,...details},statusFor(error));}
 }

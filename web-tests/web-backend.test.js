@@ -69,12 +69,12 @@ test('tag × list relationships preserve intersection and coverage for editorial
  const relation=buildRelationships(profile).relations.find(row=>row.type==='tag_list');
  assert.equal(relation.intersection,3);assert.equal(relation.list_count,5);assert.equal(relation.tag_count,3);assert.equal(relation.coverage,.6);
 });
-test('Pages Function falls back across models and returns Presentation without Python',async t=>{
+test('Pages Function returns Presentation without Python even when optional D1 publishing fails',async t=>{
  const preview=analyzeExport(parseExport(await unzipText(storedZip(fixture).buffer)),'pt-BR');
  const writing={greeting:'Certo.',archetype_phrase:'quatro décadas e nenhum consenso',profile_reaction:'Quatro filmes e duas reviews. Corajoso.',reactions:preview.moments.map(moment=>({id:moment.id,lines:[`Detalhe específico de ${moment.id}.`]}))};
  let calls=0;t.mock.method(globalThis,'fetch',async(url,options)=>{calls++;assert.match(String(url),/simulated-workers-ai\.invalid\/run/);assert.equal(new Headers(options.headers).get('Authorization'),null);return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(writing)}}]});});
  const form=new FormData();form.set('locale','pt-BR');form.set('export',new File([storedZip(fixture)],'letterboxd.zip',{type:'application/zip'}));
- const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{AI:simulatedWorkersAI(),AI_MODEL:'test-model',AI_FALLBACK_MODELS:'backup-model',__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'}});
+ const result=await onRequestPost({request:new Request('https://example.com/api/judge',{method:'POST',body:form}),env:{AI:simulatedWorkersAI(),AI_MODEL:'test-model',AI_FALLBACK_MODELS:'backup-model',RESULTS_DB:{prepare(){throw new Error('D1_ERROR: daily row read limit exceeded');}},__TEST_SKIP_ANALYST:true,__TEST_PIPELINE_MODE:'curated'}});
  assert.equal(result.status,200);const script=await result.json();assert.equal(script.version,'presentation-v2');assert.equal(script.render.runtime,'cloudflare-pages');assert.equal(script.render.served_model,'test-model');assert.equal(script.render.ai_generation,'complete');assert.equal(script.render.model_quality,'primary');assert.equal(script.ai.calls,1);assert.equal(script.opening.top_four.length,4);assert.ok(script.events.some(event=>event.cue==='top_four_reveal'));assert.ok(script.events.some(event=>event.type==='film_pair'));
 });
 

@@ -328,7 +328,10 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 
 | Variável | Default | Uso |
 | --- | --- | --- |
-| `AI` | binding Cloudflare | Obrigatório para julgamento web; não é uma chave |
+| `GEMINI_API_KEY` | vazio | Quando presente, torna Gemini o provedor web preferido |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | Modelo Gemini principal, com schema estruturado de baixa latência |
+| `GEMINI_FALLBACK_MODELS` | `gemini-3.8-flash` | Fallback Gemini de maior capacidade |
+| `AI` | binding Cloudflare | Fallback web quando `GEMINI_API_KEY` não existe; não é uma chave |
 | `AI_MODEL` | `@cf/openai/gpt-oss-20b` | Modelo principal de menor latência do Freeform e padrão do Curated |
 | `AI_FALLBACK_MODELS` | `@cf/openai/gpt-oss-120b` | Um único modelo fallback de maior capacidade |
 | `AI_ANALYST_MODEL` | herda `AI_MODEL` | Override opcional do Analyst Curated |
