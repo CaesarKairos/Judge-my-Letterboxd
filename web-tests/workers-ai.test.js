@@ -1,13 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {AI_DEFAULT_MODEL,AI_DEFAULT_FALLBACK,workersAiModels,workersAiMessages,workersAiRequest,workersAiText,workersAiFinishReason,workersAiChat,workersAiWithFallback,classifyWorkersAiError} from '../functions/_lib/workers-ai.js';
+import {AI_DEFAULT_MODEL,AI_DEFAULT_FALLBACK,GEMINI_DEFAULT_MODEL,GEMINI_DEFAULT_FALLBACK,workersAiModels,workersAiMessages,workersAiRequest,workersAiText,workersAiFinishReason,workersAiChat,workersAiWithFallback,classifyWorkersAiError} from '../functions/_lib/workers-ai.js';
 import {salvageJson} from '../functions/_lib/json-repair.js';
 
 test('Workers AI defaults and bounded primary/fallback chain',()=>{
-  assert.equal(AI_DEFAULT_MODEL,'@cf/openai/gpt-oss-120b');assert.equal(AI_DEFAULT_FALLBACK,'@cf/openai/gpt-oss-20b');
+  assert.equal(AI_DEFAULT_MODEL,'@cf/openai/gpt-oss-20b');assert.equal(AI_DEFAULT_FALLBACK,'@cf/openai/gpt-oss-120b');
   assert.deepEqual(workersAiModels({}),[AI_DEFAULT_MODEL,AI_DEFAULT_FALLBACK]);
   assert.deepEqual(workersAiModels({AI_MODEL:'primary',AI_FALLBACK_MODELS:'secondary,third'}),['primary','secondary']);
   assert.deepEqual(workersAiModels({AI_ANALYST_MODEL:'analyst',AI_MODEL:'primary'} ,'ANALYST'),['analyst',AI_DEFAULT_FALLBACK]);
+  assert.deepEqual(workersAiModels({GEMINI_API_KEY:'secret'}),[GEMINI_DEFAULT_MODEL,GEMINI_DEFAULT_FALLBACK]);
+});
+
+test('Gemini uses the key header, JSON mode and normalized response without exposing the key',async t=>{
+  let request;t.mock.method(globalThis,'fetch',async(url,options)=>{request={url,options};return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{thought:true,text:'internal reasoning that is not JSON'},{text:'{"ok":true}'}]}}],usageMetadata:{totalTokenCount:7}});});
+  const result=await workersAiChat({env:{GEMINI_API_KEY:'private-key'},model:'gemini-3.8-flash',system:'S',prompt:'P'});
+  const body=JSON.parse(request.options.body);
+  assert.match(request.url,/gemini-3\.8-flash:generateContent$/);assert.equal(request.options.headers['x-goog-api-key'],'private-key');
+  assert.equal(request.url.includes('private-key'),false);assert.equal(body.generationConfig.responseMimeType,'application/json');
+  assert.equal(result.text,'{"ok":true}');assert.equal(result.finish_reason,'stop');assert.equal(result.usage.totalTokenCount,7);
 });
 
 test('native run options request JSON mode and normalize the actual GPT-OSS response shape',async()=>{
@@ -52,4 +62,11 @@ test('deadline and transient retry are bounded',async()=>{
   let calls=0;const AI={run:async()=>{calls++;if(calls===1)throw Object.assign(new Error('temporary'),{status:503});return {response:'{}'};}};
   await workersAiChat({env:{AI},model:'m',prompt:'p',maxTransientRetries:1});assert.equal(calls,2);
   await assert.rejects(workersAiChat({env:{AI:{run:()=>new Promise(()=>{})}},model:'m',prompt:'p',deadline:Date.now()+15,timeoutMs:10,maxTransientRetries:0}),e=>e.details.reason==='timeout');
+});
+
+test('a timed out model is tried once and advances to the fallback',async()=>{
+  const seen=[],AI={run:async model=>{seen.push(model);if(model==='slow')return new Promise(()=>{});return {response:'{"ok":true}'};}};
+  const result=await workersAiWithFallback({env:{AI},models:['slow','fast'],prompt:'p',deadline:Date.now()+100,timeoutMs:10,maxTransientRetries:1});
+  assert.equal(result.model,'fast');assert.deepEqual(seen,['slow','fast']);
+  assert.deepEqual(result.attempts.map(row=>row.reason),['timeout','ok']);
 });

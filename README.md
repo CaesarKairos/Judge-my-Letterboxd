@@ -131,7 +131,8 @@ páginas individuais usam `noindex,follow`: continuam compartilháveis, mas não
 no sitemap nem transformam perfis pessoais em índice público pesquisável.
 
 Configure o binding Workers AI com o nome exato `AI` em Production e Preview.
-O padrão é `@cf/openai/gpt-oss-120b`, com `@cf/openai/gpt-oss-20b` como único fallback.
+Sem `GEMINI_API_KEY`, o padrão Workers AI é `@cf/openai/gpt-oss-20b`, com
+`@cf/openai/gpt-oss-120b` como único fallback.
 Não é necessária uma chave externa para inferência. `TMDB_API_KEY` segue opcional para
 cartazes. Localmente, `wrangler pages dev dist --ai AI` fornece o mesmo binding; `.dev.vars`
 continua disponível para variáveis locais opcionais. O binding fica no runtime da Function.
@@ -250,8 +251,8 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Se `.env` já existir, edite-o sem sobrescrever suas configurações. A configuração Gemini
-é somente para o protótipo Python legado; o site web usa o binding Workers AI.
+Se `.env` já existir, edite-o sem sobrescrever suas configurações. O site web prefere
+Gemini quando `GEMINI_API_KEY` está configurada; sem ela, usa o binding Workers AI.
 Sem ativação, use `.\.venv\Scripts\python.exe` no lugar de `python`.
 Linux/macOS: `source .venv/bin/activate`.
 
@@ -328,8 +329,8 @@ Variáveis de ambiente prevalecem sobre `.env`. Nenhuma chave é gravada nos out
 | Variável | Default | Uso |
 | --- | --- | --- |
 | `AI` | binding Cloudflare | Obrigatório para julgamento web; não é uma chave |
-| `AI_MODEL` | `@cf/openai/gpt-oss-120b` | Modelo principal do Freeform e padrão do Curated |
-| `AI_FALLBACK_MODELS` | `@cf/openai/gpt-oss-20b` | Um único modelo fallback |
+| `AI_MODEL` | `@cf/openai/gpt-oss-20b` | Modelo principal de menor latência do Freeform e padrão do Curated |
+| `AI_FALLBACK_MODELS` | `@cf/openai/gpt-oss-120b` | Um único modelo fallback de maior capacidade |
 | `AI_ANALYST_MODEL` | herda `AI_MODEL` | Override opcional do Analyst Curated |
 | `AI_ANALYST_FALLBACK_MODELS` | herda `AI_FALLBACK_MODELS` | Fallback opcional do Analyst Curated |
 | `AI_WRITER_MODEL` | herda `AI_MODEL` | Override opcional do Writer Curated |
@@ -460,8 +461,8 @@ aí entram só os dados e uma pausa, e isso é decisão de roteiro, não falha.
 
 ## Modelos e fallback Workers AI
 
-O runtime web chama `env.AI.run(model, { messages })` com `@cf/openai/gpt-oss-120b` e
-`@cf/openai/gpt-oss-20b`. Não há descoberta de modelos. 429 avança uma vez ao fallback,
+O runtime web chama `env.AI.run(model, { messages })` com `@cf/openai/gpt-oss-20b` e
+`@cf/openai/gpt-oss-120b`. Não há descoberta de modelos. 429 avança uma vez ao fallback,
 sem repetir a chamada; rede e 5xx podem repetir uma vez no mesmo modelo. Pedidos inválidos
 e contexto excessivo param sem retry. Analyst e Writer Curated aceitam overrides `AI_ANALYST_*`
 e `AI_WRITER_*`. O JSON mode documentado é solicitado com `response_format` e toda resposta
@@ -806,7 +807,8 @@ Um pré-cheque conservador reserva 16.384 tokens para a saída dentro da janela 
 contexto não couber, a execução falha explicitamente com `freeform_context_too_large`; não há corte
 silencioso nem fallback automático para Curated.
 
-O runtime JavaScript usa exclusivamente o binding Cloudflare Workers AI. Cada fase tem no máximo dois
+O runtime JavaScript prefere a API Gemini quando `GEMINI_API_KEY` existe e mantém o binding
+Cloudflare Workers AI como alternativa sem secret. Cada fase tem no máximo dois
 modelos configurados; `429` avança uma vez ao fallback e `5xx`/rede podem repetir uma vez no mesmo
 modelo. Freeform permite até três reparos direcionados e um resgate do núcleo, dentro do deadline.
 Para validar a integração real sem export nem conteúdo de resposta, execute `npm run probe:workers-ai`.

@@ -49,10 +49,10 @@ export function validateFreeformResponse(payload,archive,{registry=buildFreeform
     if(evidence.invalid.length){refs_dropped+=evidence.invalid.length;invalid.push({kind:'game',index,id:clean(row.id)||null,reason:'dropped_invalid_refs',invalid_refs:evidence.invalid});}
   }
   if(games.length===2&&clean(games[0].copy.intro).toLowerCase()===clean(games[1].copy.intro).toLowerCase()){invalid.push({kind:'game',index:1,id:games[1].id,reason:'duplicate_intro'});games.pop();}
-  const info=profileData(archive),handle=clean(info.Username),favoriteRefs=String(info['Favorite Films']||'').split(',').map(v=>v.trim().replace(/\/$/,'')).filter(Boolean).slice(0,4),favoriteTitles=favoriteRefs.map(ref=>Object.values(registry.films).find(film=>String(film.uri||'').replace(/\/$/,'')===ref)?.title||ref),opening=payload?.opening&&typeof payload.opening==='object'?payload.opening:{},taste=opening.taste_bit||{},opening_problems=[];
+  const info=profileData(archive),handle=clean(info.Username),favoriteRefs=String(info['Favorite Films']||'').split(',').map(v=>v.trim().replace(/\/$/,'')).filter(Boolean).slice(0,4),favoriteTitles=favoriteRefs.map(ref=>Object.values(registry.films).find(film=>String(film.uri||'').replace(/\/$/,'')===ref)?.title||ref),opening=payload?.opening&&typeof payload.opening==='object'?payload.opening:{},taste=opening.taste_bit||{},opening_problems=[],greetingLines=(Array.isArray(opening.greeting)?opening.greeting:[opening.greeting]).filter(Boolean);
   if(favoriteRefs.length===4){
-    if(!(opening.greeting||[]).length)opening_problems.push('greeting');
-    if(handle&&(opening.greeting||[]).some(line=>clean(line).toLowerCase().includes(handle.toLowerCase())))opening_problems.push('username_before_archetype');
+    if(!greetingLines.length)opening_problems.push('greeting');
+    if(handle&&greetingLines.some(line=>clean(line).toLowerCase().includes(handle.toLowerCase())))opening_problems.push('username_before_archetype');
     if(!clean(opening.archetype_lead))opening_problems.push('archetype_lead');
     if(handle&&clean(opening.archetype_lead).toLowerCase().includes(handle.toLowerCase()))opening_problems.push('username_before_archetype');
     if(!validArchetype(opening.archetype_phrase,{handle:info.Username,titles:favoriteTitles}))opening_problems.push('archetype_phrase');

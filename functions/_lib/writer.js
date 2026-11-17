@@ -1,7 +1,7 @@
 const DURATIONS = new Set(['short', 'medium', 'long']);
 import {modelUnavailable,noteModelFailure} from './models.js';
 import {WRITER_PROMPT} from './generated-prompts.js';
-import {workersAiModels,workersAiWithFallback} from './workers-ai.js';
+import {aiConfigured,workersAiModels,workersAiWithFallback} from './workers-ai.js';
 // The Writer and the Analyst recover a cut reply with the same implementation.
 import {salvageJson} from './json-repair.js';
 export {salvageJson};
@@ -88,7 +88,7 @@ export function normalizeJudgment(payload, ids, topFour=[],options={}) {
   return {ok: problems.length === 0, greeting, archetype_phrase: opening.archetype_phrase, profile_reaction: clean(payload.profile_reaction),opening,closer,profile_review,game_copy,reactions: [...reactions.values()], missing, problems};
 }
 export async function writeJudgment({profile,analysis,locale,env}) {
-  if(!env.AI||typeof env.AI.run!=='function')throw new Error('workers_ai_binding_missing');
+  if(!aiConfigured(env))throw new Error('workers_ai_binding_missing');
   const language=locale==='pt-BR'?'Brazilian Portuguese':'English';
   const evidence=analysis.moments.map(moment=>({id:moment.id,facts:moment.facts}));
   const ids=evidence.map(row=>row.id);

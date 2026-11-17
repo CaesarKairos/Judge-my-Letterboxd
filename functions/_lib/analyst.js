@@ -1,7 +1,7 @@
 const clean=value=>String(value||'').replace(/\s+/g,' ').trim();
 import {ANALYST_PROMPT} from './generated-prompts.js';
 import {mergeModels,configuredWithoutDiscovery,describeChain,modelUnavailable,noteModelFailure,MODEL_SAFETY_CEILING} from './models.js';
-import {workersAiModels,workersAiWithFallback} from './workers-ai.js';
+import {aiConfigured,workersAiModels,workersAiWithFallback} from './workers-ai.js';
 import {ANALYST_SCHEMA,ANALYST_SEMANTICS_SCHEMA,ANALYST_FINDINGS_SCHEMA,ANALYST_GAMES_SCHEMA} from './analyst-schema.js';
 import {buildAnalystContext,summarizeAnalystContext} from './analyst-context.js';
 import {buildEvidenceRegistry,EVIDENCE_TYPES} from './evidence-registry.js';
@@ -172,7 +172,7 @@ export async function selectEditorialMoments({profile,analysis,raw_export,locale
     semantic_findings:[],semantic_moments:[],interaction_candidates:[],top_four_semantics:[],top_four_semantics_status:'skipped',
     editorial_strength:'skipped',attempts:[],repairs:[],desired_findings:target.desired_findings,minimum_usable_findings:target.minimum_usable_findings,
     richness:target,interaction_pool:pool};
-  if(!env.AI||typeof env.AI.run!=='function')return empty('failed','workers_ai_binding_missing');
+  if(!aiConfigured(env))return empty('failed','workers_ai_binding_missing');
   if(!candidates.length)return empty('failed','no_candidates');
   const language=locale==='pt-BR'?'Brazilian Portuguese':'English';
   const registry=buildEvidenceRegistry({profile,analysis});

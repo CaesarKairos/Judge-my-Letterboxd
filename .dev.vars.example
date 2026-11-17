@@ -1,7 +1,10 @@
 # Copie para .dev.vars. Nunca coloque valores reais neste arquivo versionado.
 TMDB_API_KEY="sua-chave-tmdb-opcional"
-AI_MODEL="@cf/openai/gpt-oss-120b"
-AI_FALLBACK_MODELS="@cf/openai/gpt-oss-20b"
+GEMINI_API_KEY="sua-chave-gemini"
+GEMINI_MODEL="gemini-3.8-flash"
+GEMINI_FALLBACK_MODELS="gemini-3.1-flash-lite"
+AI_MODEL="@cf/openai/gpt-oss-20b"
+AI_FALLBACK_MODELS="@cf/openai/gpt-oss-120b"
 JUDGE_MAINTENANCE_MODE="0"
 # O binding Workers AI chamado AI é fornecido pelo Wrangler local ou pela configuração Pages.
 # Opcional para Curated: AI_ANALYST_MODEL e AI_WRITER_MODEL.

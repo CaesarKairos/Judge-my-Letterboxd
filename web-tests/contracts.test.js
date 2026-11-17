@@ -69,8 +69,8 @@ test('configuration diagnostics are dev-only and never expose the key',async t=>
   assert.equal(body.fallback_count,1);
   assert.deepEqual(body.discovered_models,[]);
   assert.deepEqual(body.chains.analyst,['primary','backup']);
-  assert.deepEqual(body.configured.freeform,['primary','@cf/openai/gpt-oss-20b']);
-  assert.deepEqual(body.chains.freeform,['primary','@cf/openai/gpt-oss-20b']);
+  assert.deepEqual(body.configured.freeform,['primary','@cf/openai/gpt-oss-120b']);
+  assert.deepEqual(body.chains.freeform,['primary','@cf/openai/gpt-oss-120b']);
   assert.equal(body.limits.freeform_chain,2);
   // A diagnostic endpoint that leaks the key would be worse than no endpoint at all.
   assert.equal(JSON.stringify(body).includes('secret-value'),false);

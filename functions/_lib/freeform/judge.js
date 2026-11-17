@@ -1,5 +1,5 @@
 import {mergeModels,modelUnavailable,noteModelFailure,FREEFORM_MODEL_LIMIT} from '../models.js';
-import {workersAiModels,workersAiWithFallback} from '../workers-ai.js';
+import {aiConfigured,workersAiModels,workersAiWithFallback} from '../workers-ai.js';
 import {salvageJson} from '../json-repair.js';
 import {FREEFORM_JUDGE_PROMPT,JUDGE_VOICE_PROMPT} from '../generated-prompts.js';
 import {validateFreeformResponse} from './validator.js';
@@ -80,7 +80,7 @@ export const classifyFinalReason=({attempts,best,fallback='no_usable_model_respo
 };
 
 export async function freeformJudge({archive,locale,env}){
-  if(!env.AI||typeof env.AI.run!=='function')throw new Error('workers_ai_binding_missing');
+  if(!aiConfigured(env))throw new Error('workers_ai_binding_missing');
   // `entities` is a derived identity index and duplicates review/session/table contents already
   // present in every source file. Keep the entire lossless file rows/text, while excluding only
   // that redundant index from the model context. The server-side validator retains full entities.
@@ -105,6 +105,8 @@ export async function freeformJudge({archive,locale,env}){
       const result=await workersAiWithFallback({env,models:[model],system:systemInstruction,prompt:dataPrompt,temperature:.8,max_completion_tokens:16384,deadline,timeoutMs:65000,phase:'freeform',maxTransientRetries:1});
       attempts.push(...result.attempts.map(row=>({...row,status:row.status>=200&&row.status<300?200:row.status,reason:row.status>=200&&row.status<300?null:row.reason,finishReason:row.finish_reason||null})));
       const raw=result.text,record={model:result.model,status:200,finishReason:result.finish_reason,reason:'ok',usage:result.usage};
+      const replyShape=salvageJson(raw);
+      console.log('Freeform model reply:',JSON.stringify({model:result.model,response_chars:raw.length,finish_reason:record.finishReason||null,json_readable:Boolean(replyShape),json_type:Array.isArray(replyShape)?'array':typeof replyShape,top_level_keys:replyShape&&typeof replyShape==='object'&&!Array.isArray(replyShape)?Object.keys(replyShape).slice(0,12):[]}));
       budgetUsed=true;
       const repairBudget=Math.max(0,3-attempts.filter(row=>row.repair).length);
       const reply=await evaluateReply({raw,archive,registry,env,model:result.model,deadline,attempts,repairBudget});
@@ -119,6 +121,7 @@ export async function freeformJudge({archive,locale,env}){
       break;
     }catch(error){
       const details=error.details||{},reason=details.reason||'provider_error';
+      console.error('Freeform attempt failed:',JSON.stringify({model,reason,error:error?.message||error?.name||'unknown'}));
       for(const row of details.attempts||[])attempts.push({...row,model:row.model||model,status:row.status===0?0:row.status,repair:false,provider_error:row.status?{code:row.status,status:String(row.status),message_category:row.reason}:undefined});
       if(contextFailure(details.status||details.attempts?.at(-1)?.status,{error:{message:details.provider_message||''}})){
         const oversized=new Error('freeform_context_too_large');oversized.details={stage:'freeform_judge',reason:'context_exceeded',model,payload_chars:archiveJson.length,attempts};throw oversized;
@@ -127,7 +130,10 @@ export async function freeformJudge({archive,locale,env}){
       if(reason==='invalid_request'){const invalid=new Error('workers_ai_invalid_request');invalid.details={stage:'freeform_judge',reason:'invalid_request',attempts};throw invalid;}
       if(reason==='context_exceeded'){const oversized=new Error('freeform_context_too_large');oversized.details={stage:'freeform_judge',reason:'context_exceeded',model,payload_chars:archiveJson.length,attempts};throw oversized;}
       if(reason==='timeout')keepReason('timeout');if(reason==='network_error')keepReason('network_error');
-      if(['rate_limited','quota_exceeded','model_unavailable','provider_error'].includes(reason))continue;
+      // A timeout belongs to this model, not to the whole pipeline. Production used to
+      // stop here after spending two calls on the 120b model and never reached the 20b
+      // fallback. Move through the explicit chain while the shared deadline remains.
+      if(['rate_limited','quota_exceeded','model_unavailable','provider_error','timeout','network_error'].includes(reason))continue;
       break;
     }
   }

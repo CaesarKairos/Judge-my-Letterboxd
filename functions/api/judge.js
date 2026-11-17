@@ -3,6 +3,7 @@ import {JUDGE_PIPELINE_MODE} from '../_lib/generated-mode.js';
 import {runCurated} from '../_pipelines/curated.js';
 import {runFreeform} from '../_pipelines/freeform.js';
 import {savePublicResult} from '../_lib/public-results.js';
+import {aiConfigured,aiProvider} from '../_lib/workers-ai.js';
 
 const MAX_UPLOAD=50*1024*1024;
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -10,8 +11,9 @@ const statusFor=error=>['quota_exceeded','rate_limited'].includes(error.details?
 const textEntries=entries=>{const decoder=new TextDecoder('utf-8',{fatal:false}),result=new Map();for(const [name,bytes] of entries)if(name.toLowerCase().endsWith('.csv'))result.set(name,decoder.decode(bytes));return result;};
 
 export async function onRequestPost({request,env}){
+  const requestId=crypto.randomUUID(),started=Date.now();
   try{
-    const runEnv=Object.create(env||null),length=Number(request.headers.get('Content-Length')||0);if(length>MAX_UPLOAD+1024*1024)return response({error:'file_too_large'},413);
+    const runEnv=Object.create(env||null);runEnv.__REQUEST_ID=requestId;const length=Number(request.headers.get('Content-Length')||0);if(length>MAX_UPLOAD+1024*1024)return response({error:'file_too_large'},413);
     const form=await request.formData(),file=form.get('export'),locale=form.get('locale')==='en-US'?'en-US':'pt-BR';
     if(!file||typeof file.arrayBuffer!=='function')return response({error:'missing_export'},400);if(file.size>MAX_UPLOAD)return response({error:'file_too_large'},413);
     const header=new Uint8Array(await file.slice(0,4).arrayBuffer());if(header[0]!==80||header[1]!==75)return response({error:'invalid_zip'},400);
@@ -19,10 +21,11 @@ export async function onRequestPost({request,env}){
     // Test-only injection keeps both architectures testable in one Node process. Production has
     // no runtime override: generated-mode.js, synchronized from judge-mode.json, is authoritative.
     const mode=env?.__TEST_PIPELINE_MODE||JUDGE_PIPELINE_MODE;
+    console.log('Judge request:',JSON.stringify({request_id:requestId,stage:'parsed',pipeline:mode,upload_bytes:file.size,entry_count:entries.size,duration_ms:Date.now()-started}));
     const result=mode==='freeform'?await runFreeform({entries,filename:file.name,locale,env:runEnv}):await runCurated({entries:textEntries(entries),locale,env:runEnv});
     const published=await savePublicResult(env,result);if(published)result.public_result=published;
-    return response(result);
-  }catch(error){const details=error.details&&typeof error.details==='object'?{...error.details}:{};delete details.provider_message;const attempts=details.attempts||[];console.error('Judge pipeline failed',error.message,JSON.stringify({stage:details.stage,reason:details.reason,attempt_count:attempts.length,phase:details.phase,models:[...new Set(attempts.map(row=>row.model).filter(Boolean))],statuses:attempts.map(row=>({model:row.model,status:row.status,phase:row.phase,reason:row.reason,usage:row.usage})).slice(0,12)}));return response({error:error.message||'internal_error',...details},statusFor(error));}
+    console.log('Judge request:',JSON.stringify({request_id:requestId,stage:'complete',pipeline:mode,duration_ms:Date.now()-started}));return response(result);
+  }catch(error){const details=error.details&&typeof error.details==='object'?{...error.details}:{};delete details.provider_message;const attempts=details.attempts||[];console.error('Judge pipeline failed',error.message,JSON.stringify({request_id:requestId,duration_ms:Date.now()-started,stage:details.stage,reason:details.reason,attempt_count:attempts.length,phase:details.phase,models:[...new Set(attempts.map(row=>row.model).filter(Boolean))],statuses:attempts.map(row=>({model:row.model,status:row.status,phase:row.phase,reason:row.reason,usage:row.usage})).slice(0,12)}));return response({error:error.message||'internal_error',request_id:requestId,...details},statusFor(error));}
 }
 
-export function onRequestGet({env}={}){return response({status:'ok',runtime:'cloudflare-pages',provider:'workers-ai',version:'web-v1',pipeline:JUDGE_PIPELINE_MODE,ai_binding_configured:Boolean(env?.AI&&typeof env.AI.run==='function')});}
+export function onRequestGet({env}={}){return response({status:'ok',runtime:'cloudflare-pages',provider:aiProvider(env),version:'web-v1',pipeline:JUDGE_PIPELINE_MODE,ai_binding_configured:aiConfigured(env)});}
