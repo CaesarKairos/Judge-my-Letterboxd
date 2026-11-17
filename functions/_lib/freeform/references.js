@@ -131,6 +131,7 @@ export function normalizeFreeformReferences(payload, registry) {
     return next;
   };
   const refsOf = row => { const result = registry.normalizeRefs(row.evidence_refs); absorb(result.conversions); return result.refs.length ? result.refs : row.evidence_refs; };
+  if(payload.opening&&typeof payload.opening==='object'&&Array.isArray(payload.opening.archetype_sources))out.opening={...payload.opening,archetype_sources:payload.opening.archetype_sources.map(row=>({...row,film_id:registry.filmIdFor(row?.film_id)||row?.film_id}))};
 
   out.moments = (Array.isArray(payload.moments) ? payload.moments : []).map(row => {
     if (!row || typeof row !== 'object') return row;

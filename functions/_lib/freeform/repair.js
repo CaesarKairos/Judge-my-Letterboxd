@@ -26,7 +26,8 @@ const registryBlock = compact => [
 export function repairOpening({env, model, deadline, compact, opening, problems}) {
   const request = `Fix ONLY the "opening" object of this Letterboxd judging session. Return {"opening":{...}} as strict JSON.
 Keep every field that is already valid; correct or complete only: ${problems.join(', ')}.
-archetype_phrase is a 3-12 word grammatical micro-scene built from the Top 4 titles; never the username, never a list of titles, never a paragraph.
+Never use trauma, therapy, sanity, validation needs, diagnoses or invented inner motives.
+archetype_phrase is a 3-12 word grammatical micro-scene built from all four Top 4 films; never the username, never a list of titles, never a paragraph. Include archetype_sources with exactly four {film_id, ingredient} entries, one per favorite.
 OPENING INSPIRATION — DO NOT COPY: the Judge sees four films, invents one impossibly specific nickname/micro-scene, notices it went too far, then falls back to the username. Do not write profile analysis here. This is a nickname beat. It must complete "You must be the..." naturally.
 ${registryBlock(compact)}
 CURRENT_OPENING:\n${JSON.stringify(opening)}`;
@@ -34,7 +35,7 @@ CURRENT_OPENING:\n${JSON.stringify(opening)}`;
 }
 export function repairMissingGames({env,model,deadline,compact,current=[],missing=0}){
   const request=`Create ONLY ${missing} missing game(s) for an existing Letterboxd session. Return {"games":[...]} as strict JSON. Preserve the existing games by not repeating them.
-Use distinct types when possible. Every game needs id, type, three distinct film_ids, evidence_refs and copy.intro. forced_triage also needs three roles and specific reaction_hints.
+Use distinct types when possible. Every game needs id, type, three distinct film_ids, evidence_refs, copy.intro and clear copy.instructions. forced_triage needs three ranked roles and all nine film-role reaction_hints. blind_rank needs reveal_copy and all four result_reactions. defend_your_take needs a question and at least two choices with reactions.
 For forced_triage/blind_rank prefer historically close ratings (ideally spread <= 0.5; <= 1.0 only with other affinity signals). This is mechanical completion, not a new editorial analysis.
 RATED FILMS (id | title | year | current rating | signals):\n${compact.game_films.join('\n')}
 EXISTING_GAMES:\n${JSON.stringify(current)}`;
@@ -50,7 +51,7 @@ CURRENT_MOMENT:\n${JSON.stringify(moment)}`;
 }
 export function repairGame({env, model, deadline, compact, index, game}) {
   const request = `Fix ONLY the game at index ${index}. Return {"game":{...}} as strict JSON.
-film_ids must contain three DISTINCT valid film ids. evidence_refs must be valid archive refs or valid ids. Keep copy.intro unless it is missing.
+film_ids must contain three DISTINCT valid film ids. evidence_refs must be valid archive refs or valid ids. Keep copy.intro unless it is missing. Include clear instructions and every field required by its type: nine film-role hints for forced_triage; four result reactions for blind_rank; choices with reactions for defend_your_take.
 ${registryBlock(compact)}
 CURRENT_GAME:\n${JSON.stringify(game)}`;
   return callRepair({env, model, deadline, request});
@@ -64,7 +65,7 @@ PROFILE_REVIEW_TEXT:\n${text}`;
   return callRepair({env, model, deadline, request});
 }
 export function repairProfileReviewText({env,model,deadline,compact,review}){
-  const request=`Rewrite ONLY profile_review.text so it sounds like a real Letterboxd review written in the account's voice, not an outside analysis. Do not start with "É incrível como", "Este perfil", "Esse usuário", "Fica claro" or "Uma mistura de". Preserve its grounded subject and evidence_refs. Return {"profile_review":{"text":"...","evidence_refs":[...]}} as strict JSON.
+  const request=`Rewrite ONLY profile_review.text in BRAZILIAN PORTUGUESE and FIRST PERSON so it sounds like a real Letterboxd review written by the account, not an outside analysis. Never answer in English. Never say profile, account, feed, diary, user, "you write" or describe the person. Do not start with "É incrível como", "Um perfil", "O perfil", "Este perfil", "Esse usuário", "Fica claro", "Oscila entre" or "Uma mistura de". Never invent therapy, sanity, trauma, validation needs, personality, identity or inner motives. Match the samples' sentence length, punctuation and abruptness; write a review of the viewing experience, not a self-description checklist. Preserve its grounded subject and evidence_refs. Return {"profile_review":{"text":"...","evidence_refs":[...]}} as strict JSON.
 ${registryBlock(compact)}
 CURRENT_PROFILE_REVIEW:\n${JSON.stringify(review)}`;
   return callRepair({env,model,deadline,request});
@@ -120,7 +121,7 @@ export async function repairFreeform({payload, validated, registry, env, model, 
     }
   }
   // Profile Review is core too, so it must run before any optional moment/attachment cleanup.
-  if (!validated.profile_review_valid && canCall()) {
+  if ((!validated.profile_review_valid||(validated.profile_review_ai_like&&validated.strict_contract)) && canCall()) {
     const result = !validated.profile_review?.text?await repairProfileReviewMissing({env,model,deadline,compact}):validated.profile_review_ai_like?await repairProfileReviewText({env,model,deadline,compact,review:payload.profile_review}):await repairProfileReview({env, model, deadline, compact, text: validated.profile_review.text});
     calls++; note('profile_review',result);
     if(result.parsed?.profile_review)payload.profile_review={...(payload.profile_review||{}),...result.parsed.profile_review};else if(Array.isArray(result.parsed?.evidence_refs))payload.profile_review={...(payload.profile_review||{}),evidence_refs:result.parsed.evidence_refs};if(result.parsed){repairs.push('profile_review');validateAgain();}

@@ -337,9 +337,9 @@ test('rich inline runs preserve exact sibling spacing and remove quote placehold
   assert.ok(messages.includes('fechar com Dito isso: como se...'));assert.ok(messages.includes('pedra mágica colorida faz total sentido'));assert.ok(messages.includes('você escalou Internet - O Filme. Isso é...'));assert.equal(JSON.stringify(script).includes('[citação em blockquote]'),false);assert.equal(JSON.stringify(script).includes('[conteúdo que fica aqui]'),false);
 });
 
-test('blind rank pre-reveal copy rejects title, year and rating leaks',async()=>{
+test('blind rank pre-reveal copy sanitizes title, year and rating leaks',async()=>{
   const {ai}=await buildFreeformArchive(richEntries());
-  for(const leak of ['Gamma','2002','4.5★']){const games=twoGames();games[1].copy.intro=`Sem olhar: ${leak}`;const result=validateFreeformResponse({...fullResponse(),games},ai);assert.equal(result.games.some(game=>game.id==='g2'),false,leak);assert.equal(result.games_invalid.some(game=>game.reason==='blind_rank_leak'),true,leak);}
+  for(const leak of ['Gamma','2002','4.5★']){const games=twoGames();games[1].copy.intro=`Sem olhar: ${leak}`;const result=validateFreeformResponse({...fullResponse(),games},ai),game=result.games.find(row=>row.id==='g2');assert.ok(game,leak);assert.equal(`${game.copy.intro} ${game.copy.instructions}`.includes(leak),false,leak);}
 });
 
 test('Freeform rhythm and explicit game placement survive materialization',async()=>{

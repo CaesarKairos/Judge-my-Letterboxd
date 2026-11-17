@@ -11,7 +11,8 @@
     "test:workers-ai": "node --test web-tests/workers-ai.test.js",
     "test:web": "npm run check:sync && node --test web-tests/*.test.js",
     "test:browser": "node web-tests/smoke.mjs && node web-tests/games-smoke.mjs",
-    "test:edge": "node web-tests/edge-cases.mjs"
+    "test:edge": "node web-tests/edge-cases.mjs",
+    "evaluate:editorial": "node scripts/editorial-harness.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",
